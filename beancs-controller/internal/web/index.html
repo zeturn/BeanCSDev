@@ -1,0 +1,560 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BeanCS</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f7f8fb;
+        --panel: #ffffff;
+        --ink: #18202f;
+        --muted: #667085;
+        --line: #d7dce5;
+        --accent: #0b6bcb;
+        --accent-strong: #084f9a;
+        --ok-bg: #e8f7ee;
+        --ok: #17613a;
+        --warn-bg: #fff4d6;
+        --warn: #7a5300;
+        --bad-bg: #fdebea;
+        --bad: #9f1d1d;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--bg);
+        color: var(--ink);
+        font: 14px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      button,
+      input {
+        font: inherit;
+      }
+
+      .shell {
+        min-height: 100vh;
+        display: grid;
+        grid-template-columns: 244px minmax(0, 1fr);
+      }
+
+      .sidebar {
+        background: #101828;
+        color: #f9fafb;
+        padding: 24px 18px;
+      }
+
+      .brand {
+        font-size: 22px;
+        font-weight: 760;
+        letter-spacing: 0;
+        margin-bottom: 28px;
+      }
+
+      .nav-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        width: 100%;
+        min-height: 40px;
+        border: 0;
+        border-radius: 6px;
+        padding: 9px 10px;
+        background: #1d2939;
+        color: #ffffff;
+        text-align: left;
+        cursor: default;
+      }
+
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: #52c41a;
+      }
+
+      .main {
+        min-width: 0;
+        padding: 22px 28px 36px;
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 20px;
+      }
+
+      h1 {
+        font-size: 24px;
+        line-height: 1.2;
+        margin: 0;
+        letter-spacing: 0;
+      }
+
+      .subtle {
+        color: var(--muted);
+        margin: 4px 0 0;
+      }
+
+      .actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .button {
+        min-height: 38px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 0 14px;
+        background: #ffffff;
+        color: var(--ink);
+        cursor: pointer;
+      }
+
+      .button.primary {
+        border-color: var(--accent);
+        background: var(--accent);
+        color: #ffffff;
+      }
+
+      .button.primary:hover {
+        background: var(--accent-strong);
+      }
+
+      .button:disabled {
+        cursor: wait;
+        opacity: 0.7;
+      }
+
+      .toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+
+      .search {
+        width: min(420px, 100%);
+        min-height: 38px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 0 12px;
+        background: #ffffff;
+        color: var(--ink);
+      }
+
+      .table-wrap {
+        overflow: auto;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        min-width: 760px;
+      }
+
+      th,
+      td {
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--line);
+        text-align: left;
+        vertical-align: middle;
+        white-space: nowrap;
+      }
+
+      th {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+
+      tr:last-child td {
+        border-bottom: 0;
+      }
+
+      .name {
+        font-weight: 700;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        min-height: 24px;
+        border-radius: 999px;
+        padding: 0 9px;
+        background: var(--ok-bg);
+        color: var(--ok);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .pill.warn {
+        background: var(--warn-bg);
+        color: var(--warn);
+      }
+
+      .labels {
+        max-width: 420px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        color: var(--muted);
+      }
+
+      .notice {
+        display: none;
+        margin-bottom: 14px;
+        border-radius: 8px;
+        padding: 12px 14px;
+        border: 1px solid var(--line);
+        background: #ffffff;
+      }
+
+      .notice.show {
+        display: block;
+      }
+
+      .notice.error {
+        border-color: #f4b4b4;
+        background: var(--bad-bg);
+        color: var(--bad);
+      }
+
+      .login {
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+
+      .login-panel {
+        width: min(440px, 100%);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #ffffff;
+        padding: 26px;
+      }
+
+      .login-panel h1 {
+        font-size: 28px;
+        margin-bottom: 8px;
+      }
+
+      .login-panel .button {
+        width: 100%;
+        margin-top: 22px;
+      }
+
+      .hidden {
+        display: none;
+      }
+
+      @media (max-width: 760px) {
+        .shell {
+          grid-template-columns: 1fr;
+        }
+
+        .sidebar {
+          padding: 14px 18px;
+        }
+
+        .brand {
+          margin-bottom: 10px;
+        }
+
+        .main {
+          padding: 18px;
+        }
+
+        .topbar,
+        .toolbar {
+          align-items: stretch;
+          flex-direction: column;
+        }
+
+        .actions {
+          justify-content: flex-start;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <section id="login" class="login hidden">
+      <div class="login-panel">
+        <h1>BeanCS</h1>
+        <p class="subtle">Sign in with BasaltPass to manage your k3s runtime.</p>
+        <button id="loginButton" class="button primary">Sign in with BasaltPass</button>
+      </div>
+    </section>
+
+    <section id="app" class="shell hidden">
+      <aside class="sidebar">
+        <div class="brand">BeanCS</div>
+        <button class="nav-item" type="button"><span class="dot"></span><span>Namespaces</span></button>
+      </aside>
+
+      <main class="main">
+        <div class="topbar">
+          <div>
+            <h1>Namespaces</h1>
+            <p id="summary" class="subtle">Loading cluster state</p>
+          </div>
+          <div class="actions">
+            <button id="refreshButton" class="button" type="button">Refresh</button>
+            <button id="logoutButton" class="button" type="button">Sign out</button>
+          </div>
+        </div>
+
+        <div id="notice" class="notice"></div>
+
+        <div class="toolbar">
+          <input id="filterInput" class="search" type="search" placeholder="Filter namespaces" />
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Status</th>
+                <th>Age</th>
+                <th>Created</th>
+                <th>Labels</th>
+              </tr>
+            </thead>
+            <tbody id="namespaceRows"></tbody>
+          </table>
+        </div>
+      </main>
+    </section>
+
+    <script>
+      const state = {
+        config: null,
+        namespaces: [],
+        token: localStorage.getItem("beancs.accessToken") || "",
+      };
+
+      const login = document.getElementById("login");
+      const app = document.getElementById("app");
+      const loginButton = document.getElementById("loginButton");
+      const logoutButton = document.getElementById("logoutButton");
+      const refreshButton = document.getElementById("refreshButton");
+      const filterInput = document.getElementById("filterInput");
+      const namespaceRows = document.getElementById("namespaceRows");
+      const summary = document.getElementById("summary");
+      const notice = document.getElementById("notice");
+
+      loginButton.addEventListener("click", startLogin);
+      logoutButton.addEventListener("click", logout);
+      refreshButton.addEventListener("click", loadNamespaces);
+      filterInput.addEventListener("input", renderNamespaces);
+
+      boot();
+
+      async function boot() {
+        try {
+          state.config = await getJSON("/api/v1/ui/config");
+          if (location.search.includes("code=")) {
+            await finishLogin();
+            history.replaceState({}, "", location.pathname);
+          }
+          setView(Boolean(state.token));
+          if (state.token) {
+            await loadNamespaces();
+          }
+        } catch (err) {
+          showError(err.message);
+          setView(Boolean(state.token));
+        }
+      }
+
+      function setView(authenticated) {
+        login.classList.toggle("hidden", authenticated);
+        app.classList.toggle("hidden", !authenticated);
+      }
+
+      async function startLogin() {
+        const verifier = randomString(64);
+        const challenge = await codeChallenge(verifier);
+        const authState = randomString(32);
+        sessionStorage.setItem("beancs.pkceVerifier", verifier);
+        sessionStorage.setItem("beancs.oauthState", authState);
+
+        const params = new URLSearchParams({
+          response_type: "code",
+          client_id: state.config.client_id,
+          redirect_uri: location.origin + location.pathname,
+          scope: "openid profile email beancs.admin",
+          state: authState,
+          code_challenge: challenge,
+          code_challenge_method: "S256",
+        });
+        location.href = trimSlash(state.config.auth_url) + "/oauth/authorize?" + params.toString();
+      }
+
+      async function finishLogin() {
+        const params = new URLSearchParams(location.search);
+        const code = params.get("code");
+        const returnedState = params.get("state");
+        const expectedState = sessionStorage.getItem("beancs.oauthState");
+        const verifier = sessionStorage.getItem("beancs.pkceVerifier");
+        if (!code || !verifier || returnedState !== expectedState) {
+          throw new Error("Login callback was incomplete.");
+        }
+
+        const res = await fetch("/api/v1/ui/oauth/token", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+          code,
+          redirect_uri: location.origin + location.pathname,
+          code_verifier: verifier,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.access_token) {
+          throw new Error(data.error_description || data.error || "Unable to exchange login code.");
+        }
+        state.token = data.access_token;
+        localStorage.setItem("beancs.accessToken", state.token);
+        sessionStorage.removeItem("beancs.pkceVerifier");
+        sessionStorage.removeItem("beancs.oauthState");
+      }
+
+      async function loadNamespaces() {
+        refreshButton.disabled = true;
+        clearNotice();
+        try {
+          const data = await apiJSON("/api/v1/runtime/namespaces");
+          state.namespaces = data.data || [];
+          renderNamespaces();
+        } catch (err) {
+          if (err.status === 401) {
+            logout();
+            return;
+          }
+          showError(err.message);
+        } finally {
+          refreshButton.disabled = false;
+        }
+      }
+
+      function renderNamespaces() {
+        const query = filterInput.value.trim().toLowerCase();
+        const rows = state.namespaces.filter((ns) => !query || ns.name.toLowerCase().includes(query));
+        summary.textContent = `${rows.length} namespace${rows.length === 1 ? "" : "s"}`;
+        namespaceRows.innerHTML = rows.map((ns) => {
+          const labels = Object.entries(ns.labels || {}).map(([key, value]) => `${key}=${value}`).join(", ");
+          const active = ns.status === "Active";
+          return `
+            <tr>
+              <td class="name">${escapeHTML(ns.name)}</td>
+              <td><span class="pill ${active ? "" : "warn"}">${escapeHTML(ns.status || "Unknown")}</span></td>
+              <td>${formatAge(ns.age_seconds)}</td>
+              <td>${formatDate(ns.created_at)}</td>
+              <td class="labels" title="${escapeHTML(labels)}">${escapeHTML(labels || "-")}</td>
+            </tr>
+          `;
+        }).join("");
+      }
+
+      function logout() {
+        state.token = "";
+        state.namespaces = [];
+        localStorage.removeItem("beancs.accessToken");
+        setView(false);
+      }
+
+      async function getJSON(url) {
+        const res = await fetch(url);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data.error || `Request failed with ${res.status}`);
+        }
+        return data;
+      }
+
+      async function apiJSON(url) {
+        const res = await fetch(url, {headers: {Authorization: `Bearer ${state.token}`}});
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const err = new Error(data.error || `Request failed with ${res.status}`);
+          err.status = res.status;
+          throw err;
+        }
+        return data;
+      }
+
+      async function codeChallenge(verifier) {
+        const data = new TextEncoder().encode(verifier);
+        const digest = await crypto.subtle.digest("SHA-256", data);
+        return base64URL(new Uint8Array(digest));
+      }
+
+      function randomString(length) {
+        const bytes = new Uint8Array(length);
+        crypto.getRandomValues(bytes);
+        return base64URL(bytes).slice(0, length);
+      }
+
+      function base64URL(bytes) {
+        let binary = "";
+        bytes.forEach((b) => binary += String.fromCharCode(b));
+        return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+      }
+
+      function showError(message) {
+        notice.textContent = message;
+        notice.className = "notice error show";
+      }
+
+      function clearNotice() {
+        notice.textContent = "";
+        notice.className = "notice";
+      }
+
+      function formatAge(seconds) {
+        if (!Number.isFinite(seconds) || seconds < 0) return "-";
+        const units = [["y", 31536000], ["d", 86400], ["h", 3600], ["m", 60]];
+        for (const [label, size] of units) {
+          if (seconds >= size) return `${Math.floor(seconds / size)}${label}`;
+        }
+        return `${Math.floor(seconds)}s`;
+      }
+
+      function formatDate(value) {
+        if (!value) return "-";
+        return new Date(value).toLocaleString();
+      }
+
+      function trimSlash(value) {
+        return String(value || "").replace(/\/+$/, "");
+      }
+
+      function escapeHTML(value) {
+        return String(value ?? "").replace(/[&<>"']/g, (ch) => ({
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          '"': "&quot;",
+          "'": "&#039;",
+        })[ch]);
+      }
+    </script>
+  </body>
+</html>

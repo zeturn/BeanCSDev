@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: beancs-controller-env
+  namespace: beancs-system
+type: Opaque
+stringData:
+  DATABASE_URL: postgres://beancs:change-me-before-production@beancs-postgres.beancs-system.svc.cluster.local:5432/beancs?sslmode=disable
+  BP_MGMT_BASE_URL: https://your-basaltpass.example.com
+  BP_MGMT_CLIENT_ID: replace-me
+  BP_MGMT_CLIENT_SECRET: replace-me
+  BP_BROWSER_AUTH_URL: https://your-basaltpass.example.com
+  BP_BROWSER_CLIENT_ID: replace-me
+  BP_BROWSER_CLIENT_SECRET: replace-me
+  WEBHOOK_SECRET: replace-me
+  ENCRYPTION_KEY: replace-with-64-hex-characters
+  INGRESS_IP: 127.0.0.1
+  BEANCS_PUBLIC_HOST: beancs.example.com
+  BEANCS_WEBHOOK_HOST: hooks.beancs.example.com
+  BEANCS_TAILSCALE_HOST: beancs-controller

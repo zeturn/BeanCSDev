@@ -1,0 +1,103 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: beancs-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: beancs-controller
+  namespace: beancs-system
+  labels:
+    app: beancs-controller
+    managed-by: beancs
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: beancs-controller
+  template:
+    metadata:
+      labels:
+        app: beancs-controller
+        managed-by: beancs
+    spec:
+      serviceAccountName: beancs-controller
+      priorityClassName: platform-critical
+      tolerations:
+        - key: node.kubernetes.io/not-ready
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 30
+        - key: node.kubernetes.io/unreachable
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 30
+      containers:
+        - name: controller
+          image: ghcr.io/zeturn/beancs-controller:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - secretRef:
+                name: beancs-controller-env
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: BEANCS_CONTROLLER_NAME
+              value: beancs-controller
+            - name: BEANCS_SELF_MANAGE_INGRESS
+              value: "true"
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: beancs-controller
+  namespace: beancs-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: beancs-controller
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces", "secrets", "services", "pods", "pods/log", "nodes"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies", "ingresses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["argoproj.io"]
+    resources: ["applications"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: beancs-controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: beancs-controller
+subjects:
+  - kind: ServiceAccount
+    name: beancs-controller
+    namespace: beancs-system
