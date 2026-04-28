@@ -30,11 +30,11 @@ jobs:
 
       - name: Test controller
         working-directory: beancs-controller
-        run: go test ./...
+        run: go test -v -timeout=5m ./...
 
       - name: Test CLI
         working-directory: beanctl
-        run: go test ./...
+        run: go test -v -timeout=5m ./...
 
   build_and_push:
     needs: test
@@ -80,8 +80,11 @@ jobs:
         with:
           context: ./beancs-controller
           file: ./beancs-controller/Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/arm64
           push: true
+          provenance: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           tags: ${{ steps.meta.outputs.tags }}
 
   deploy_k3s:
