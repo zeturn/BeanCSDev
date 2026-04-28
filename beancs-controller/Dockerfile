@@ -1,9 +1,11 @@
-FROM golang:1.26-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS builder
 WORKDIR /app
+ARG TARGETOS
+ARG TARGETARCH
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o /beancs-controller ./cmd/server
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /beancs-controller ./cmd/server
 
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates
