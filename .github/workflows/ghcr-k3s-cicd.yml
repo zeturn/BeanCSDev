@@ -155,7 +155,8 @@ jobs:
         run: |
           DATABASE_URL="${BEANCS_DATABASE_URL}"
           if [ -z "${DATABASE_URL}" ]; then
-            DATABASE_URL="postgres://beancs:${BEANCS_POSTGRES_PASSWORD}@beancs-postgres.beancs-system.svc.cluster.local:5432/beancs?sslmode=disable"
+            ENCODED_POSTGRES_PASSWORD="$(python3 -c 'import os, urllib.parse; print(urllib.parse.quote(os.environ["BEANCS_POSTGRES_PASSWORD"], safe=""))')"
+            DATABASE_URL="postgres://beancs:${ENCODED_POSTGRES_PASSWORD}@beancs-postgres.beancs-system.svc.cluster.local:5432/beancs?sslmode=disable"
           fi
           kubectl -n "${NAMESPACE}" create secret generic beancs-controller-env \
             --from-literal=DATABASE_URL="${DATABASE_URL}" \
