@@ -176,4 +176,10 @@ jobs:
           kubectl -n "${NAMESPACE}" set image deployment/beancs-controller controller="${IMAGE}"
           kubectl -n "${NAMESPACE}" patch deployment beancs-controller \
             -p '{"spec":{"template":{"spec":{"imagePullSecrets":[{"name":"ghcr-creds"}]}}}}'
-          kubectl -n "${NAMESPACE}" rollout status deployment/beancs-controller --timeout=240s
+          if ! kubectl -n "${NAMESPACE}" rollout status deployment/beancs-controller --timeout=240s; then
+            kubectl -n "${NAMESPACE}" describe deployment beancs-controller
+            kubectl -n "${NAMESPACE}" get replicasets,pods -l app=beancs-controller -o wide
+            kubectl -n "${NAMESPACE}" describe replicasets -l app=beancs-controller
+            kubectl -n "${NAMESPACE}" describe pods -l app=beancs-controller
+            exit 1
+          fi

@@ -12,7 +12,7 @@ metadata:
     app: beancs-controller
     managed-by: beancs
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: beancs-controller
@@ -23,7 +23,6 @@ spec:
         managed-by: beancs
     spec:
       serviceAccountName: beancs-controller
-      priorityClassName: platform-critical
       tolerations:
         - key: node.kubernetes.io/not-ready
           operator: Exists
