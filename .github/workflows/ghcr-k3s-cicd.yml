@@ -185,5 +185,13 @@ jobs:
             kubectl -n "${NAMESPACE}" get replicasets,pods -l app=beancs-controller -o wide
             kubectl -n "${NAMESPACE}" describe replicasets -l app=beancs-controller
             kubectl -n "${NAMESPACE}" describe pods -l app=beancs-controller
+            for pod in $(kubectl -n "${NAMESPACE}" get pods -l app=beancs-controller -o name); do
+              echo "::group::Logs for ${pod}"
+              kubectl -n "${NAMESPACE}" logs "${pod}" --all-containers=true --tail=200 || true
+              echo "::endgroup::"
+              echo "::group::Previous logs for ${pod}"
+              kubectl -n "${NAMESPACE}" logs "${pod}" --all-containers=true --previous --tail=200 || true
+              echo "::endgroup::"
+            done
             exit 1
           fi
