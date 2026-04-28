@@ -1,0 +1,54 @@
+name: k3s diagnostics
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NAMESPACE: beancs-system
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure kubeconfig
+        shell: bash
+        run: |
+          if [ -z "${{ secrets.KUBE_CONFIG }}" ]; then
+            echo "KUBE_CONFIG secret is required"
+            exit 1
+          fi
+          mkdir -p ~/.kube
+          printf '%s' "${{ secrets.KUBE_CONFIG }}" > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Inspect BeanCS routing
+        shell: bash
+        run: |
+          set -x
+          kubectl get nodes -o wide
+          kubectl -n "${NAMESPACE}" get pods -o wide
+          kubectl -n "${NAMESPACE}" get svc,endpoints,ingress,networkpolicy -o wide
+          kubectl -n "${NAMESPACE}" describe svc beancs-controller || true
+          kubectl -n "${NAMESPACE}" describe endpoints beancs-controller || true
+          kubectl -n "${NAMESPACE}" describe ingress beancs-controller-public || true
+          kubectl -n kube-system get pods --show-labels -o wide | grep -i traefik || true
+          kubectl -n traefik get pods --show-labels -o wide || true
+
+      - name: Probe from inside cluster
+        shell: bash
+        run: |
+          set -x
+          ENDPOINT="$(kubectl -n "${NAMESPACE}" get endpoints beancs-controller -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null || true)"
+          kubectl -n "${NAMESPACE}" run beancs-curl-test \
+            --rm -i --restart=Never \
+            --image=curlimages/curl:8.10.1 \
+            --command -- sh -c "curl -svm 8 http://beancs-controller.${NAMESPACE}.svc.cluster.local:8080/api/v1/health || true; if [ -n '${ENDPOINT}' ]; then curl -svm 8 http://${ENDPOINT}:8080/api/v1/health || true; fi"
+
+      - name: Recent Traefik logs
+        shell: bash
+        run: |
+          kubectl -n kube-system logs -l app.kubernetes.io/name=traefik --tail=200 || true
+          kubectl -n traefik logs -l app.kubernetes.io/name=traefik --tail=200 || true
