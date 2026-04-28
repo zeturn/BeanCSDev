@@ -25,6 +25,15 @@ spec:
         managed-by: beancs
     spec:
       serviceAccountName: beancs-controller
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: NotIn
+                    values:
+                      - vps-9f2d58ef
       tolerations:
         - key: node.kubernetes.io/not-ready
           operator: Exists
