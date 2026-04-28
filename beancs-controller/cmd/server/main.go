@@ -41,13 +41,16 @@ func main() {
 	if err != nil {
 		log.Fatal("load config", zap.Error(err))
 	}
+	log.Info("config loaded", zap.String("version", cfg.Version))
 	db, err := gorm.Open(postgres.Open(cfg.DatabaseURL), &gorm.Config{})
 	if err != nil {
 		log.Fatal("connect database", zap.Error(err))
 	}
+	log.Info("database connected")
 	if err := migration.AutoMigrate(db); err != nil {
 		log.Fatal("migrate database", zap.Error(err))
 	}
+	log.Info("database migrated")
 	cipher, err := cryptoutil.NewAESGCMCipher(cfg.EncryptionKey)
 	if err != nil {
 		log.Fatal("init cipher", zap.Error(err))
@@ -62,18 +65,6 @@ func main() {
 	gitopsSvc := service.NewGitOpsService()
 	projectSvc := service.NewProjectService(db, credentialSvc, quotaSvc, dnsSvc, gitopsSvc, k8sManager, registry, cipher)
 	deploymentSvc := service.NewDeploymentService(db)
-	if cfg.SelfManageIngress {
-		if err := k8sManager.ApplyControllerAccess(context.Background(), k8s.ControllerAccessOptions{
-			Namespace:     cfg.ControllerNamespace,
-			Name:          cfg.ControllerName,
-			ServicePort:   cfg.SelfServicePort,
-			PublicHost:    cfg.SelfPublicHost,
-			TailscaleHost: cfg.SelfTailscaleHost,
-			WebhookHost:   cfg.SelfWebhookHost,
-		}); err != nil {
-			log.Warn("self access reconcile failed", zap.Error(err))
-		}
-	}
 
 	app := fiber.New(fiber.Config{
 		ErrorHandler: func(c *fiber.Ctx, err error) error {
@@ -135,6 +126,24 @@ func main() {
 		}
 		return serveIndex(c)
 	})
+	if cfg.SelfManageIngress {
+		go func() {
+			reconcileCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := k8sManager.ApplyControllerAccess(reconcileCtx, k8s.ControllerAccessOptions{
+				Namespace:     cfg.ControllerNamespace,
+				Name:          cfg.ControllerName,
+				ServicePort:   cfg.SelfServicePort,
+				PublicHost:    cfg.SelfPublicHost,
+				TailscaleHost: cfg.SelfTailscaleHost,
+				WebhookHost:   cfg.SelfWebhookHost,
+			}); err != nil {
+				log.Warn("self access reconcile failed", zap.Error(err))
+				return
+			}
+			log.Info("self access reconciled")
+		}()
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
