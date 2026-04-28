@@ -42,7 +42,7 @@ func main() {
 		log.Fatal("load config", zap.Error(err))
 	}
 	log.Info("config loaded", zap.String("version", cfg.Version))
-	db, err := gorm.Open(postgres.Open(cfg.DatabaseURL), &gorm.Config{})
+	db, err := openDatabase(log, cfg.DatabaseURL)
 	if err != nil {
 		log.Fatal("connect database", zap.Error(err))
 	}
@@ -157,6 +157,50 @@ func main() {
 	if err := app.Listen(":" + cfg.Port); err != nil && !strings.Contains(strings.ToLower(err.Error()), "server closed") {
 		log.Fatal("listen", zap.Error(err))
 	}
+}
+
+func openDatabase(log *zap.Logger, databaseURL string) (*gorm.DB, error) {
+	dsn := databaseURLWithConnectTimeout(databaseURL, "5")
+	deadline := time.Now().Add(2 * time.Minute)
+	var lastErr error
+	for {
+		db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+		if err == nil {
+			sqlDB, sqlErr := db.DB()
+			if sqlErr == nil {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				sqlErr = sqlDB.PingContext(ctx)
+				cancel()
+			}
+			if sqlErr == nil {
+				return db, nil
+			}
+			lastErr = sqlErr
+			if sqlDB != nil {
+				_ = sqlDB.Close()
+			}
+		} else {
+			lastErr = err
+		}
+		if time.Now().After(deadline) {
+			return nil, lastErr
+		}
+		log.Warn("database unavailable; retrying", zap.Error(lastErr))
+		time.Sleep(3 * time.Second)
+	}
+}
+
+func databaseURLWithConnectTimeout(databaseURL, timeout string) string {
+	u, err := url.Parse(databaseURL)
+	if err != nil || u.Scheme == "" {
+		return databaseURL
+	}
+	q := u.Query()
+	if q.Get("connect_timeout") == "" {
+		q.Set("connect_timeout", timeout)
+		u.RawQuery = q.Encode()
+	}
+	return u.String()
 }
 
 func serveIndex(c *fiber.Ctx) error {
