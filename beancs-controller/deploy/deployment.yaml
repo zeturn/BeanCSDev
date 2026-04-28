@@ -27,6 +27,12 @@ spec:
       serviceAccountName: beancs-controller
       dnsPolicy: Default
       affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: beancs-postgres
+              topologyKey: kubernetes.io/hostname
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
