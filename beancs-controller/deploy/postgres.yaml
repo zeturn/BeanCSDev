@@ -44,6 +44,7 @@ spec:
                     operator: NotIn
                     values:
                       - vps-9f2d58ef
+                      - hollowdata-k3s-node-2
       containers:
         - name: postgres
           image: postgres:17-alpine
