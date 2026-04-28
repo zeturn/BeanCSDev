@@ -148,6 +148,8 @@ jobs:
           kubectl apply -f beancs-controller/deploy/postgres.yaml
           kubectl -n "${NAMESPACE}" get service beancs-postgres
           kubectl -n "${NAMESPACE}" rollout status statefulset/beancs-postgres --timeout=180s
+          kubectl -n "${NAMESPACE}" get pods -l app=beancs-postgres -o wide
+          kubectl -n "${NAMESPACE}" get service,endpoints beancs-postgres -o wide
 
       - name: Configure controller env
         shell: bash
@@ -158,7 +160,12 @@ jobs:
           DATABASE_URL="${BEANCS_DATABASE_URL}"
           if [ -z "${DATABASE_URL}" ]; then
             ENCODED_POSTGRES_PASSWORD="$(python3 -c 'import os, urllib.parse; print(urllib.parse.quote(os.environ["BEANCS_POSTGRES_PASSWORD"], safe=""))')"
-            DATABASE_URL="postgres://beancs:${ENCODED_POSTGRES_PASSWORD}@beancs-postgres.beancs-system.svc.cluster.local:5432/beancs?sslmode=disable"
+            POSTGRES_HOST="$(kubectl -n "${NAMESPACE}" get pod -l app=beancs-postgres -o jsonpath='{.items[0].status.podIP}')"
+            if [ -z "${POSTGRES_HOST}" ]; then
+              echo "beancs-postgres pod IP is required"
+              exit 1
+            fi
+            DATABASE_URL="postgres://beancs:${ENCODED_POSTGRES_PASSWORD}@${POSTGRES_HOST}:5432/beancs?sslmode=disable"
           fi
           kubectl -n "${NAMESPACE}" create secret generic beancs-controller-env \
             --from-literal=DATABASE_URL="${DATABASE_URL}" \

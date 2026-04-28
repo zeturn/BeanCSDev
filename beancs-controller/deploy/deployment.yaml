@@ -25,6 +25,7 @@ spec:
         managed-by: beancs
     spec:
       serviceAccountName: beancs-controller
+      dnsPolicy: Default
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
