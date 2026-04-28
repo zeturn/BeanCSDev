@@ -145,7 +145,7 @@ jobs:
             --from-literal=POSTGRES_USER=beancs \
             --from-literal=POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" \
             --dry-run=client -o yaml | kubectl apply -f -
-          awk 'BEGIN {doc=0} /^---$/ {doc++; next} doc >= 1 {print}' beancs-controller/deploy/postgres.yaml | kubectl apply -f -
+          kubectl apply -f beancs-controller/deploy/postgres.yaml
           kubectl -n "${NAMESPACE}" get service beancs-postgres
           kubectl -n "${NAMESPACE}" rollout status statefulset/beancs-postgres --timeout=180s
 
