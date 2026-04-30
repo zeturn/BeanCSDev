@@ -19,6 +19,14 @@ on:
         options:
           - "true"
           - "false"
+      restart_traefik:
+        description: "Restart Traefik to reload current routes and endpoints"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
 
 permissions:
   contents: read
@@ -62,6 +70,14 @@ jobs:
           kubectl -n cert-manager rollout status deployment/cert-manager-cainjector --timeout=180s
           kubectl -n cert-manager rollout status deployment/cert-manager-webhook --timeout=180s
           kubectl apply -f beancs-controller/deploy/clusterissuer-letsencrypt.yaml
+
+      - name: Restart Traefik
+        if: ${{ github.event.inputs.restart_traefik == 'true' }}
+        shell: bash
+        run: |
+          set -euxo pipefail
+          kubectl -n traefik rollout restart deployment/traefik
+          kubectl -n traefik rollout status deployment/traefik --timeout=180s
 
       - name: Show production routing
         shell: bash
