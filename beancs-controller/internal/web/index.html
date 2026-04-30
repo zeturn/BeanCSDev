@@ -399,7 +399,7 @@
           response_type: "code",
           client_id: state.config.client_id,
           redirect_uri: browserRedirectURI(),
-          scope: "openid profile email beancs.admin",
+          scope: "openid profile email",
           state: authState,
           code_challenge: challenge,
           code_challenge_method: "S256",
@@ -409,6 +409,13 @@
 
       async function finishLogin() {
         const params = new URLSearchParams(location.search);
+        const oauthError = params.get("error");
+        if (oauthError) {
+          const description = params.get("error_description") || oauthError;
+          sessionStorage.removeItem("beancs.pkceVerifier");
+          sessionStorage.removeItem("beancs.oauthState");
+          throw new Error(`BasaltPass login failed: ${description}`);
+        }
         const code = params.get("code");
         const returnedState = params.get("state");
         const expectedState = sessionStorage.getItem("beancs.oauthState");
