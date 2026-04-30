@@ -43,6 +43,9 @@ func (m *Manager) applyIngressPort(ctx context.Context, namespace, projectName s
 	if m.CertManager.IssuerName != "" {
 		annotations["cert-manager.io/issuer"] = m.CertManager.IssuerName
 	}
+	if port.Exposure == model.ExposurePublic {
+		annotations["kubernetes.io/ingress.class"] = "traefik"
+	}
 	if port.Exposure == model.ExposurePrivate {
 		className = "tailscale"
 		annotations = map[string]string{}

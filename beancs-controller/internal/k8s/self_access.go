@@ -59,7 +59,10 @@ func (m *Manager) ApplyControllerAccess(ctx context.Context, opts ControllerAcce
 			Path:          "/",
 			Port:          opts.ServicePort,
 			TLSSecretName: opts.Name + "-public-tls",
-			Annotations:   map[string]string{"cert-manager.io/cluster-issuer": "letsencrypt-prod"},
+			Annotations: map[string]string{
+				"cert-manager.io/cluster-issuer": "letsencrypt-prod",
+				"kubernetes.io/ingress.class":    "traefik",
+			},
 		}); err != nil {
 			return err
 		}
@@ -78,7 +81,10 @@ func (m *Manager) ApplyControllerAccess(ctx context.Context, opts ControllerAcce
 			Path:          "/api/v1/webhooks",
 			Port:          opts.ServicePort,
 			TLSSecretName: webhookTLSSecret,
-			Annotations:   map[string]string{"cert-manager.io/cluster-issuer": "letsencrypt-prod"},
+			Annotations: map[string]string{
+				"cert-manager.io/cluster-issuer": "letsencrypt-prod",
+				"kubernetes.io/ingress.class":    "traefik",
+			},
 		}); err != nil {
 			return err
 		}
