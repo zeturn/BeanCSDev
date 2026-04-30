@@ -121,6 +121,20 @@ jobs:
       - name: Create namespace
         run: kubectl get namespace "${NAMESPACE}" >/dev/null 2>&1 || kubectl create namespace "${NAMESPACE}"
 
+      - name: Ensure cert-manager
+        shell: bash
+        run: |
+          set -euxo pipefail
+          if ! kubectl get crd certificates.cert-manager.io >/dev/null 2>&1; then
+            kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.20.0/cert-manager.yaml
+          fi
+          kubectl wait --for=condition=Established crd/certificates.cert-manager.io --timeout=120s
+          kubectl wait --for=condition=Established crd/clusterissuers.cert-manager.io --timeout=120s
+          kubectl -n cert-manager rollout status deployment/cert-manager --timeout=180s
+          kubectl -n cert-manager rollout status deployment/cert-manager-cainjector --timeout=180s
+          kubectl -n cert-manager rollout status deployment/cert-manager-webhook --timeout=180s
+          kubectl apply -f beancs-controller/deploy/clusterissuer-letsencrypt.yaml
+
       - name: Configure GHCR pull secret
         shell: bash
         run: |

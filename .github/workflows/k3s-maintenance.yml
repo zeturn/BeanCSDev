@@ -11,6 +11,14 @@ on:
         options:
           - "true"
           - "false"
+      install_cert_manager:
+        description: "Install cert-manager and the letsencrypt-prod ClusterIssuer"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
 
 permissions:
   contents: read
@@ -19,6 +27,9 @@ jobs:
   maintenance:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Configure kubeconfig
         shell: bash
         run: |
@@ -37,9 +48,25 @@ jobs:
           set -euxo pipefail
           kubectl -n public-demo delete ingress whoami-public whoami-public-http-redirect --ignore-not-found
 
+      - name: Ensure cert-manager
+        if: ${{ github.event.inputs.install_cert_manager == 'true' }}
+        shell: bash
+        run: |
+          set -euxo pipefail
+          if ! kubectl get crd certificates.cert-manager.io >/dev/null 2>&1; then
+            kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.20.0/cert-manager.yaml
+          fi
+          kubectl wait --for=condition=Established crd/certificates.cert-manager.io --timeout=120s
+          kubectl wait --for=condition=Established crd/clusterissuers.cert-manager.io --timeout=120s
+          kubectl -n cert-manager rollout status deployment/cert-manager --timeout=180s
+          kubectl -n cert-manager rollout status deployment/cert-manager-cainjector --timeout=180s
+          kubectl -n cert-manager rollout status deployment/cert-manager-webhook --timeout=180s
+          kubectl apply -f beancs-controller/deploy/clusterissuer-letsencrypt.yaml
+
       - name: Show production routing
         shell: bash
         run: |
           set -euxo pipefail
+          kubectl get clusterissuer,certificate,challenge,order -A || true
           kubectl get ingress -A -o wide || true
           kubectl -n beancs-system get pods,svc,endpoints,ingress -o wide
