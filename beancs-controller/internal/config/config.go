@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/hex"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/caarlos0/env/v11"
@@ -59,14 +60,24 @@ func Load() (*Config, error) {
 	if cfg.BPBrowserAuthURL == "" {
 		cfg.BPBrowserAuthURL = cfg.BPMgmtBaseURL
 	}
-	cfg.BPBrowserAuthURL = browserAuthBase(cfg.BPBrowserAuthURL)
+	cfg.BPBrowserAuthURL = basaltAPIBaseURL(cfg.BPBrowserAuthURL)
 	if cfg.BPBrowserClientID == "" {
 		cfg.BPBrowserClientID = cfg.BPMgmtClientID
 	}
 	return &cfg, nil
 }
 
-func browserAuthBase(v string) string {
+func basaltAPIBaseURL(v string) string {
 	v = strings.TrimRight(strings.TrimSpace(v), "/")
-	return strings.TrimSuffix(v, "/api/v1")
+	if v == "" {
+		return v
+	}
+	parsed, err := url.Parse(v)
+	if err != nil {
+		return v + "/api/v1"
+	}
+	if strings.HasSuffix(strings.TrimRight(parsed.Path, "/"), "/api/v1") {
+		return v
+	}
+	return v + "/api/v1"
 }

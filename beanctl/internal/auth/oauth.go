@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os/exec"
 	"runtime"
+	"strings"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -41,14 +42,15 @@ func Login(ctx context.Context, opts LoginOptions) (*oauth2.Token, error) {
 		return nil, err
 	}
 	redirectURL := fmt.Sprintf("http://127.0.0.1:%d/callback", opts.Port)
+	authBaseURL := oauthAPIBaseURL(opts.AuthURL)
 	conf := oauth2.Config{
 		ClientID:     opts.ClientID,
 		ClientSecret: opts.ClientSecret,
 		RedirectURL:  redirectURL,
 		Scopes:       opts.Scopes,
 		Endpoint: oauth2.Endpoint{
-			AuthURL:  trimSlash(opts.AuthURL) + "/oauth/authorize",
-			TokenURL: trimSlash(opts.AuthURL) + "/oauth/token",
+			AuthURL:  authBaseURL + "/oauth/authorize",
+			TokenURL: authBaseURL + "/oauth/token",
 		},
 	}
 
@@ -141,6 +143,21 @@ func trimSlash(v string) string {
 		out = out[:len(out)-1]
 	}
 	return out
+}
+
+func oauthAPIBaseURL(v string) string {
+	base := trimSlash(v)
+	if base == "" {
+		return base
+	}
+	parsed, err := url.Parse(base)
+	if err != nil {
+		return base + "/api/v1"
+	}
+	if strings.HasSuffix(strings.TrimRight(parsed.Path, "/"), "/api/v1") {
+		return base
+	}
+	return base + "/api/v1"
 }
 
 func openBrowser(rawURL string) error {

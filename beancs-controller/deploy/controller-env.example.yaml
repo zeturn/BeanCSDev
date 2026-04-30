@@ -9,6 +9,7 @@ stringData:
   BP_MGMT_BASE_URL: https://your-basaltpass.example.com
   BP_MGMT_CLIENT_ID: replace-me
   BP_MGMT_CLIENT_SECRET: replace-me
+  # Root host or /api/v1 base; BeanCS normalizes browser OAuth calls to /api/v1/oauth/*.
   BP_BROWSER_AUTH_URL: https://your-basaltpass.example.com
   BP_BROWSER_CLIENT_ID: replace-me
   BP_BROWSER_CLIENT_SECRET: replace-me

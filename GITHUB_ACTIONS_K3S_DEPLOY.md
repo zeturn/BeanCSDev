@@ -14,7 +14,7 @@ This repository can deploy BeanCS from GitHub Actions to a k3s cluster.
 - `BP_MGMT_BASE_URL`: BasaltPass base URL.
 - `BP_MGMT_CLIENT_ID`: BasaltPass management OAuth client ID.
 - `BP_MGMT_CLIENT_SECRET`: BasaltPass management OAuth client secret.
-- `BP_BROWSER_AUTH_URL`: BasaltPass browser login base URL.
+- `BP_BROWSER_AUTH_URL`: BasaltPass browser login base URL. Either the root host or `/api/v1` base is accepted; BeanCS normalizes OAuth calls to `/api/v1/oauth/*`.
 - `BP_BROWSER_CLIENT_ID`: BasaltPass browser OAuth client ID.
 - `BP_BROWSER_CLIENT_SECRET`: BasaltPass browser OAuth client secret.
 - `BEANCS_WEBHOOK_SECRET`: webhook verification secret.

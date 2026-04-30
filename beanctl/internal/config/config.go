@@ -89,8 +89,8 @@ func defaultConfig() *Config {
 		CurrentProfile: "default",
 		Profiles: map[string]Profile{
 			"default": {
-				APIURL:   "https://beancs.hollodata.com",
-				AuthURL:  "https://auth.beancs.hollodata.com",
+				APIURL:   "https://beancs.hollowdata.com",
+				AuthURL:  "https://auth.beancs.hollowdata.com",
 				ClientID: "beanctl-cli",
 			},
 			"local": {
