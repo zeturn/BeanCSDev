@@ -93,6 +93,7 @@ func main() {
 			"client_id": cfg.BPBrowserClientID,
 		})
 	})
+	api.Get("/ui/oauth/callback", serveIndex)
 	api.Post("/ui/oauth/token", func(c *fiber.Ctx) error {
 		return exchangeBrowserToken(c, cfg)
 	})

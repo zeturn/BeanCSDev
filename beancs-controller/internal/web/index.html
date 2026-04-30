@@ -398,7 +398,7 @@
         const params = new URLSearchParams({
           response_type: "code",
           client_id: state.config.client_id,
-          redirect_uri: location.origin + location.pathname,
+          redirect_uri: browserRedirectURI(),
           scope: "openid profile email beancs.admin",
           state: authState,
           code_challenge: challenge,
@@ -422,7 +422,7 @@
           headers: {"Content-Type": "application/json"},
           body: JSON.stringify({
           code,
-          redirect_uri: location.origin + location.pathname,
+          redirect_uri: browserRedirectURI(),
           code_verifier: verifier,
           }),
         });
@@ -544,6 +544,10 @@
 
       function trimSlash(value) {
         return String(value || "").replace(/\/+$/, "");
+      }
+
+      function browserRedirectURI() {
+        return location.origin + "/api/v1/ui/oauth/callback";
       }
 
       function escapeHTML(value) {
