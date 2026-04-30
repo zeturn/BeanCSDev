@@ -45,6 +45,8 @@ func (m *Manager) applyIngressPort(ctx context.Context, namespace, projectName s
 	}
 	if port.Exposure == model.ExposurePublic {
 		annotations["kubernetes.io/ingress.class"] = "traefik"
+		annotations["traefik.ingress.kubernetes.io/router.entrypoints"] = "websecure"
+		annotations["traefik.ingress.kubernetes.io/router.tls"] = "true"
 	}
 	if port.Exposure == model.ExposurePrivate {
 		className = "tailscale"

@@ -60,8 +60,10 @@ func (m *Manager) ApplyControllerAccess(ctx context.Context, opts ControllerAcce
 			Port:          opts.ServicePort,
 			TLSSecretName: opts.Name + "-public-tls",
 			Annotations: map[string]string{
-				"cert-manager.io/cluster-issuer": "letsencrypt-prod",
-				"kubernetes.io/ingress.class":    "traefik",
+				"cert-manager.io/cluster-issuer":                   "letsencrypt-prod",
+				"kubernetes.io/ingress.class":                      "traefik",
+				"traefik.ingress.kubernetes.io/router.entrypoints": "websecure",
+				"traefik.ingress.kubernetes.io/router.tls":         "true",
 			},
 		}); err != nil {
 			return err
@@ -82,8 +84,10 @@ func (m *Manager) ApplyControllerAccess(ctx context.Context, opts ControllerAcce
 			Port:          opts.ServicePort,
 			TLSSecretName: webhookTLSSecret,
 			Annotations: map[string]string{
-				"cert-manager.io/cluster-issuer": "letsencrypt-prod",
-				"kubernetes.io/ingress.class":    "traefik",
+				"cert-manager.io/cluster-issuer":                   "letsencrypt-prod",
+				"kubernetes.io/ingress.class":                      "traefik",
+				"traefik.ingress.kubernetes.io/router.entrypoints": "websecure",
+				"traefik.ingress.kubernetes.io/router.tls":         "true",
 			},
 		}); err != nil {
 			return err

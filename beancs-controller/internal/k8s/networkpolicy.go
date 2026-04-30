@@ -48,6 +48,7 @@ func (m *Manager) ApplyNetworkPoliciesForPorts(ctx context.Context, namespace, p
 		for _, ns := range m.PublicIngressNamespaces {
 			allow.Spec.Ingress = append(allow.Spec.Ingress, namespaceIngressPorts(ns, publicPorts))
 		}
+		allow.Spec.Ingress = append(allow.Spec.Ingress, tailnetIngressPorts(publicPorts))
 	}
 	privatePorts := policyPortsForExposure(ports, model.ExposurePrivate)
 	if len(privatePorts) > 0 {
@@ -66,6 +67,15 @@ func namespaceIngressPorts(ns string, ports []networkingv1.NetworkPolicyPort) ne
 	return networkingv1.NetworkPolicyIngressRule{
 		From: []networkingv1.NetworkPolicyPeer{{
 			NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": ns}},
+		}},
+		Ports: ports,
+	}
+}
+
+func tailnetIngressPorts(ports []networkingv1.NetworkPolicyPort) networkingv1.NetworkPolicyIngressRule {
+	return networkingv1.NetworkPolicyIngressRule{
+		From: []networkingv1.NetworkPolicyPeer{{
+			IPBlock: &networkingv1.IPBlock{CIDR: "100.64.0.0/10"},
 		}},
 		Ports: ports,
 	}
