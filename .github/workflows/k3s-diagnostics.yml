@@ -29,17 +29,23 @@ jobs:
         run: |
           set -x
           kubectl get nodes -o wide
+          kubectl get ingressclass -o wide || true
+          kubectl get ingressclass -o yaml || true
           kubectl get ingress -A -o wide || true
           kubectl get ingressroute -A -o wide || true
           kubectl -n "${NAMESPACE}" get pods -o wide
           kubectl -n "${NAMESPACE}" get svc,endpoints,ingress,networkpolicy -o wide
+          kubectl -n "${NAMESPACE}" get ingress -o yaml || true
           kubectl -n "${NAMESPACE}" describe svc beancs-controller || true
           kubectl -n "${NAMESPACE}" describe endpoints beancs-controller || true
           kubectl -n "${NAMESPACE}" describe ingress beancs-controller-public || true
+          kubectl -n "${NAMESPACE}" describe ingress basaltpass-public || true
           kubectl -n kube-system get pods --show-labels -o wide | grep -i traefik || true
           kubectl -n traefik get pods --show-labels -o wide || true
+          kubectl -n traefik describe deploy,svc,pod -l app=traefik || true
 
       - name: Probe from inside cluster
+        continue-on-error: true
         shell: bash
         run: |
           set -x
@@ -54,3 +60,4 @@ jobs:
         run: |
           kubectl -n kube-system logs -l app.kubernetes.io/name=traefik --tail=200 || true
           kubectl -n traefik logs -l app.kubernetes.io/name=traefik --tail=200 || true
+          kubectl -n traefik logs -l app=traefik --tail=200 || true
