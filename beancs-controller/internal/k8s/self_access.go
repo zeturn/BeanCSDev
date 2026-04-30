@@ -65,6 +65,10 @@ func (m *Manager) ApplyControllerAccess(ctx context.Context, opts ControllerAcce
 		}
 	}
 	if opts.WebhookHost != "" {
+		webhookTLSSecret := opts.Name + "-webhooks-public-tls"
+		if opts.WebhookHost == opts.PublicHost {
+			webhookTLSSecret = opts.Name + "-public-tls"
+		}
 		if err := m.applyControllerIngress(ctx, controllerIngressOptions{
 			Namespace:     opts.Namespace,
 			Name:          opts.Name + "-webhooks-public",
@@ -73,7 +77,7 @@ func (m *Manager) ApplyControllerAccess(ctx context.Context, opts ControllerAcce
 			ClassName:     "traefik",
 			Path:          "/api/v1/webhooks",
 			Port:          opts.ServicePort,
-			TLSSecretName: opts.Name + "-webhooks-public-tls",
+			TLSSecretName: webhookTLSSecret,
 			Annotations:   map[string]string{"cert-manager.io/cluster-issuer": "letsencrypt-prod"},
 		}); err != nil {
 			return err
