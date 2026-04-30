@@ -1,0 +1,45 @@
+name: k3s maintenance
+
+on:
+  workflow_dispatch:
+    inputs:
+      cleanup_public_demo:
+        description: "Delete demo ingress resources that can conflict with production hostnames"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+permissions:
+  contents: read
+
+jobs:
+  maintenance:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure kubeconfig
+        shell: bash
+        run: |
+          if [ -z "${{ secrets.KUBE_CONFIG }}" ]; then
+            echo "KUBE_CONFIG secret is required"
+            exit 1
+          fi
+          mkdir -p ~/.kube
+          printf '%s' "${{ secrets.KUBE_CONFIG }}" > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Clean conflicting demo ingresses
+        if: ${{ github.event.inputs.cleanup_public_demo == 'true' }}
+        shell: bash
+        run: |
+          set -euxo pipefail
+          kubectl -n public-demo delete ingress whoami-public whoami-public-http-redirect --ignore-not-found
+
+      - name: Show production routing
+        shell: bash
+        run: |
+          set -euxo pipefail
+          kubectl get ingress -A -o wide || true
+          kubectl -n beancs-system get pods,svc,endpoints,ingress -o wide
