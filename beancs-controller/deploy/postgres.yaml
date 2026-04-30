@@ -35,16 +35,6 @@ spec:
         app: beancs-postgres
         managed-by: beancs
     spec:
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-              - matchExpressions:
-                  - key: kubernetes.io/hostname
-                    operator: NotIn
-                    values:
-                      - vps-9f2d58ef
-                      - hollowdata-k3s-node-2
       containers:
         - name: postgres
           image: postgres:17-alpine
