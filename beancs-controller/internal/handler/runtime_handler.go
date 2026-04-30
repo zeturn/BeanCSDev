@@ -22,6 +22,7 @@ func NewRuntimeHandler(db *gorm.DB, k8sManager *k8s.Manager, v *validator.Valida
 }
 
 func (h *RuntimeHandler) Register(r fiber.Router) {
+	r.Get("/runtime/overview", h.overview)
 	r.Get("/runtime/namespaces", h.namespaces)
 	r.Get("/projects/:id/status", middleware.ProjectAccess(h.db), h.status)
 	r.Get("/projects/:id/logs", middleware.ProjectAccess(h.db), h.logs)
@@ -31,6 +32,14 @@ func (h *RuntimeHandler) Register(r fiber.Router) {
 
 func (h *RuntimeHandler) namespaces(c *fiber.Ctx) error {
 	out, err := h.k8s.ListNamespaces(c.UserContext())
+	if err != nil {
+		return fail(c, 400, err)
+	}
+	return c.JSON(fiber.Map{"data": out})
+}
+
+func (h *RuntimeHandler) overview(c *fiber.Ctx) error {
+	out, err := h.k8s.RuntimeOverview(c.UserContext())
 	if err != nil {
 		return fail(c, 400, err)
 	}

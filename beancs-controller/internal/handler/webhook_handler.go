@@ -17,8 +17,8 @@ func NewWebhookHandler(svc *service.DeploymentService, v *validator.Validate) *W
 }
 
 func (h *WebhookHandler) Register(r fiber.Router) {
-	r.Post("/webhooks/github", h.github)
-	r.Post("/webhooks/argocd", h.argocd)
+	r.Post("/github", h.github)
+	r.Post("/argocd", h.argocd)
 }
 
 func (h *WebhookHandler) github(c *fiber.Ctx) error {

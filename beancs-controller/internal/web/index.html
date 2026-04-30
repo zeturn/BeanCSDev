@@ -70,7 +70,16 @@
         background: #1d2939;
         color: #ffffff;
         text-align: left;
-        cursor: default;
+        cursor: pointer;
+      }
+
+      .nav-item + .nav-item {
+        margin-top: 8px;
+      }
+
+      .nav-item.active {
+        background: #ffffff;
+        color: #101828;
       }
 
       .dot {
@@ -144,6 +153,34 @@
         margin-bottom: 12px;
       }
 
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(118px, 1fr));
+        gap: 10px;
+        margin-bottom: 14px;
+      }
+
+      .stat {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #ffffff;
+        padding: 10px 12px;
+      }
+
+      .stat-value {
+        display: block;
+        font-size: 22px;
+        font-weight: 760;
+        line-height: 1.1;
+      }
+
+      .stat-label {
+        display: block;
+        color: var(--muted);
+        font-size: 12px;
+        margin-top: 3px;
+      }
+
       .search {
         width: min(420px, 100%);
         min-height: 38px;
@@ -152,6 +189,39 @@
         padding: 0 12px;
         background: #ffffff;
         color: var(--ink);
+      }
+
+      .credential-panel {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #ffffff;
+        padding: 14px;
+        margin-bottom: 14px;
+      }
+
+      .form-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(150px, 1fr));
+        gap: 10px;
+      }
+
+      .form-grid input {
+        min-height: 38px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 0 10px;
+        background: #ffffff;
+        color: var(--ink);
+      }
+
+      .form-grid .wide {
+        grid-column: span 2;
+      }
+
+      .form-actions {
+        display: flex;
+        justify-content: flex-end;
+        margin-top: 10px;
       }
 
       .table-wrap {
@@ -213,6 +283,11 @@
         overflow: hidden;
         text-overflow: ellipsis;
         color: var(--muted);
+      }
+
+      .empty {
+        color: var(--muted);
+        text-align: center;
       }
 
       .notice {
@@ -286,6 +361,18 @@
           flex-direction: column;
         }
 
+        .stats {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .form-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .form-grid .wide {
+          grid-column: auto;
+        }
+
         .actions {
           justify-content: flex-start;
         }
@@ -304,13 +391,20 @@
     <section id="app" class="shell hidden">
       <aside class="sidebar">
         <div class="brand">BeanCS</div>
-        <button class="nav-item" type="button"><span class="dot"></span><span>Namespaces</span></button>
+        <button class="nav-item active" type="button" data-resource="namespaces"><span class="dot"></span><span>Namespaces</span></button>
+        <button class="nav-item" type="button" data-resource="pods"><span class="dot"></span><span>Pods</span></button>
+        <button class="nav-item" type="button" data-resource="nodes"><span class="dot"></span><span>Nodes</span></button>
+        <button class="nav-item" type="button" data-resource="deployments"><span class="dot"></span><span>Deployments</span></button>
+        <button class="nav-item" type="button" data-resource="services"><span class="dot"></span><span>Services</span></button>
+        <button class="nav-item" type="button" data-resource="ingresses"><span class="dot"></span><span>Ingresses</span></button>
+        <button class="nav-item" type="button" data-resource="github_credentials"><span class="dot"></span><span>GitHub Keys</span></button>
+        <button class="nav-item" type="button" data-resource="cloudflare_credentials"><span class="dot"></span><span>Cloudflare Keys</span></button>
       </aside>
 
       <main class="main">
         <div class="topbar">
           <div>
-            <h1>Namespaces</h1>
+            <h1 id="viewTitle">Namespaces</h1>
             <p id="summary" class="subtle">Loading cluster state</p>
           </div>
           <div class="actions">
@@ -321,22 +415,50 @@
 
         <div id="notice" class="notice"></div>
 
+        <div class="stats">
+          <div class="stat"><span id="statNamespaces" class="stat-value">0</span><span class="stat-label">Namespaces</span></div>
+          <div class="stat"><span id="statPods" class="stat-value">0</span><span class="stat-label">Pods</span></div>
+          <div class="stat"><span id="statNodes" class="stat-value">0</span><span class="stat-label">Nodes</span></div>
+          <div class="stat"><span id="statDeployments" class="stat-value">0</span><span class="stat-label">Deployments</span></div>
+          <div class="stat"><span id="statServices" class="stat-value">0</span><span class="stat-label">Services</span></div>
+          <div class="stat"><span id="statIngresses" class="stat-value">0</span><span class="stat-label">Ingresses</span></div>
+        </div>
+
         <div class="toolbar">
-          <input id="filterInput" class="search" type="search" placeholder="Filter namespaces" />
+          <input id="filterInput" class="search" type="search" placeholder="Filter resources" />
+        </div>
+
+        <div id="credentialPanel" class="credential-panel hidden">
+          <form id="githubForm" class="hidden">
+            <div class="form-grid">
+              <input name="name" placeholder="Credential name" required />
+              <input name="org" placeholder="GitHub org or user" />
+              <input name="gitops_repo" class="wide" placeholder="GitOps repo, e.g. zeturn/gitops" required />
+              <input name="token" class="wide" type="password" placeholder="GitHub token" required />
+            </div>
+            <div class="form-actions">
+              <button class="button primary" type="submit">Add GitHub key</button>
+            </div>
+          </form>
+
+          <form id="cloudflareForm" class="hidden">
+            <div class="form-grid">
+              <input name="name" placeholder="Credential name" required />
+              <input name="domain" placeholder="Domain, e.g. hollowdata.com" required />
+              <input name="zone_id" class="wide" placeholder="Cloudflare zone ID" required />
+              <input name="account_id" placeholder="Account ID" />
+              <input name="api_token" class="wide" type="password" placeholder="Cloudflare API token" required />
+            </div>
+            <div class="form-actions">
+              <button class="button primary" type="submit">Add Cloudflare key</button>
+            </div>
+          </form>
         </div>
 
         <div class="table-wrap">
           <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Status</th>
-                <th>Age</th>
-                <th>Created</th>
-                <th>Labels</th>
-              </tr>
-            </thead>
-            <tbody id="namespaceRows"></tbody>
+            <thead id="resourceHead"></thead>
+            <tbody id="resourceRows"></tbody>
           </table>
         </div>
       </main>
@@ -345,7 +467,12 @@
     <script>
       const state = {
         config: null,
-        namespaces: [],
+        view: "namespaces",
+        credentials: {
+          github_credentials: [],
+          cloudflare_credentials: [],
+        },
+        runtime: emptyRuntime(),
         token: localStorage.getItem("beancs.accessToken") || "",
       };
 
@@ -355,14 +482,183 @@
       const logoutButton = document.getElementById("logoutButton");
       const refreshButton = document.getElementById("refreshButton");
       const filterInput = document.getElementById("filterInput");
-      const namespaceRows = document.getElementById("namespaceRows");
+      const resourceHead = document.getElementById("resourceHead");
+      const resourceRows = document.getElementById("resourceRows");
+      const credentialPanel = document.getElementById("credentialPanel");
+      const githubForm = document.getElementById("githubForm");
+      const cloudflareForm = document.getElementById("cloudflareForm");
+      const viewTitle = document.getElementById("viewTitle");
       const summary = document.getElementById("summary");
       const notice = document.getElementById("notice");
+      const statNamespaces = document.getElementById("statNamespaces");
+      const statPods = document.getElementById("statPods");
+      const statNodes = document.getElementById("statNodes");
+      const statDeployments = document.getElementById("statDeployments");
+      const statServices = document.getElementById("statServices");
+      const statIngresses = document.getElementById("statIngresses");
 
       loginButton.addEventListener("click", startLogin);
       logoutButton.addEventListener("click", logout);
-      refreshButton.addEventListener("click", loadNamespaces);
-      filterInput.addEventListener("input", renderNamespaces);
+      refreshButton.addEventListener("click", loadCurrentView);
+      filterInput.addEventListener("input", renderCurrentView);
+      githubForm.addEventListener("submit", (event) => createCredential(event, "github"));
+      cloudflareForm.addEventListener("submit", (event) => createCredential(event, "cloudflare"));
+      resourceRows.addEventListener("click", handleTableAction);
+      document.querySelectorAll(".nav-item[data-resource]").forEach((button) => {
+        button.addEventListener("click", () => {
+          state.view = button.dataset.resource;
+          filterInput.value = "";
+          loadCurrentView();
+        });
+      });
+
+      const resourceMeta = {
+        namespaces: {
+          title: "Namespaces",
+          label: "namespace",
+          columns: ["Name", "Status", "Age", "Created", "Labels"],
+          search: (ns) => `${ns.name || ""} ${ns.status || ""} ${labelText(ns.labels)}`.toLowerCase(),
+          row: (ns) => {
+            const labels = labelText(ns.labels);
+            return `
+              <tr>
+                <td class="name">${escapeHTML(ns.name)}</td>
+                <td>${statusPill(ns.status, ns.status === "Active")}</td>
+                <td>${formatAge(ns.age_seconds)}</td>
+                <td>${formatDate(ns.created_at)}</td>
+                <td class="labels" title="${escapeHTML(labels)}">${escapeHTML(labels || "-")}</td>
+              </tr>
+            `;
+          },
+        },
+        pods: {
+          title: "Pods",
+          label: "pod",
+          columns: ["Namespace", "Name", "Status", "Ready", "Restarts", "Node", "Pod IP", "Age"],
+          search: (pod) => `${pod.namespace || ""} ${pod.name || ""} ${pod.status || ""} ${pod.node_name || ""} ${pod.pod_ip || ""}`.toLowerCase(),
+          row: (pod) => `
+            <tr>
+              <td>${escapeHTML(pod.namespace)}</td>
+              <td class="name">${escapeHTML(pod.name)}</td>
+              <td>${statusPill(pod.status, pod.status === "Running" || pod.status === "Succeeded")}</td>
+              <td>${Number(pod.ready_containers || 0)}/${Number(pod.total_containers || 0)}</td>
+              <td>${Number(pod.restarts || 0)}</td>
+              <td>${escapeHTML(pod.node_name || "-")}</td>
+              <td>${escapeHTML(pod.pod_ip || "-")}</td>
+              <td>${formatAge(pod.age_seconds)}</td>
+            </tr>
+          `,
+        },
+        nodes: {
+          title: "Nodes",
+          label: "node",
+          columns: ["Name", "Status", "Roles", "Version", "Internal IP", "Age", "Labels"],
+          search: (node) => `${node.name || ""} ${node.status || ""} ${(node.roles || []).join(" ")} ${node.version || ""} ${node.internal_ip || ""} ${labelText(node.labels)}`.toLowerCase(),
+          row: (node) => {
+            const labels = labelText(node.labels);
+            return `
+              <tr>
+                <td class="name">${escapeHTML(node.name)}</td>
+                <td>${statusPill(node.status, node.status === "Ready")}</td>
+                <td>${escapeHTML((node.roles || []).join(", ") || "-")}</td>
+                <td>${escapeHTML(node.version || "-")}</td>
+                <td>${escapeHTML(node.internal_ip || "-")}</td>
+                <td>${formatAge(node.age_seconds)}</td>
+                <td class="labels" title="${escapeHTML(labels)}">${escapeHTML(labels || "-")}</td>
+              </tr>
+            `;
+          },
+        },
+        deployments: {
+          title: "Deployments",
+          label: "deployment",
+          columns: ["Namespace", "Name", "Ready", "Available", "Updated", "Age"],
+          search: (deploy) => `${deploy.namespace || ""} ${deploy.name || ""}`.toLowerCase(),
+          row: (deploy) => `
+            <tr>
+              <td>${escapeHTML(deploy.namespace)}</td>
+              <td class="name">${escapeHTML(deploy.name)}</td>
+              <td>${Number(deploy.ready_replicas || 0)}/${Number(deploy.replicas || 0)}</td>
+              <td>${Number(deploy.available_replicas || 0)}</td>
+              <td>${Number(deploy.updated_replicas || 0)}</td>
+              <td>${formatAge(deploy.age_seconds)}</td>
+            </tr>
+          `,
+        },
+        services: {
+          title: "Services",
+          label: "service",
+          columns: ["Namespace", "Name", "Type", "Cluster IP", "External IP", "Ports", "Age"],
+          search: (svc) => `${svc.namespace || ""} ${svc.name || ""} ${svc.type || ""} ${svc.cluster_ip || ""} ${svc.external_ip || ""} ${(svc.ports || []).join(" ")}`.toLowerCase(),
+          row: (svc) => `
+            <tr>
+              <td>${escapeHTML(svc.namespace)}</td>
+              <td class="name">${escapeHTML(svc.name)}</td>
+              <td>${escapeHTML(svc.type || "-")}</td>
+              <td>${escapeHTML(svc.cluster_ip || "-")}</td>
+              <td>${escapeHTML(svc.external_ip || "-")}</td>
+              <td class="labels" title="${escapeHTML((svc.ports || []).join(", "))}">${escapeHTML((svc.ports || []).join(", ") || "-")}</td>
+              <td>${formatAge(svc.age_seconds)}</td>
+            </tr>
+          `,
+        },
+        ingresses: {
+          title: "Ingresses",
+          label: "ingress",
+          columns: ["Namespace", "Name", "Class", "Hosts", "Address", "TLS", "Age"],
+          search: (ing) => `${ing.namespace || ""} ${ing.name || ""} ${ing.class || ""} ${(ing.hosts || []).join(" ")} ${ing.address || ""}`.toLowerCase(),
+          row: (ing) => `
+            <tr>
+              <td>${escapeHTML(ing.namespace)}</td>
+              <td class="name">${escapeHTML(ing.name)}</td>
+              <td>${escapeHTML(ing.class || "-")}</td>
+              <td class="labels" title="${escapeHTML((ing.hosts || []).join(", "))}">${escapeHTML((ing.hosts || []).join(", ") || "-")}</td>
+              <td>${escapeHTML(ing.address || "-")}</td>
+              <td>${ing.tls ? "Yes" : "No"}</td>
+              <td>${formatAge(ing.age_seconds)}</td>
+            </tr>
+          `,
+        },
+        github_credentials: {
+          title: "GitHub Keys",
+          label: "GitHub key",
+          columns: ["Name", "Org", "GitOps repo", "Active", "Created", "Actions"],
+          search: (cred) => `${cred.name || ""} ${cred.org || ""} ${cred.gitops_repo || ""}`.toLowerCase(),
+          row: (cred) => `
+            <tr>
+              <td class="name">${escapeHTML(cred.name)}</td>
+              <td>${escapeHTML(cred.org || "-")}</td>
+              <td>${escapeHTML(cred.gitops_repo || "-")}</td>
+              <td>${statusPill(cred.is_active ? "Active" : "Inactive", Boolean(cred.is_active))}</td>
+              <td>${formatDate(cred.created_at)}</td>
+              <td>
+                <button class="button" type="button" data-action="verify" data-kind="github" data-id="${Number(cred.id)}">Verify</button>
+                <button class="button" type="button" data-action="delete" data-kind="github" data-id="${Number(cred.id)}">Delete</button>
+              </td>
+            </tr>
+          `,
+        },
+        cloudflare_credentials: {
+          title: "Cloudflare Keys",
+          label: "Cloudflare key",
+          columns: ["Name", "Domain", "Zone ID", "Account", "Active", "Created", "Actions"],
+          search: (cred) => `${cred.name || ""} ${cred.domain || ""} ${cred.zone_id || ""} ${cred.account_id || ""}`.toLowerCase(),
+          row: (cred) => `
+            <tr>
+              <td class="name">${escapeHTML(cred.name)}</td>
+              <td>${escapeHTML(cred.domain || "-")}</td>
+              <td>${escapeHTML(cred.zone_id || "-")}</td>
+              <td>${escapeHTML(cred.account_id || "-")}</td>
+              <td>${statusPill(cred.is_active ? "Active" : "Inactive", Boolean(cred.is_active))}</td>
+              <td>${formatDate(cred.created_at)}</td>
+              <td>
+                <button class="button" type="button" data-action="verify" data-kind="cloudflare" data-id="${Number(cred.id)}">Verify</button>
+                <button class="button" type="button" data-action="delete" data-kind="cloudflare" data-id="${Number(cred.id)}">Delete</button>
+              </td>
+            </tr>
+          `,
+        },
+      };
 
       boot();
 
@@ -375,7 +671,7 @@
           }
           setView(Boolean(state.token));
           if (state.token) {
-            await loadNamespaces();
+            await loadCurrentView();
           }
         } catch (err) {
           showError(err.message);
@@ -443,13 +739,13 @@
         sessionStorage.removeItem("beancs.oauthState");
       }
 
-      async function loadNamespaces() {
+      async function loadRuntime() {
         refreshButton.disabled = true;
         clearNotice();
         try {
-          const data = await apiJSON("/api/v1/runtime/namespaces");
-          state.namespaces = data.data || [];
-          renderNamespaces();
+          const data = await apiJSON("/api/v1/runtime/overview");
+          state.runtime = normalizeRuntime(data.data);
+          renderCurrentView();
         } catch (err) {
           if (err.status === 401) {
             logout();
@@ -461,30 +757,157 @@
         }
       }
 
-      function renderNamespaces() {
+      async function loadCredentials(kind) {
+        refreshButton.disabled = true;
+        clearNotice();
+        try {
+          const data = await apiJSON(`/api/v1/credentials/${kind}/`);
+          state.credentials[`${kind}_credentials`] = data.data || [];
+          renderCurrentView();
+        } catch (err) {
+          if (err.status === 401) {
+            logout();
+            return;
+          }
+          showError(err.message);
+        } finally {
+          refreshButton.disabled = false;
+        }
+      }
+
+      async function loadCurrentView() {
+        if (state.view === "github_credentials") {
+          await loadCredentials("github");
+          return;
+        }
+        if (state.view === "cloudflare_credentials") {
+          await loadCredentials("cloudflare");
+          return;
+        }
+        await loadRuntime();
+      }
+
+      function renderCurrentView() {
+        const meta = resourceMeta[state.view] || resourceMeta.namespaces;
         const query = filterInput.value.trim().toLowerCase();
-        const rows = state.namespaces.filter((ns) => !query || ns.name.toLowerCase().includes(query));
-        summary.textContent = `${rows.length} namespace${rows.length === 1 ? "" : "s"}`;
-        namespaceRows.innerHTML = rows.map((ns) => {
-          const labels = Object.entries(ns.labels || {}).map(([key, value]) => `${key}=${value}`).join(", ");
-          const active = ns.status === "Active";
-          return `
-            <tr>
-              <td class="name">${escapeHTML(ns.name)}</td>
-              <td><span class="pill ${active ? "" : "warn"}">${escapeHTML(ns.status || "Unknown")}</span></td>
-              <td>${formatAge(ns.age_seconds)}</td>
-              <td>${formatDate(ns.created_at)}</td>
-              <td class="labels" title="${escapeHTML(labels)}">${escapeHTML(labels || "-")}</td>
-            </tr>
-          `;
-        }).join("");
+        const allRows = viewRows(state.view);
+        const rows = allRows.filter((item) => !query || meta.search(item).includes(query));
+        viewTitle.textContent = meta.title;
+        filterInput.placeholder = `Filter ${meta.title.toLowerCase()}`;
+        summary.textContent = `${rows.length} of ${allRows.length} ${meta.label}${allRows.length === 1 ? "" : "s"}`;
+        document.querySelectorAll(".nav-item[data-resource]").forEach((button) => {
+          button.classList.toggle("active", button.dataset.resource === state.view);
+        });
+        updateStats();
+        renderCredentialPanel();
+        resourceHead.innerHTML = `<tr>${meta.columns.map((column) => `<th>${escapeHTML(column)}</th>`).join("")}</tr>`;
+        resourceRows.innerHTML = rows.length
+          ? rows.map(meta.row).join("")
+          : `<tr><td class="empty" colspan="${meta.columns.length}">No ${meta.label}s found</td></tr>`;
       }
 
       function logout() {
         state.token = "";
-        state.namespaces = [];
+        state.runtime = emptyRuntime();
         localStorage.removeItem("beancs.accessToken");
         setView(false);
+      }
+
+      function viewRows(view) {
+        if (view === "github_credentials" || view === "cloudflare_credentials") {
+          return state.credentials[view] || [];
+        }
+        return state.runtime[view] || [];
+      }
+
+      function renderCredentialPanel() {
+        const isGitHub = state.view === "github_credentials";
+        const isCloudflare = state.view === "cloudflare_credentials";
+        credentialPanel.classList.toggle("hidden", !isGitHub && !isCloudflare);
+        githubForm.classList.toggle("hidden", !isGitHub);
+        cloudflareForm.classList.toggle("hidden", !isCloudflare);
+      }
+
+      async function createCredential(event, kind) {
+        event.preventDefault();
+        clearNotice();
+        const form = event.currentTarget;
+        const body = Object.fromEntries(new FormData(form).entries());
+        Object.keys(body).forEach((key) => {
+          if (typeof body[key] === "string") body[key] = body[key].trim();
+          if (body[key] === "") delete body[key];
+        });
+        try {
+          await apiJSON(`/api/v1/credentials/${kind}/`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify(body),
+          });
+          form.reset();
+          await loadCredentials(kind);
+        } catch (err) {
+          showError(err.message);
+        }
+      }
+
+      async function handleTableAction(event) {
+        const button = event.target.closest("button[data-action]");
+        if (!button) return;
+        const kind = button.dataset.kind;
+        const id = button.dataset.id;
+        clearNotice();
+        try {
+          if (button.dataset.action === "verify") {
+            await apiJSON(`/api/v1/credentials/${kind}/${id}/verify`);
+            showInfo(`${kindLabel(kind)} credential verified.`);
+          } else if (button.dataset.action === "delete") {
+            if (!confirm(`Delete this ${kindLabel(kind)} credential?`)) return;
+            await apiJSON(`/api/v1/credentials/${kind}/${id}`, {method: "DELETE"});
+            await loadCredentials(kind);
+          }
+        } catch (err) {
+          showError(err.message);
+        }
+      }
+
+      function emptyRuntime() {
+        return {
+          namespaces: [],
+          pods: [],
+          nodes: [],
+          deployments: [],
+          services: [],
+          ingresses: [],
+        };
+      }
+
+      function kindLabel(kind) {
+        return kind === "cloudflare" ? "Cloudflare" : "GitHub";
+      }
+
+      function normalizeRuntime(data) {
+        const runtime = emptyRuntime();
+        Object.keys(runtime).forEach((key) => {
+          runtime[key] = Array.isArray(data?.[key]) ? data[key] : [];
+        });
+        return runtime;
+      }
+
+      function updateStats() {
+        statNamespaces.textContent = state.runtime.namespaces.length;
+        statPods.textContent = state.runtime.pods.length;
+        statNodes.textContent = state.runtime.nodes.length;
+        statDeployments.textContent = state.runtime.deployments.length;
+        statServices.textContent = state.runtime.services.length;
+        statIngresses.textContent = state.runtime.ingresses.length;
+      }
+
+      function statusPill(value, ok) {
+        return `<span class="pill ${ok ? "" : "warn"}">${escapeHTML(value || "Unknown")}</span>`;
+      }
+
+      function labelText(labels) {
+        return Object.entries(labels || {}).map(([key, value]) => `${key}=${value}`).join(", ");
       }
 
       async function getJSON(url) {
@@ -496,8 +919,9 @@
         return data;
       }
 
-      async function apiJSON(url) {
-        const res = await fetch(url, {headers: {Authorization: `Bearer ${state.token}`}});
+      async function apiJSON(url, options = {}) {
+        const headers = Object.assign({}, options.headers || {}, {Authorization: `Bearer ${state.token}`});
+        const res = await fetch(url, Object.assign({}, options, {headers}));
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
           const err = new Error(data.error || `Request failed with ${res.status}`);
@@ -528,6 +952,11 @@
       function showError(message) {
         notice.textContent = message;
         notice.className = "notice error show";
+      }
+
+      function showInfo(message) {
+        notice.textContent = message;
+        notice.className = "notice show";
       }
 
       function clearNotice() {

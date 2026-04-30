@@ -99,7 +99,7 @@ func main() {
 	})
 
 	webhookLimiter := limiter.New(limiter.Config{Max: 30, Expiration: time.Minute})
-	handler.NewWebhookHandler(deploymentSvc, v).Register(api.Group("/", webhookLimiter, middleware.WebhookVerify(cfg.WebhookSecret)))
+	handler.NewWebhookHandler(deploymentSvc, v).Register(api.Group("/webhooks", webhookLimiter, middleware.WebhookVerify(cfg.WebhookSecret)))
 
 	authLimiter := limiter.New(limiter.Config{
 		Max:        60,
