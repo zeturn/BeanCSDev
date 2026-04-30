@@ -45,11 +45,15 @@ func (m *Manager) ApplyNetworkPoliciesForPorts(ctx context.Context, namespace, p
 	}
 	publicPorts := policyPortsForExposure(ports, model.ExposurePublic)
 	if len(publicPorts) > 0 {
-		allow.Spec.Ingress = append(allow.Spec.Ingress, namespaceIngressPorts("kube-system", publicPorts))
+		for _, ns := range m.PublicIngressNamespaces {
+			allow.Spec.Ingress = append(allow.Spec.Ingress, namespaceIngressPorts(ns, publicPorts))
+		}
 	}
 	privatePorts := policyPortsForExposure(ports, model.ExposurePrivate)
 	if len(privatePorts) > 0 {
-		allow.Spec.Ingress = append(allow.Spec.Ingress, namespaceIngressPorts("tailscale", privatePorts))
+		for _, ns := range m.PrivateIngressNamespaces {
+			allow.Spec.Ingress = append(allow.Spec.Ingress, namespaceIngressPorts(ns, privatePorts))
+		}
 	}
 	return m.upsertNetworkPolicy(ctx, allow)
 }

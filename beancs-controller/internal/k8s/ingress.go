@@ -39,7 +39,10 @@ func (m *Manager) ApplyIngressPorts(ctx context.Context, namespace, projectName 
 
 func (m *Manager) applyIngressPort(ctx context.Context, namespace, projectName string, port model.ProjectPort) error {
 	className := "traefik"
-	annotations := map[string]string{"cert-manager.io/cluster-issuer": "letsencrypt-prod"}
+	annotations := map[string]string{}
+	if m.CertManager.IssuerName != "" {
+		annotations["cert-manager.io/issuer"] = m.CertManager.IssuerName
+	}
 	if port.Exposure == model.ExposurePrivate {
 		className = "tailscale"
 		annotations = map[string]string{}

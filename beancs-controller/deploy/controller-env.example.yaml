@@ -15,6 +15,14 @@ stringData:
   WEBHOOK_SECRET: replace-me
   ENCRYPTION_KEY: replace-with-64-hex-characters
   INGRESS_IP: 127.0.0.1
+  BEANCS_PUBLIC_INGRESS_NAMESPACES: kube-system,traefik
+  BEANCS_PRIVATE_INGRESS_NAMESPACES: tailscale,tailscale-system
+  BEANCS_CERT_MANAGER_ISSUER_NAME: beancs-letsencrypt
+  BEANCS_CERT_MANAGER_ACME_SERVER: https://acme-v02.api.letsencrypt.org/directory
+  BEANCS_CERT_MANAGER_EMAIL: admin@example.com
+  BEANCS_CERT_MANAGER_CLOUDFLARE_SECRET_NAME: beancs-cloudflare-dns01
+  BEANCS_CERT_MANAGER_CLOUDFLARE_SECRET_KEY: api-token
+  BEANCS_CERT_MANAGER_PRIVATE_KEY_SECRET_SUFFIX: account-key
   BEANCS_PUBLIC_HOST: beancs.example.com
   BEANCS_WEBHOOK_HOST: hooks.beancs.example.com
   BEANCS_TAILSCALE_HOST: beancs-controller

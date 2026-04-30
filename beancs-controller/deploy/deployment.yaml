@@ -25,8 +25,6 @@ spec:
         managed-by: beancs
     spec:
       serviceAccountName: beancs-controller
-      hostNetwork: true
-      dnsPolicy: Default
       affinity:
         podAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -114,6 +112,9 @@ rules:
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["networking.k8s.io"]
     resources: ["networkpolicies", "ingresses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["cert-manager.io"]
+    resources: ["issuers"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["argoproj.io"]
     resources: ["applications"]

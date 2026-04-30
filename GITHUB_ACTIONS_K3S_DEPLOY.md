@@ -24,6 +24,14 @@ Optional:
 
 - `BEANCS_DATABASE_URL`: external database URL. If omitted, the workflow points BeanCS at the bundled Postgres service.
 - `GHCR_PAT`: package token for image pulls when `GITHUB_TOKEN` is not enough.
+- `BEANCS_PUBLIC_INGRESS_NAMESPACES`: namespaces that may route public traffic to BeanCS-managed pods, defaults to `kube-system,traefik`.
+- `BEANCS_PRIVATE_INGRESS_NAMESPACES`: namespaces that may route Tailnet-only traffic to BeanCS-managed pods, defaults to `tailscale,tailscale-system`.
+- `BEANCS_CERT_MANAGER_ISSUER_NAME`: project namespace Issuer name for public app certificates, defaults to `beancs-letsencrypt`.
+- `BEANCS_CERT_MANAGER_ACME_SERVER`: ACME directory URL, defaults to Let's Encrypt production.
+- `BEANCS_CERT_MANAGER_EMAIL`: optional ACME account email.
+- `BEANCS_CERT_MANAGER_CLOUDFLARE_SECRET_NAME`: per-project Cloudflare DNS-01 token Secret name, defaults to `beancs-cloudflare-dns01`.
+- `BEANCS_CERT_MANAGER_CLOUDFLARE_SECRET_KEY`: Cloudflare token Secret key, defaults to `api-token`.
+- `BEANCS_CERT_MANAGER_PRIVATE_KEY_SECRET_SUFFIX`: ACME account private key Secret suffix, defaults to `account-key`.
 
 ## Required GitHub Variables
 

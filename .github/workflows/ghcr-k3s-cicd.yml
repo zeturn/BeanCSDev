@@ -160,11 +160,7 @@ jobs:
           DATABASE_URL="${BEANCS_DATABASE_URL}"
           if [ -z "${DATABASE_URL}" ]; then
             ENCODED_POSTGRES_PASSWORD="$(python3 -c 'import os, urllib.parse; print(urllib.parse.quote(os.environ["BEANCS_POSTGRES_PASSWORD"], safe=""))')"
-            POSTGRES_HOST="$(kubectl -n "${NAMESPACE}" get pod -l app=beancs-postgres -o jsonpath='{.items[0].status.podIP}')"
-            if [ -z "${POSTGRES_HOST}" ]; then
-              echo "beancs-postgres pod IP is required"
-              exit 1
-            fi
+            POSTGRES_HOST="beancs-postgres.${NAMESPACE}.svc.cluster.local"
             DATABASE_URL="postgres://beancs:${ENCODED_POSTGRES_PASSWORD}@${POSTGRES_HOST}:5432/beancs?sslmode=disable"
           fi
           kubectl -n "${NAMESPACE}" create secret generic beancs-controller-env \
@@ -178,6 +174,14 @@ jobs:
             --from-literal=WEBHOOK_SECRET="${{ secrets.BEANCS_WEBHOOK_SECRET }}" \
             --from-literal=ENCRYPTION_KEY="${{ secrets.BEANCS_ENCRYPTION_KEY }}" \
             --from-literal=INGRESS_IP="${{ vars.INGRESS_IP }}" \
+            --from-literal=BEANCS_PUBLIC_INGRESS_NAMESPACES="${{ vars.BEANCS_PUBLIC_INGRESS_NAMESPACES || 'kube-system,traefik' }}" \
+            --from-literal=BEANCS_PRIVATE_INGRESS_NAMESPACES="${{ vars.BEANCS_PRIVATE_INGRESS_NAMESPACES || 'tailscale,tailscale-system' }}" \
+            --from-literal=BEANCS_CERT_MANAGER_ISSUER_NAME="${{ vars.BEANCS_CERT_MANAGER_ISSUER_NAME || 'beancs-letsencrypt' }}" \
+            --from-literal=BEANCS_CERT_MANAGER_ACME_SERVER="${{ vars.BEANCS_CERT_MANAGER_ACME_SERVER || 'https://acme-v02.api.letsencrypt.org/directory' }}" \
+            --from-literal=BEANCS_CERT_MANAGER_EMAIL="${{ vars.BEANCS_CERT_MANAGER_EMAIL }}" \
+            --from-literal=BEANCS_CERT_MANAGER_CLOUDFLARE_SECRET_NAME="${{ vars.BEANCS_CERT_MANAGER_CLOUDFLARE_SECRET_NAME || 'beancs-cloudflare-dns01' }}" \
+            --from-literal=BEANCS_CERT_MANAGER_CLOUDFLARE_SECRET_KEY="${{ vars.BEANCS_CERT_MANAGER_CLOUDFLARE_SECRET_KEY || 'api-token' }}" \
+            --from-literal=BEANCS_CERT_MANAGER_PRIVATE_KEY_SECRET_SUFFIX="${{ vars.BEANCS_CERT_MANAGER_PRIVATE_KEY_SECRET_SUFFIX || 'account-key' }}" \
             --from-literal=BEANCS_PUBLIC_HOST="${{ vars.BEANCS_PUBLIC_HOST }}" \
             --from-literal=BEANCS_WEBHOOK_HOST="${{ vars.BEANCS_WEBHOOK_HOST }}" \
             --from-literal=BEANCS_TAILSCALE_HOST="${{ vars.BEANCS_TAILSCALE_HOST || 'beancs-controller' }}" \

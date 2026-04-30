@@ -28,6 +28,16 @@ type Config struct {
 	KubeConfig string `env:"KUBECONFIG"`
 	IngressIP  string `env:"INGRESS_IP" envDefault:"127.0.0.1"`
 
+	PublicIngressNamespaces  string `env:"BEANCS_PUBLIC_INGRESS_NAMESPACES" envDefault:"kube-system,traefik"`
+	PrivateIngressNamespaces string `env:"BEANCS_PRIVATE_INGRESS_NAMESPACES" envDefault:"tailscale,tailscale-system"`
+
+	CertManagerIssuerName             string `env:"BEANCS_CERT_MANAGER_ISSUER_NAME" envDefault:"beancs-letsencrypt"`
+	CertManagerACMEServer             string `env:"BEANCS_CERT_MANAGER_ACME_SERVER" envDefault:"https://acme-v02.api.letsencrypt.org/directory"`
+	CertManagerEmail                  string `env:"BEANCS_CERT_MANAGER_EMAIL"`
+	CertManagerCloudflareSecretName   string `env:"BEANCS_CERT_MANAGER_CLOUDFLARE_SECRET_NAME" envDefault:"beancs-cloudflare-dns01"`
+	CertManagerCloudflareSecretKey    string `env:"BEANCS_CERT_MANAGER_CLOUDFLARE_SECRET_KEY" envDefault:"api-token"`
+	CertManagerPrivateKeySecretSuffix string `env:"BEANCS_CERT_MANAGER_PRIVATE_KEY_SECRET_SUFFIX" envDefault:"account-key"`
+
 	ControllerNamespace string `env:"POD_NAMESPACE" envDefault:"beancs-system"`
 	ControllerName      string `env:"BEANCS_CONTROLLER_NAME" envDefault:"beancs-controller"`
 	SelfManageIngress   bool   `env:"BEANCS_SELF_MANAGE_INGRESS" envDefault:"true"`

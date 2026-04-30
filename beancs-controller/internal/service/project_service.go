@@ -181,6 +181,12 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 		rollback()
 		return nil, err
 	}
+	if hasPublicPorts(project.Ports) {
+		if err := s.k8s.ApplyProjectCertificateIssuer(ctx, project.Namespace, project.Name, cfToken); err != nil {
+			rollback()
+			return nil, err
+		}
+	}
 
 	dnsRecords := []model.DNSRecord{}
 	for _, p := range project.Ports {
@@ -424,6 +430,15 @@ func firstRoutableDomain(ports model.ProjectPorts) string {
 		}
 	}
 	return ""
+}
+
+func hasPublicPorts(ports model.ProjectPorts) bool {
+	for _, p := range ports {
+		if p.Exposure == model.ExposurePublic {
+			return true
+		}
+	}
+	return false
 }
 
 func projectHome(p *model.Project) string {
