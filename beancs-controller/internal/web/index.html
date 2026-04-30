@@ -191,6 +191,39 @@
         color: var(--ink);
       }
 
+      .credential-panel {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #ffffff;
+        padding: 14px;
+        margin-bottom: 14px;
+      }
+
+      .form-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(150px, 1fr));
+        gap: 10px;
+      }
+
+      .form-grid input {
+        min-height: 38px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 0 10px;
+        background: #ffffff;
+        color: var(--ink);
+      }
+
+      .form-grid .wide {
+        grid-column: span 2;
+      }
+
+      .form-actions {
+        display: flex;
+        justify-content: flex-end;
+        margin-top: 10px;
+      }
+
       .table-wrap {
         overflow: auto;
         border: 1px solid var(--line);
@@ -332,6 +365,14 @@
           grid-template-columns: repeat(2, minmax(0, 1fr));
         }
 
+        .form-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .form-grid .wide {
+          grid-column: auto;
+        }
+
         .actions {
           justify-content: flex-start;
         }
@@ -356,6 +397,8 @@
         <button class="nav-item" type="button" data-resource="deployments"><span class="dot"></span><span>Deployments</span></button>
         <button class="nav-item" type="button" data-resource="services"><span class="dot"></span><span>Services</span></button>
         <button class="nav-item" type="button" data-resource="ingresses"><span class="dot"></span><span>Ingresses</span></button>
+        <button class="nav-item" type="button" data-resource="github_credentials"><span class="dot"></span><span>GitHub Keys</span></button>
+        <button class="nav-item" type="button" data-resource="cloudflare_credentials"><span class="dot"></span><span>Cloudflare Keys</span></button>
       </aside>
 
       <main class="main">
@@ -385,6 +428,33 @@
           <input id="filterInput" class="search" type="search" placeholder="Filter resources" />
         </div>
 
+        <div id="credentialPanel" class="credential-panel hidden">
+          <form id="githubForm" class="hidden">
+            <div class="form-grid">
+              <input name="name" placeholder="Credential name" required />
+              <input name="org" placeholder="GitHub org or user" />
+              <input name="gitops_repo" class="wide" placeholder="GitOps repo, e.g. zeturn/gitops" required />
+              <input name="token" class="wide" type="password" placeholder="GitHub token" required />
+            </div>
+            <div class="form-actions">
+              <button class="button primary" type="submit">Add GitHub key</button>
+            </div>
+          </form>
+
+          <form id="cloudflareForm" class="hidden">
+            <div class="form-grid">
+              <input name="name" placeholder="Credential name" required />
+              <input name="domain" placeholder="Domain, e.g. hollowdata.com" required />
+              <input name="zone_id" class="wide" placeholder="Cloudflare zone ID" required />
+              <input name="account_id" placeholder="Account ID" />
+              <input name="api_token" class="wide" type="password" placeholder="Cloudflare API token" required />
+            </div>
+            <div class="form-actions">
+              <button class="button primary" type="submit">Add Cloudflare key</button>
+            </div>
+          </form>
+        </div>
+
         <div class="table-wrap">
           <table>
             <thead id="resourceHead"></thead>
@@ -398,6 +468,10 @@
       const state = {
         config: null,
         view: "namespaces",
+        credentials: {
+          github_credentials: [],
+          cloudflare_credentials: [],
+        },
         runtime: emptyRuntime(),
         token: localStorage.getItem("beancs.accessToken") || "",
       };
@@ -410,6 +484,9 @@
       const filterInput = document.getElementById("filterInput");
       const resourceHead = document.getElementById("resourceHead");
       const resourceRows = document.getElementById("resourceRows");
+      const credentialPanel = document.getElementById("credentialPanel");
+      const githubForm = document.getElementById("githubForm");
+      const cloudflareForm = document.getElementById("cloudflareForm");
       const viewTitle = document.getElementById("viewTitle");
       const summary = document.getElementById("summary");
       const notice = document.getElementById("notice");
@@ -422,13 +499,16 @@
 
       loginButton.addEventListener("click", startLogin);
       logoutButton.addEventListener("click", logout);
-      refreshButton.addEventListener("click", loadRuntime);
-      filterInput.addEventListener("input", renderRuntime);
+      refreshButton.addEventListener("click", loadCurrentView);
+      filterInput.addEventListener("input", renderCurrentView);
+      githubForm.addEventListener("submit", (event) => createCredential(event, "github"));
+      cloudflareForm.addEventListener("submit", (event) => createCredential(event, "cloudflare"));
+      resourceRows.addEventListener("click", handleTableAction);
       document.querySelectorAll(".nav-item[data-resource]").forEach((button) => {
         button.addEventListener("click", () => {
           state.view = button.dataset.resource;
           filterInput.value = "";
-          renderRuntime();
+          loadCurrentView();
         });
       });
 
@@ -539,6 +619,45 @@
             </tr>
           `,
         },
+        github_credentials: {
+          title: "GitHub Keys",
+          label: "GitHub key",
+          columns: ["Name", "Org", "GitOps repo", "Active", "Created", "Actions"],
+          search: (cred) => `${cred.name || ""} ${cred.org || ""} ${cred.gitops_repo || ""}`.toLowerCase(),
+          row: (cred) => `
+            <tr>
+              <td class="name">${escapeHTML(cred.name)}</td>
+              <td>${escapeHTML(cred.org || "-")}</td>
+              <td>${escapeHTML(cred.gitops_repo || "-")}</td>
+              <td>${statusPill(cred.is_active ? "Active" : "Inactive", Boolean(cred.is_active))}</td>
+              <td>${formatDate(cred.created_at)}</td>
+              <td>
+                <button class="button" type="button" data-action="verify" data-kind="github" data-id="${Number(cred.id)}">Verify</button>
+                <button class="button" type="button" data-action="delete" data-kind="github" data-id="${Number(cred.id)}">Delete</button>
+              </td>
+            </tr>
+          `,
+        },
+        cloudflare_credentials: {
+          title: "Cloudflare Keys",
+          label: "Cloudflare key",
+          columns: ["Name", "Domain", "Zone ID", "Account", "Active", "Created", "Actions"],
+          search: (cred) => `${cred.name || ""} ${cred.domain || ""} ${cred.zone_id || ""} ${cred.account_id || ""}`.toLowerCase(),
+          row: (cred) => `
+            <tr>
+              <td class="name">${escapeHTML(cred.name)}</td>
+              <td>${escapeHTML(cred.domain || "-")}</td>
+              <td>${escapeHTML(cred.zone_id || "-")}</td>
+              <td>${escapeHTML(cred.account_id || "-")}</td>
+              <td>${statusPill(cred.is_active ? "Active" : "Inactive", Boolean(cred.is_active))}</td>
+              <td>${formatDate(cred.created_at)}</td>
+              <td>
+                <button class="button" type="button" data-action="verify" data-kind="cloudflare" data-id="${Number(cred.id)}">Verify</button>
+                <button class="button" type="button" data-action="delete" data-kind="cloudflare" data-id="${Number(cred.id)}">Delete</button>
+              </td>
+            </tr>
+          `,
+        },
       };
 
       boot();
@@ -552,7 +671,7 @@
           }
           setView(Boolean(state.token));
           if (state.token) {
-            await loadRuntime();
+            await loadCurrentView();
           }
         } catch (err) {
           showError(err.message);
@@ -626,7 +745,7 @@
         try {
           const data = await apiJSON("/api/v1/runtime/overview");
           state.runtime = normalizeRuntime(data.data);
-          renderRuntime();
+          renderCurrentView();
         } catch (err) {
           if (err.status === 401) {
             logout();
@@ -638,10 +757,40 @@
         }
       }
 
-      function renderRuntime() {
+      async function loadCredentials(kind) {
+        refreshButton.disabled = true;
+        clearNotice();
+        try {
+          const data = await apiJSON(`/api/v1/credentials/${kind}/`);
+          state.credentials[`${kind}_credentials`] = data.data || [];
+          renderCurrentView();
+        } catch (err) {
+          if (err.status === 401) {
+            logout();
+            return;
+          }
+          showError(err.message);
+        } finally {
+          refreshButton.disabled = false;
+        }
+      }
+
+      async function loadCurrentView() {
+        if (state.view === "github_credentials") {
+          await loadCredentials("github");
+          return;
+        }
+        if (state.view === "cloudflare_credentials") {
+          await loadCredentials("cloudflare");
+          return;
+        }
+        await loadRuntime();
+      }
+
+      function renderCurrentView() {
         const meta = resourceMeta[state.view] || resourceMeta.namespaces;
         const query = filterInput.value.trim().toLowerCase();
-        const allRows = state.runtime[state.view] || [];
+        const allRows = viewRows(state.view);
         const rows = allRows.filter((item) => !query || meta.search(item).includes(query));
         viewTitle.textContent = meta.title;
         filterInput.placeholder = `Filter ${meta.title.toLowerCase()}`;
@@ -650,6 +799,7 @@
           button.classList.toggle("active", button.dataset.resource === state.view);
         });
         updateStats();
+        renderCredentialPanel();
         resourceHead.innerHTML = `<tr>${meta.columns.map((column) => `<th>${escapeHTML(column)}</th>`).join("")}</tr>`;
         resourceRows.innerHTML = rows.length
           ? rows.map(meta.row).join("")
@@ -663,6 +813,63 @@
         setView(false);
       }
 
+      function viewRows(view) {
+        if (view === "github_credentials" || view === "cloudflare_credentials") {
+          return state.credentials[view] || [];
+        }
+        return state.runtime[view] || [];
+      }
+
+      function renderCredentialPanel() {
+        const isGitHub = state.view === "github_credentials";
+        const isCloudflare = state.view === "cloudflare_credentials";
+        credentialPanel.classList.toggle("hidden", !isGitHub && !isCloudflare);
+        githubForm.classList.toggle("hidden", !isGitHub);
+        cloudflareForm.classList.toggle("hidden", !isCloudflare);
+      }
+
+      async function createCredential(event, kind) {
+        event.preventDefault();
+        clearNotice();
+        const form = event.currentTarget;
+        const body = Object.fromEntries(new FormData(form).entries());
+        Object.keys(body).forEach((key) => {
+          if (typeof body[key] === "string") body[key] = body[key].trim();
+          if (body[key] === "") delete body[key];
+        });
+        try {
+          await apiJSON(`/api/v1/credentials/${kind}/`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify(body),
+          });
+          form.reset();
+          await loadCredentials(kind);
+        } catch (err) {
+          showError(err.message);
+        }
+      }
+
+      async function handleTableAction(event) {
+        const button = event.target.closest("button[data-action]");
+        if (!button) return;
+        const kind = button.dataset.kind;
+        const id = button.dataset.id;
+        clearNotice();
+        try {
+          if (button.dataset.action === "verify") {
+            await apiJSON(`/api/v1/credentials/${kind}/${id}/verify`);
+            showInfo(`${kindLabel(kind)} credential verified.`);
+          } else if (button.dataset.action === "delete") {
+            if (!confirm(`Delete this ${kindLabel(kind)} credential?`)) return;
+            await apiJSON(`/api/v1/credentials/${kind}/${id}`, {method: "DELETE"});
+            await loadCredentials(kind);
+          }
+        } catch (err) {
+          showError(err.message);
+        }
+      }
+
       function emptyRuntime() {
         return {
           namespaces: [],
@@ -672,6 +879,10 @@
           services: [],
           ingresses: [],
         };
+      }
+
+      function kindLabel(kind) {
+        return kind === "cloudflare" ? "Cloudflare" : "GitHub";
       }
 
       function normalizeRuntime(data) {
@@ -708,8 +919,9 @@
         return data;
       }
 
-      async function apiJSON(url) {
-        const res = await fetch(url, {headers: {Authorization: `Bearer ${state.token}`}});
+      async function apiJSON(url, options = {}) {
+        const headers = Object.assign({}, options.headers || {}, {Authorization: `Bearer ${state.token}`});
+        const res = await fetch(url, Object.assign({}, options, {headers}));
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
           const err = new Error(data.error || `Request failed with ${res.status}`);
@@ -740,6 +952,11 @@
       function showError(message) {
         notice.textContent = message;
         notice.className = "notice error show";
+      }
+
+      function showInfo(message) {
+        notice.textContent = message;
+        notice.className = "notice show";
       }
 
       function clearNotice() {
