@@ -23,6 +23,7 @@ func NewProjectHandler(db *gorm.DB, svc *service.ProjectService, k8sManager *k8s
 }
 
 func (h *ProjectHandler) Register(r fiber.Router) {
+	r.Post("/projects/analyze", h.analyze)
 	r.Post("/projects", h.create)
 	r.Get("/projects", h.list)
 	r.Get("/projects/:id", middleware.ProjectAccess(h.db), h.get)
@@ -32,6 +33,18 @@ func (h *ProjectHandler) Register(r fiber.Router) {
 	r.Put("/projects/:id/env", middleware.ProjectOwner(h.db), h.setEnv)
 	r.Patch("/projects/:id/env", middleware.ProjectOwner(h.db), h.patchEnv)
 	r.Get("/projects/:id/dns", middleware.ProjectAccess(h.db), h.dns)
+}
+
+func (h *ProjectHandler) analyze(c *fiber.Ctx) error {
+	var req dto.AnalyzeProjectRepositoryRequest
+	if err := h.parseAndValidate(c, &req); err != nil {
+		return err
+	}
+	out, err := h.service.AnalyzeRepository(c.UserContext(), middleware.UserID(c), req)
+	if err != nil {
+		return fail(c, 400, err)
+	}
+	return c.JSON(out)
 }
 
 func (h *ProjectHandler) create(c *fiber.Ctx) error {

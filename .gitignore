@@ -26,3 +26,7 @@ Thumbs.db
 *.log
 tmp/
 *.tmp
+
+# Frontend dependencies
+node_modules/
+beancs-controller/internal/web/dist/

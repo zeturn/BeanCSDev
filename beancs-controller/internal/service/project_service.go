@@ -2,9 +2,14 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/zeturn/beancs-controller/internal/basaltpass"
 	cryptoutil "github.com/zeturn/beancs-controller/internal/crypto"
@@ -29,6 +34,65 @@ type ProjectService struct {
 
 func NewProjectService(db *gorm.DB, credentials *CredentialService, quota *QuotaService, dns *DNSService, gitops *GitOpsService, k8sManager *k8s.Manager, registry *basaltpass.ClientRegistry, cipher cryptoutil.Cipher) *ProjectService {
 	return &ProjectService{db: db, credentials: credentials, quota: quota, dns: dns, gitops: gitops, k8s: k8sManager, registry: registry, cipher: cipher}
+}
+
+func (s *ProjectService) AnalyzeRepository(ctx context.Context, userID string, req dto.AnalyzeProjectRepositoryRequest) (*dto.AnalyzeProjectRepositoryResponse, error) {
+	if err := s.credentials.RequireAccess(userID, model.CredentialTypeGitHub, req.GitHubCredentialID, false); err != nil {
+		return nil, err
+	}
+	var ghCred model.GitHubCredential
+	if err := s.db.WithContext(ctx).First(&ghCred, req.GitHubCredentialID).Error; err != nil {
+		return nil, err
+	}
+	token, err := s.credentials.GitHubToken(ctx, ghCred)
+	if err != nil {
+		return nil, err
+	}
+	owner, repo, ok := splitRepo(req.GitHubRepo)
+	if !ok {
+		return nil, fmt.Errorf("github_repo must be in owner/repo format")
+	}
+	branch := strings.TrimSpace(req.GitHubBranch)
+	if branch == "" {
+		branch = "main"
+	}
+
+	out := &dto.AnalyzeProjectRepositoryResponse{DefaultPort: 8080}
+	for _, candidate := range []string{"Dockerfile", "dockerfile", "Containerfile"} {
+		exists, err := githubContentExists(ctx, token, owner, repo, candidate, branch)
+		if err != nil {
+			return nil, err
+		}
+		if exists {
+			out.Deployable = true
+			out.Containerized = true
+			out.DockerfilePath = candidate
+			out.Signals = append(out.Signals, candidate+" found")
+			break
+		}
+	}
+	for _, candidate := range []string{"compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml"} {
+		exists, err := githubContentExists(ctx, token, owner, repo, candidate, branch)
+		if err != nil {
+			return nil, err
+		}
+		if exists {
+			out.Signals = append(out.Signals, candidate+" found")
+		}
+	}
+	for _, candidate := range []string{"package.json", "go.mod", "pyproject.toml", "requirements.txt", "Cargo.toml"} {
+		exists, err := githubContentExists(ctx, token, owner, repo, candidate, branch)
+		if err != nil {
+			return nil, err
+		}
+		if exists {
+			out.Signals = append(out.Signals, candidate+" found")
+		}
+	}
+	if !out.Containerized {
+		out.Warnings = append(out.Warnings, "No Dockerfile or Containerfile was found at the repository root.")
+	}
+	return out, nil
 }
 
 func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID string, req dto.CreateProjectRequest) (*model.Project, error) {
@@ -453,4 +517,34 @@ func coalesce(v, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func githubContentExists(ctx context.Context, token, owner, repo, filePath, ref string) (bool, error) {
+	endpoint := fmt.Sprintf("https://api.github.com/repos/%s/%s/contents/%s?ref=%s", url.PathEscape(owner), url.PathEscape(repo), strings.TrimLeft(filePath, "/"), url.QueryEscape(ref))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return false, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode == http.StatusNotFound {
+		return false, nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return false, fmt.Errorf("GitHub content check failed: %s", strings.TrimSpace(string(body)))
+	}
+	var payload struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return false, fmt.Errorf("GitHub returned invalid JSON")
+	}
+	return payload.Type == "file", nil
 }

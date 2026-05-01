@@ -22,6 +22,21 @@ type CreateProjectRequest struct {
 	Env                    map[string]string  `json:"env" validate:"omitempty"`
 }
 
+type AnalyzeProjectRepositoryRequest struct {
+	GitHubCredentialID uint   `json:"github_credential_id" validate:"required"`
+	GitHubRepo         string `json:"github_repo" validate:"required,max=256"`
+	GitHubBranch       string `json:"github_branch" validate:"omitempty,max=128"`
+}
+
+type AnalyzeProjectRepositoryResponse struct {
+	Deployable     bool     `json:"deployable"`
+	Containerized  bool     `json:"containerized"`
+	DockerfilePath string   `json:"dockerfile_path,omitempty"`
+	DefaultPort    int      `json:"default_port"`
+	Signals        []string `json:"signals"`
+	Warnings       []string `json:"warnings"`
+}
+
 type UpdateProjectRequest struct {
 	DisplayName    *string `json:"display_name" validate:"omitempty,max=256"`
 	Description    *string `json:"description" validate:"omitempty,max=2000"`
