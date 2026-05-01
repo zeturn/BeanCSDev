@@ -29,12 +29,18 @@ jobs:
         run: |
           set -x
           kubectl get nodes -o wide
+          kubectl get events -A --sort-by=.lastTimestamp | tail -200 || true
           kubectl get ingressclass -o wide || true
           kubectl get ingressclass -o yaml || true
           kubectl get ingress -A -o wide || true
           kubectl get ingressroute -A -o wide || true
           kubectl -n "${NAMESPACE}" get pods -o wide
           kubectl -n "${NAMESPACE}" get svc,endpoints,ingress,networkpolicy -o wide
+          kubectl -n "${NAMESPACE}" get events --sort-by=.lastTimestamp || true
+          kubectl -n "${NAMESPACE}" describe deployment beancs-controller || true
+          kubectl -n "${NAMESPACE}" describe statefulset beancs-postgres || true
+          kubectl -n "${NAMESPACE}" describe pods -l app=beancs-controller || true
+          kubectl -n "${NAMESPACE}" describe pods -l app=beancs-postgres || true
           kubectl -n "${NAMESPACE}" get ingress -o yaml || true
           kubectl -n "${NAMESPACE}" describe svc beancs-controller || true
           kubectl -n "${NAMESPACE}" describe endpoints beancs-controller || true
@@ -61,3 +67,15 @@ jobs:
           kubectl -n kube-system logs -l app.kubernetes.io/name=traefik --tail=200 || true
           kubectl -n traefik logs -l app.kubernetes.io/name=traefik --tail=200 || true
           kubectl -n traefik logs -l app=traefik --tail=200 || true
+
+      - name: Recent BeanCS logs
+        shell: bash
+        run: |
+          kubectl -n "${NAMESPACE}" logs deployment/beancs-controller --tail=300 || true
+          kubectl -n "${NAMESPACE}" logs statefulset/beancs-postgres --tail=300 || true
+          for pod in $(kubectl -n "${NAMESPACE}" get pods -l app=beancs-controller -o name); do
+            kubectl -n "${NAMESPACE}" logs "${pod}" --previous --tail=200 || true
+          done
+          for pod in $(kubectl -n "${NAMESPACE}" get pods -l app=beancs-postgres -o name); do
+            kubectl -n "${NAMESPACE}" logs "${pod}" --previous --tail=200 || true
+          done

@@ -19,5 +19,23 @@ func AutoMigrate(db *gorm.DB) error {
 	); err != nil {
 		return err
 	}
-	return db.Exec("ALTER TABLE git_hub_credentials ALTER COLUMN token_enc DROP NOT NULL").Error
+	if err := db.Exec("ALTER TABLE git_hub_credentials ALTER COLUMN token_enc DROP NOT NULL").Error; err != nil {
+		return err
+	}
+	if err := db.Exec("ALTER TABLE git_hub_credentials ALTER COLUMN git_ops_repo DROP NOT NULL").Error; err != nil {
+		return err
+	}
+	if err := db.Exec("ALTER TABLE cloudflare_credentials ALTER COLUMN zone_id DROP NOT NULL").Error; err != nil {
+		return err
+	}
+	if err := db.Exec("ALTER TABLE cloudflare_credentials ALTER COLUMN domain DROP NOT NULL").Error; err != nil {
+		return err
+	}
+	if err := db.Exec("ALTER TABLE projects ALTER COLUMN basalt_pass_instance_id DROP NOT NULL").Error; err != nil {
+		return err
+	}
+	if err := db.Exec("ALTER TABLE projects ALTER COLUMN git_hub_credential_id DROP NOT NULL").Error; err != nil {
+		return err
+	}
+	return db.Exec("ALTER TABLE projects ALTER COLUMN git_hub_repo DROP NOT NULL").Error
 }

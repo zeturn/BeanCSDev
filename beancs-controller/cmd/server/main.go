@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"os"
@@ -80,9 +81,68 @@ func main() {
 	app.Use(logger.New())
 	app.Use(cors.New(cors.Config{AllowOrigins: cfg.CORSOrigins}))
 
-	api := app.Group("/api/v1")
+	registerAPI(app.Group("/v1/api"), cfg, db, registry, credentialSvc, projectSvc, deploymentSvc, k8sManager, v)
+	registerAPI(app.Group("/api/v1"), cfg, db, registry, credentialSvc, projectSvc, deploymentSvc, k8sManager, v)
+
+	app.Get("/assets/*", serveAsset)
+	app.Get("/", serveIndex)
+	app.Get("/*", func(c *fiber.Ctx) error {
+		if strings.HasPrefix(c.Path(), "/api/") || strings.HasPrefix(c.Path(), "/v1/api/") {
+			return fiber.ErrNotFound
+		}
+		return serveIndex(c)
+	})
+	if cfg.SelfManageIngress {
+		go func() {
+			reconcileCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := k8sManager.ApplyControllerAccess(reconcileCtx, k8s.ControllerAccessOptions{
+				Namespace:     cfg.ControllerNamespace,
+				Name:          cfg.ControllerName,
+				ServicePort:   cfg.SelfServicePort,
+				PublicHost:    cfg.SelfPublicHost,
+				TailscaleHost: cfg.SelfTailscaleHost,
+				WebhookHost:   cfg.SelfWebhookHost,
+			}); err != nil {
+				log.Warn("self access reconcile failed", zap.Error(err))
+				return
+			}
+			log.Info("self access reconciled")
+		}()
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = app.ShutdownWithContext(shutdownCtx)
+	}()
+	log.Info("starting beancs controller", zap.String("port", cfg.Port), zap.String("version", cfg.Version))
+	if err := app.Listen(":" + cfg.Port); err != nil && !strings.Contains(strings.ToLower(err.Error()), "server closed") {
+		log.Fatal("listen", zap.Error(err))
+	}
+}
+
+func registerAPI(api fiber.Router, cfg *config.Config, db *gorm.DB, registry *basaltpass.ClientRegistry, credentialSvc *service.CredentialService, projectSvc *service.ProjectService, deploymentSvc *service.DeploymentService, k8sManager *k8s.Manager, v *validator.Validate) {
 	api.Get("/health", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{"status": "ok", "version": cfg.Version})
+	})
+	api.Get("/ready", func(c *fiber.Ctx) error {
+		return c.JSON(fiber.Map{"status": "ready", "version": cfg.Version})
+	})
+	api.Get("/db-ready", func(c *fiber.Ctx) error {
+		sqlDB, err := db.DB()
+		if err != nil {
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"status": "unavailable", "error": "database handle unavailable"})
+		}
+		ctx, cancel := context.WithTimeout(c.UserContext(), 2*time.Second)
+		defer cancel()
+		if err := sqlDB.PingContext(ctx); err != nil {
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"status": "unavailable", "error": "database unavailable"})
+		}
+		return c.JSON(fiber.Map{"status": "ready", "database": "ok", "version": cfg.Version})
 	})
 	api.Get("/version", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{"version": cfg.Version})
@@ -121,57 +181,19 @@ func main() {
 	handler.NewRuntimeHandler(db, k8sManager, v).Register(secured)
 	secured.Use("/admin", middleware.RequireScope("beancs.admin"))
 	handler.NewAdminHandler(db, k8sManager, v).Register(secured)
-
-	app.Get("/", serveIndex)
-	app.Get("/*", func(c *fiber.Ctx) error {
-		if strings.HasPrefix(c.Path(), "/api/") {
-			return fiber.ErrNotFound
-		}
-		return serveIndex(c)
-	})
-	if cfg.SelfManageIngress {
-		go func() {
-			reconcileCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			if err := k8sManager.ApplyControllerAccess(reconcileCtx, k8s.ControllerAccessOptions{
-				Namespace:     cfg.ControllerNamespace,
-				Name:          cfg.ControllerName,
-				ServicePort:   cfg.SelfServicePort,
-				PublicHost:    cfg.SelfPublicHost,
-				TailscaleHost: cfg.SelfTailscaleHost,
-				WebhookHost:   cfg.SelfWebhookHost,
-			}); err != nil {
-				log.Warn("self access reconcile failed", zap.Error(err))
-				return
-			}
-			log.Info("self access reconciled")
-		}()
-	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	go func() {
-		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		_ = app.ShutdownWithContext(shutdownCtx)
-	}()
-	log.Info("starting beancs controller", zap.String("port", cfg.Port), zap.String("version", cfg.Version))
-	if err := app.Listen(":" + cfg.Port); err != nil && !strings.Contains(strings.ToLower(err.Error()), "server closed") {
-		log.Fatal("listen", zap.Error(err))
-	}
 }
 
 func openDatabase(log *zap.Logger, databaseURL string) (*gorm.DB, error) {
-	dsn := databaseURLWithConnectTimeout(databaseURL, "5")
-	deadline := time.Now().Add(2 * time.Minute)
+	dsn := databaseURLWithConnectTimeout(databaseURL, "15")
+	deadline := time.Now().Add(5 * time.Minute)
 	var lastErr error
 	for {
 		db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 		if err == nil {
 			sqlDB, sqlErr := db.DB()
 			if sqlErr == nil {
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				configureDatabasePool(sqlDB)
+				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 				sqlErr = sqlDB.PingContext(ctx)
 				cancel()
 			}
@@ -193,6 +215,20 @@ func openDatabase(log *zap.Logger, databaseURL string) (*gorm.DB, error) {
 	}
 }
 
+type databasePool interface {
+	SetMaxOpenConns(int)
+	SetMaxIdleConns(int)
+	SetConnMaxLifetime(time.Duration)
+	SetConnMaxIdleTime(time.Duration)
+}
+
+func configureDatabasePool(db databasePool) {
+	db.SetMaxOpenConns(10)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(30 * time.Minute)
+	db.SetConnMaxIdleTime(5 * time.Minute)
+}
+
 func databaseURLWithConnectTimeout(databaseURL, timeout string) string {
 	u, err := url.Parse(databaseURL)
 	if err != nil || u.Scheme == "" {
@@ -208,7 +244,30 @@ func databaseURLWithConnectTimeout(databaseURL, timeout string) string {
 
 func serveIndex(c *fiber.Ctx) error {
 	c.Type("html", "utf-8")
-	return c.SendString(web.IndexHTML())
+	body, err := web.IndexHTML()
+	if err != nil {
+		return err
+	}
+	return c.Send(body)
+}
+
+func serveAsset(c *fiber.Ctx) error {
+	path := strings.TrimPrefix(c.Path(), "/")
+	body, err := web.Asset(path)
+	if err != nil {
+		return fiber.ErrNotFound
+	}
+	if typ := mime.TypeByExtension(urlPathExt(path)); typ != "" {
+		c.Set(fiber.HeaderContentType, typ)
+	}
+	return c.Send(body)
+}
+
+func urlPathExt(path string) string {
+	if idx := strings.LastIndex(path, "."); idx >= 0 {
+		return path[idx:]
+	}
+	return ""
 }
 
 func exchangeBrowserToken(c *fiber.Ctx, cfg *config.Config) error {

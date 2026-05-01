@@ -81,6 +81,48 @@ type IngressSummary struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
+type ProjectRuntimeStatus struct {
+	Deployment *ProjectDeploymentStatus `json:"deployment,omitempty"`
+	Pods       []ProjectPodStatus       `json:"pods"`
+	Services   []ServiceSummary         `json:"services"`
+	Ingresses  []IngressSummary         `json:"ingresses"`
+	Events     []EventSummary           `json:"events"`
+}
+
+type ProjectDeploymentStatus struct {
+	Name              string    `json:"name"`
+	ReadyReplicas     int32     `json:"ready_replicas"`
+	AvailableReplicas int32     `json:"available_replicas"`
+	Replicas          int32     `json:"replicas"`
+	UpdatedReplicas   int32     `json:"updated_replicas"`
+	Conditions        []string  `json:"conditions"`
+	CreatedAt         time.Time `json:"created_at"`
+}
+
+type ProjectPodStatus struct {
+	Name            string    `json:"name"`
+	Status          string    `json:"status"`
+	ReadyContainers int       `json:"ready_containers"`
+	TotalContainers int       `json:"total_containers"`
+	Restarts        int32     `json:"restarts"`
+	NodeName        string    `json:"node_name,omitempty"`
+	PodIP           string    `json:"pod_ip,omitempty"`
+	Reason          string    `json:"reason,omitempty"`
+	Message         string    `json:"message,omitempty"`
+	Containers      []string  `json:"containers"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+type EventSummary struct {
+	Type      string    `json:"type"`
+	Reason    string    `json:"reason"`
+	Message   string    `json:"message"`
+	Object    string    `json:"object"`
+	Count     int32     `json:"count"`
+	LastSeen  time.Time `json:"last_seen"`
+	FirstSeen time.Time `json:"first_seen"`
+}
+
 func (m *Manager) PodStatus(ctx context.Context, namespace, projectName string) ([]corev1.Pod, error) {
 	if err := m.ensure(); err != nil {
 		return nil, err
@@ -90,6 +132,87 @@ func (m *Manager) PodStatus(ctx context.Context, namespace, projectName string) 
 		return nil, err
 	}
 	return list.Items, nil
+}
+
+func (m *Manager) ProjectRuntimeStatus(ctx context.Context, namespace, projectName string) (*ProjectRuntimeStatus, error) {
+	if err := m.ensure(); err != nil {
+		return nil, err
+	}
+	out := &ProjectRuntimeStatus{Pods: []ProjectPodStatus{}, Services: []ServiceSummary{}, Ingresses: []IngressSummary{}, Events: []EventSummary{}}
+
+	if deploy, err := m.Clientset.AppsV1().Deployments(namespace).Get(ctx, projectName, metav1.GetOptions{}); err == nil {
+		out.Deployment = projectDeploymentStatus(*deploy)
+	}
+
+	pods, err := m.PodStatus(ctx, namespace, projectName)
+	if err != nil {
+		return nil, err
+	}
+	for _, pod := range pods {
+		out.Pods = append(out.Pods, projectPodStatus(pod))
+	}
+
+	services, err := m.Clientset.CoreV1().Services(namespace).List(ctx, metav1.ListOptions{LabelSelector: "app=" + projectName + ",managed-by=beancs"})
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	for _, svc := range services.Items {
+		created := svc.CreationTimestamp.Time
+		out.Services = append(out.Services, ServiceSummary{
+			Namespace:  svc.Namespace,
+			Name:       svc.Name,
+			Type:       string(svc.Spec.Type),
+			ClusterIP:  serviceClusterIP(svc),
+			ExternalIP: serviceExternalIP(svc),
+			Ports:      servicePorts(svc),
+			AgeSeconds: int64(now.Sub(created).Seconds()),
+			CreatedAt:  created,
+		})
+	}
+
+	ingresses, err := m.Clientset.NetworkingV1().Ingresses(namespace).List(ctx, metav1.ListOptions{LabelSelector: "app=" + projectName + ",managed-by=beancs"})
+	if err != nil {
+		return nil, err
+	}
+	for _, ing := range ingresses.Items {
+		created := ing.CreationTimestamp.Time
+		out.Ingresses = append(out.Ingresses, IngressSummary{
+			Namespace:  ing.Namespace,
+			Name:       ing.Name,
+			Class:      ingressClass(ing),
+			Hosts:      ingressHosts(ing),
+			Address:    ingressAddress(ing),
+			TLS:        len(ing.Spec.TLS) > 0,
+			AgeSeconds: int64(now.Sub(created).Seconds()),
+			CreatedAt:  created,
+		})
+	}
+
+	events, err := m.Clientset.CoreV1().Events(namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	for _, event := range events.Items {
+		if event.InvolvedObject.Name != projectName && !strings.HasPrefix(event.InvolvedObject.Name, projectName+"-") {
+			continue
+		}
+		out.Events = append(out.Events, EventSummary{
+			Type:      event.Type,
+			Reason:    event.Reason,
+			Message:   event.Message,
+			Object:    event.InvolvedObject.Kind + "/" + event.InvolvedObject.Name,
+			Count:     event.Count,
+			LastSeen:  event.LastTimestamp.Time,
+			FirstSeen: event.FirstTimestamp.Time,
+		})
+	}
+	sort.Slice(out.Events, func(i, j int) bool { return out.Events[i].LastSeen.After(out.Events[j].LastSeen) })
+	if len(out.Events) > 20 {
+		out.Events = out.Events[:20]
+	}
+
+	return out, nil
 }
 
 func (m *Manager) RuntimeOverview(ctx context.Context) (*RuntimeOverview, error) {
@@ -143,15 +266,33 @@ func (m *Manager) Logs(ctx context.Context, namespace, projectName string, tail 
 	if len(pods) == 0 {
 		return "", nil
 	}
-	req := m.Clientset.CoreV1().Pods(namespace).GetLogs(pods[0].Name, &corev1.PodLogOptions{TailLines: &tail})
-	stream, err := req.Stream(ctx)
-	if err != nil {
-		return "", err
-	}
-	defer stream.Close()
 	var buf bytes.Buffer
-	_, err = io.Copy(&buf, stream)
-	return buf.String(), err
+	for _, pod := range pods {
+		for _, container := range pod.Spec.Containers {
+			buf.WriteString("==> ")
+			buf.WriteString(pod.Name)
+			buf.WriteString("/")
+			buf.WriteString(container.Name)
+			buf.WriteString(" <==\n")
+			req := m.Clientset.CoreV1().Pods(namespace).GetLogs(pod.Name, &corev1.PodLogOptions{Container: container.Name, TailLines: &tail, Timestamps: true})
+			stream, err := req.Stream(ctx)
+			if err != nil {
+				buf.WriteString("log stream unavailable: ")
+				buf.WriteString(err.Error())
+				buf.WriteString("\n")
+				continue
+			}
+			_, err = io.Copy(&buf, stream)
+			_ = stream.Close()
+			if err != nil {
+				buf.WriteString("log read failed: ")
+				buf.WriteString(err.Error())
+				buf.WriteString("\n")
+			}
+			buf.WriteString("\n")
+		}
+	}
+	return buf.String(), nil
 }
 
 func (m *Manager) Nodes(ctx context.Context) ([]corev1.Node, error) {
@@ -333,6 +474,70 @@ func podContainerTotals(pod corev1.Pod) (int, int, int32) {
 		restarts += status.RestartCount
 	}
 	return ready, len(pod.Spec.Containers), restarts
+}
+
+func projectDeploymentStatus(deploy appsv1.Deployment) *ProjectDeploymentStatus {
+	conditions := make([]string, 0, len(deploy.Status.Conditions))
+	for _, condition := range deploy.Status.Conditions {
+		conditions = append(conditions, fmt.Sprintf("%s=%s:%s", condition.Type, condition.Status, condition.Reason))
+	}
+	return &ProjectDeploymentStatus{
+		Name:              deploy.Name,
+		ReadyReplicas:     deploy.Status.ReadyReplicas,
+		AvailableReplicas: deploy.Status.AvailableReplicas,
+		Replicas:          deploymentReplicas(deploy),
+		UpdatedReplicas:   deploy.Status.UpdatedReplicas,
+		Conditions:        conditions,
+		CreatedAt:         deploy.CreationTimestamp.Time,
+	}
+}
+
+func projectPodStatus(pod corev1.Pod) ProjectPodStatus {
+	ready, total, restarts := podContainerTotals(pod)
+	containers := make([]string, 0, len(pod.Status.ContainerStatuses))
+	reason := ""
+	message := ""
+	for _, status := range pod.Status.ContainerStatuses {
+		state := "waiting"
+		if status.State.Running != nil {
+			state = "running"
+		} else if status.State.Terminated != nil {
+			state = "terminated"
+			if status.State.Terminated.Reason != "" {
+				reason = status.State.Terminated.Reason
+			}
+			if status.State.Terminated.Message != "" {
+				message = status.State.Terminated.Message
+			}
+		} else if status.State.Waiting != nil {
+			if status.State.Waiting.Reason != "" {
+				reason = status.State.Waiting.Reason
+			}
+			if status.State.Waiting.Message != "" {
+				message = status.State.Waiting.Message
+			}
+		}
+		containers = append(containers, fmt.Sprintf("%s:%s ready=%t restarts=%d", status.Name, state, status.Ready, status.RestartCount))
+	}
+	if reason == "" {
+		reason = pod.Status.Reason
+	}
+	if message == "" {
+		message = pod.Status.Message
+	}
+	return ProjectPodStatus{
+		Name:            pod.Name,
+		Status:          string(pod.Status.Phase),
+		ReadyContainers: ready,
+		TotalContainers: total,
+		Restarts:        restarts,
+		NodeName:        pod.Spec.NodeName,
+		PodIP:           pod.Status.PodIP,
+		Reason:          reason,
+		Message:         message,
+		Containers:      containers,
+		CreatedAt:       pod.CreationTimestamp.Time,
+	}
 }
 
 func deploymentReplicas(deploy appsv1.Deployment) int32 {

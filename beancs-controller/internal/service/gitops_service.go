@@ -38,7 +38,10 @@ func (s *GitOpsService) CommitProjectManifests(ctx context.Context, token string
 
 func (s *GitOpsService) RenderManifests(project *model.Project) map[string]string {
 	base := "apps/" + project.Name
-	image := "ghcr.io/" + strings.ToLower(project.GitHubRepo) + ":latest"
+	image := strings.TrimSpace(project.ImageReference)
+	if image == "" {
+		image = "ghcr.io/" + strings.ToLower(project.GitHubRepo) + ":latest"
+	}
 	ports := project.Ports
 	if len(ports) == 0 {
 		ports = model.ProjectPorts{{Name: "http", Port: project.Port, Exposure: project.ExposureMode, Domain: project.Domain}}
@@ -106,13 +109,13 @@ spec:
   - deployment.yaml
   - service.yaml
 `,
-		path.Join(base, "overlays", "dev", "kustomization.yaml"): `resources:
+		path.Join(base, "overlays", "dev", "kustomization.yaml"): fmt.Sprintf(`resources:
   - ../../base
 images:
   - name: app
-    newName: ghcr.io/placeholder/app
+    newName: %s
     newTag: latest
-`,
+`, image),
 	}
 }
 

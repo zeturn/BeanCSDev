@@ -1,10 +1,16 @@
 package web
 
-import _ "embed"
+import (
+	"embed"
+)
 
-//go:embed index.html
-var indexHTML string
+//go:embed dist/*
+var distFS embed.FS
 
-func IndexHTML() string {
-	return indexHTML
+func IndexHTML() ([]byte, error) {
+	return distFS.ReadFile("dist/index.html")
+}
+
+func Asset(path string) ([]byte, error) {
+	return distFS.ReadFile("dist/" + path)
 }

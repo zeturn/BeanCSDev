@@ -57,19 +57,56 @@ func (s *CredentialService) RequireAccess(userID, typ string, id uint, ownerOnly
 	return nil
 }
 
-func (s *CredentialService) CreateCloudflare(ctx context.Context, userID string, req dto.CreateCloudflareCredentialRequest) (*model.CloudflareCredential, error) {
+func (s *CredentialService) CreateCloudflare(ctx context.Context, userID string, req dto.CreateCloudflareCredentialRequest) ([]model.CloudflareCredential, error) {
 	enc, err := s.cipher.EncryptString(req.APIToken)
 	if err != nil {
 		return nil, err
 	}
-	cred := &model.CloudflareCredential{Name: req.Name, APITokenEnc: enc, ZoneID: req.ZoneID, Domain: req.Domain, AccountID: req.AccountID, IsActive: true, CreatedBy: userID}
-	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(cred).Error; err != nil {
-			return err
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		name = "Cloudflare"
+	}
+	zones, err := s.cloudflareZones(ctx, req.APIToken, req.ZoneID)
+	if err != nil {
+		return nil, err
+	}
+	if len(zones) == 0 && strings.TrimSpace(req.ZoneID) != "" && strings.TrimSpace(req.Domain) != "" {
+		zones = []cloudflareZonePayload{{ID: strings.TrimSpace(req.ZoneID), Name: strings.TrimSpace(req.Domain), Account: cloudflareZoneAccount{ID: strings.TrimSpace(req.AccountID)}}}
+	}
+	if len(zones) == 0 {
+		return nil, fmt.Errorf("no Cloudflare zones were returned for this token")
+	}
+
+	creds := make([]model.CloudflareCredential, 0, len(zones))
+	for _, zone := range zones {
+		if strings.TrimSpace(zone.ID) == "" || strings.TrimSpace(zone.Name) == "" {
+			continue
 		}
-		return tx.Create(&model.UserCredential{UserID: userID, CredentialType: model.CredentialTypeCloudflare, CredentialID: cred.ID, Role: model.CredentialRoleOwner}).Error
+		accountID := strings.TrimSpace(req.AccountID)
+		if accountID == "" {
+			accountID = strings.TrimSpace(zone.Account.ID)
+		}
+		credName := name
+		if len(zones) > 1 || !strings.Contains(strings.ToLower(name), strings.ToLower(zone.Name)) {
+			credName = fmt.Sprintf("%s - %s", name, zone.Name)
+		}
+		creds = append(creds, model.CloudflareCredential{Name: credName, APITokenEnc: enc, ZoneID: zone.ID, Domain: zone.Name, AccountID: accountID, IsActive: true, CreatedBy: userID})
+	}
+	if len(creds) == 0 {
+		return nil, fmt.Errorf("no usable Cloudflare zones were returned for this token")
+	}
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for i := range creds {
+			if err := tx.Create(&creds[i]).Error; err != nil {
+				return err
+			}
+			if err := tx.Create(&model.UserCredential{UserID: userID, CredentialType: model.CredentialTypeCloudflare, CredentialID: creds[i].ID, Role: model.CredentialRoleOwner}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
 	})
-	return cred, err
+	return creds, err
 }
 
 func (s *CredentialService) CreateGitHub(ctx context.Context, userID string, req dto.CreateGitHubCredentialRequest) (*model.GitHubCredential, error) {
@@ -77,14 +114,35 @@ func (s *CredentialService) CreateGitHub(ctx context.Context, userID string, req
 	if err != nil {
 		return nil, err
 	}
-	cred := &model.GitHubCredential{Name: req.Name, AuthType: "pat", TokenEnc: enc, Org: req.Org, GitOpsRepo: req.GitOpsRepo, IsActive: true, CreatedBy: userID}
+	account, err := s.githubUserAccount(ctx, req.Token)
+	if err != nil {
+		return nil, err
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		name = account.Login
+	}
+	org := strings.TrimSpace(req.Org)
+	if org == "" {
+		org = account.Login
+	}
+	cred := &model.GitHubCredential{Name: name, AuthType: "pat", TokenEnc: enc, AccountLogin: account.Login, AvatarURL: account.AvatarURL, Org: org, GitOpsRepo: strings.TrimSpace(req.GitOpsRepo), IsActive: true, CreatedBy: userID}
 	err = s.createGitHubCredential(ctx, userID, cred)
 	return cred, err
 }
 
 func (s *CredentialService) CreateGitHubApp(ctx context.Context, userID string, req dto.StartGitHubAppInstallRequest, installationID int64, accountLogin string) (*model.GitHubCredential, error) {
-	cred := &model.GitHubCredential{Name: req.Name, AuthType: "app", InstallationID: installationID, AccountLogin: accountLogin, Org: req.Org, GitOpsRepo: req.GitOpsRepo, IsActive: true, CreatedBy: userID}
-	err := s.createGitHubCredential(ctx, userID, cred)
+	account, err := s.GitHubAppInstallationAccount(ctx, installationID)
+	if err == nil && strings.TrimSpace(account.Login) != "" {
+		accountLogin = account.Login
+	}
+	accountLogin = strings.TrimSpace(accountLogin)
+	name := accountLogin
+	if name == "" {
+		name = fmt.Sprintf("github-app-%d", installationID)
+	}
+	cred := &model.GitHubCredential{Name: name, AuthType: "app", InstallationID: installationID, AccountLogin: accountLogin, AvatarURL: account.AvatarURL, Org: accountLogin, GitOpsRepo: strings.TrimSpace(req.GitOpsRepo), IsActive: true, CreatedBy: userID}
+	err = s.createGitHubCredential(ctx, userID, cred)
 	return cred, err
 }
 
@@ -128,6 +186,28 @@ func (s *CredentialService) ListCloudflare(ctx context.Context, userID string) (
 	err := s.db.WithContext(ctx).Joins("JOIN user_credentials uc ON uc.credential_id = cloudflare_credentials.id AND uc.credential_type = ?", model.CredentialTypeCloudflare).
 		Where("uc.user_id = ?", userID).Find(&out).Error
 	return out, err
+}
+
+func (s *CredentialService) ListCloudflareDomains(ctx context.Context, userID string) ([]dto.CloudflareDomainResponse, error) {
+	creds, err := s.ListCloudflare(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]dto.CloudflareDomainResponse, 0, len(creds))
+	for _, cred := range creds {
+		if cred.Domain == "" || cred.ZoneID == "" {
+			continue
+		}
+		out = append(out, dto.CloudflareDomainResponse{
+			CredentialID: cred.ID,
+			Credential:   cred.Name,
+			ZoneID:       cred.ZoneID,
+			Domain:       cred.Domain,
+			AccountID:    cred.AccountID,
+			Active:       cred.IsActive,
+		})
+	}
+	return out, nil
 }
 
 func (s *CredentialService) ListGitHub(ctx context.Context, userID string) ([]model.GitHubCredential, error) {
@@ -224,6 +304,19 @@ func (s *CredentialService) VerifyCloudflare(ctx context.Context, id uint) (map[
 	if err != nil {
 		return nil, err
 	}
+	if cred.ZoneID == "" {
+		zones, err := s.cloudflareZones(ctx, token, "")
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{
+			"status":     "ok",
+			"credential": cred.Name,
+			"account_id": cred.AccountID,
+			"token":      verify["result"],
+			"zones":      len(zones),
+		}, nil
+	}
 	zoneURL := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/dns_records?per_page=1", url.PathEscape(cred.ZoneID))
 	zone, err := cloudflareGET(ctx, client, token, zoneURL)
 	if err != nil {
@@ -238,6 +331,46 @@ func (s *CredentialService) VerifyCloudflare(ctx context.Context, id uint) (map[
 		"token":      verify["result"],
 		"zone_check": map[string]any{"success": zone["success"]},
 	}, nil
+}
+
+type cloudflareZoneAccount struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type cloudflareZonePayload struct {
+	ID      string                `json:"id"`
+	Name    string                `json:"name"`
+	Status  string                `json:"status"`
+	Account cloudflareZoneAccount `json:"account"`
+}
+
+func (s *CredentialService) cloudflareZones(ctx context.Context, token, zoneID string) ([]cloudflareZonePayload, error) {
+	client := &http.Client{Timeout: 15 * time.Second}
+	endpoint := "https://api.cloudflare.com/client/v4/zones?per_page=100"
+	if strings.TrimSpace(zoneID) != "" {
+		endpoint = fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s", url.PathEscape(strings.TrimSpace(zoneID)))
+	}
+	result, err := cloudflareGET(ctx, client, token, endpoint)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := json.Marshal(result["result"])
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(zoneID) != "" {
+		var zone cloudflareZonePayload
+		if err := json.Unmarshal(raw, &zone); err != nil {
+			return nil, fmt.Errorf("cloudflare returned invalid zone JSON")
+		}
+		return []cloudflareZonePayload{zone}, nil
+	}
+	var zones []cloudflareZonePayload
+	if err := json.Unmarshal(raw, &zones); err != nil {
+		return nil, fmt.Errorf("cloudflare returned invalid zones JSON")
+	}
+	return zones, nil
 }
 
 func (s *CredentialService) DecryptGitHubToken(cred model.GitHubCredential) (string, error) {
@@ -285,6 +418,84 @@ func (s *CredentialService) githubInstallationToken(ctx context.Context, install
 	return out.Token, nil
 }
 
+type githubAccount struct {
+	Login     string `json:"login"`
+	AvatarURL string `json:"avatar_url"`
+}
+
+func (s *CredentialService) GitHubAppInstallationAccount(ctx context.Context, installationID int64) (githubAccount, error) {
+	if s.cfg == nil || s.cfg.GitHubAppID == 0 || strings.TrimSpace(s.cfg.GitHubAppPrivateKey) == "" {
+		return githubAccount{}, fmt.Errorf("GitHub App is not configured")
+	}
+	appJWT, err := s.githubAppJWT()
+	if err != nil {
+		return githubAccount{}, err
+	}
+	var out struct {
+		Account githubAccount `json:"account"`
+	}
+	endpoint := fmt.Sprintf("https://api.github.com/app/installations/%d", installationID)
+	if err := githubJSON(ctx, http.MethodGet, endpoint, appJWT, &out); err != nil {
+		return githubAccount{}, err
+	}
+	if strings.TrimSpace(out.Account.Login) == "" {
+		return githubAccount{}, fmt.Errorf("GitHub installation account was not returned")
+	}
+	return out.Account, nil
+}
+
+func (s *CredentialService) ListGitHubRepositories(ctx context.Context, id uint) ([]dto.GitHubRepositoryResponse, error) {
+	var cred model.GitHubCredential
+	if err := s.db.WithContext(ctx).First(&cred, id).Error; err != nil {
+		return nil, err
+	}
+	token, err := s.GitHubToken(ctx, cred)
+	if err != nil {
+		return nil, err
+	}
+	endpoint := "https://api.github.com/user/repos?affiliation=owner,collaborator,organization_member&sort=updated&per_page=100"
+	if cred.AuthType == "app" || cred.InstallationID != 0 {
+		endpoint = "https://api.github.com/installation/repositories?per_page=100"
+	}
+	repos := make([]dto.GitHubRepositoryResponse, 0)
+	for page := 1; page <= 10; page++ {
+		pageURL := fmt.Sprintf("%s&page=%d", endpoint, page)
+		var batch []githubRepositoryPayload
+		if cred.AuthType == "app" || cred.InstallationID != 0 {
+			var out struct {
+				Repositories []githubRepositoryPayload `json:"repositories"`
+			}
+			if err := githubJSON(ctx, http.MethodGet, pageURL, token, &out); err != nil {
+				return nil, err
+			}
+			batch = out.Repositories
+		} else if err := githubJSON(ctx, http.MethodGet, pageURL, token, &batch); err != nil {
+			return nil, err
+		}
+		if len(batch) == 0 {
+			break
+		}
+		for _, repo := range batch {
+			repos = append(repos, repo.toResponse())
+		}
+		if len(batch) < 100 {
+			break
+		}
+	}
+	return repos, nil
+}
+
+func (s *CredentialService) githubUserAccount(ctx context.Context, token string) (githubAccount, error) {
+	var out githubAccount
+	if err := githubJSON(ctx, http.MethodGet, "https://api.github.com/user", token, &out); err != nil {
+		return githubAccount{}, err
+	}
+	if strings.TrimSpace(out.Login) == "" {
+		return githubAccount{}, fmt.Errorf("GitHub user login was not returned")
+	}
+	return out, nil
+}
+
 func (s *CredentialService) githubAppJWT() (string, error) {
 	rawKey := strings.TrimSpace(s.cfg.GitHubAppPrivateKey)
 	if decoded, err := base64.StdEncoding.DecodeString(rawKey); err == nil && strings.Contains(string(decoded), "PRIVATE KEY") {
@@ -314,6 +525,51 @@ func (s *CredentialService) githubAppJWT() (string, error) {
 		"iss": s.cfg.GitHubAppID,
 	}
 	return jwt.NewWithClaims(jwt.SigningMethodRS256, claims).SignedString(key)
+}
+
+type githubRepositoryPayload struct {
+	FullName      string `json:"full_name"`
+	Name          string `json:"name"`
+	Private       bool   `json:"private"`
+	DefaultBranch string `json:"default_branch"`
+	HTMLURL       string `json:"html_url"`
+	Owner         struct {
+		Login string `json:"login"`
+	} `json:"owner"`
+}
+
+func (r githubRepositoryPayload) toResponse() dto.GitHubRepositoryResponse {
+	return dto.GitHubRepositoryResponse{
+		FullName:      r.FullName,
+		Name:          r.Name,
+		Owner:         r.Owner.Login,
+		Private:       r.Private,
+		DefaultBranch: r.DefaultBranch,
+		HTMLURL:       r.HTMLURL,
+	}
+}
+
+func githubJSON(ctx context.Context, method, endpoint, token string, out any) error {
+	req, err := http.NewRequestWithContext(ctx, method, endpoint, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("GitHub API request failed: %s", strings.TrimSpace(string(body)))
+	}
+	if err := json.Unmarshal(body, out); err != nil {
+		return fmt.Errorf("GitHub returned invalid JSON")
+	}
+	return nil
 }
 
 func cloudflareGET(ctx context.Context, client *http.Client, token, endpoint string) (map[string]any, error) {

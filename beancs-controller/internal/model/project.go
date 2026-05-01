@@ -11,6 +11,11 @@ const (
 	ExposurePublic       = "public"
 	ExposurePrivate      = "private"
 	ExposureInternalOnly = "internal-only"
+
+	BuildSourceGitHub       = "github"
+	BuildSourceDockerHub    = "dockerhub"
+	BuildSourceGHCR         = "ghcr"
+	BuildSourceSourceUpload = "source-upload"
 )
 
 type Project struct {
@@ -22,12 +27,16 @@ type Project struct {
 	TeamID      string `gorm:"size:128;index" json:"team_id"`
 	TenantID    string `gorm:"size:128;index" json:"tenant_id"`
 
-	GitHubCredentialID uint   `gorm:"not null;index" json:"github_credential_id"`
-	GitHubRepo         string `gorm:"size:256;not null" json:"github_repo"`
+	BuildSource       string `gorm:"size:32;default:'github'" json:"build_source"`
+	ImageReference    string `gorm:"size:512" json:"image_reference"`
+	SourceArchiveName string `gorm:"size:256" json:"source_archive_name"`
+
+	GitHubCredentialID uint   `gorm:"index" json:"github_credential_id"`
+	GitHubRepo         string `gorm:"size:256" json:"github_repo"`
 	GitHubBranch       string `gorm:"size:128;default:'main'" json:"github_branch"`
 	DockerfilePath     string `gorm:"size:512;default:'Dockerfile'" json:"dockerfile_path"`
 
-	BasaltPassInstanceID uint   `gorm:"not null;index" json:"basaltpass_instance_id"`
+	BasaltPassInstanceID *uint  `gorm:"index" json:"basaltpass_instance_id,omitempty"`
 	BasaltAppID          uint   `json:"basalt_app_id"`
 	BasaltClientID       string `gorm:"size:256" json:"basalt_client_id"`
 	BasaltSecretEnc      []byte `gorm:"type:bytea" json:"-"`

@@ -1,11 +1,20 @@
 package dto
 
 type CreateCloudflareCredentialRequest struct {
-	Name      string `json:"name" validate:"required,max=128"`
+	Name      string `json:"name" validate:"omitempty,max=128"`
 	APIToken  string `json:"api_token" validate:"required"`
-	ZoneID    string `json:"zone_id" validate:"required,max=128"`
-	Domain    string `json:"domain" validate:"required,fqdn"`
+	ZoneID    string `json:"zone_id" validate:"omitempty,max=128"`
+	Domain    string `json:"domain" validate:"omitempty,fqdn"`
 	AccountID string `json:"account_id" validate:"omitempty,max=128"`
+}
+
+type CloudflareDomainResponse struct {
+	CredentialID uint   `json:"credential_id"`
+	Credential   string `json:"credential"`
+	ZoneID       string `json:"zone_id"`
+	Domain       string `json:"domain"`
+	AccountID    string `json:"account_id,omitempty"`
+	Active       bool   `json:"active"`
 }
 
 type UpdateCloudflareCredentialRequest struct {
@@ -18,16 +27,14 @@ type UpdateCloudflareCredentialRequest struct {
 }
 
 type CreateGitHubCredentialRequest struct {
-	Name       string `json:"name" validate:"required,max=128"`
+	Name       string `json:"name" validate:"omitempty,max=128"`
 	Token      string `json:"token" validate:"required"`
 	Org        string `json:"org" validate:"omitempty,max=128"`
-	GitOpsRepo string `json:"gitops_repo" validate:"required,max=256"`
+	GitOpsRepo string `json:"gitops_repo" validate:"omitempty,max=256"`
 }
 
 type StartGitHubAppInstallRequest struct {
-	Name       string `json:"name" validate:"required,max=128"`
-	Org        string `json:"org" validate:"omitempty,max=128"`
-	GitOpsRepo string `json:"gitops_repo" validate:"required,max=256"`
+	GitOpsRepo string `json:"gitops_repo" validate:"omitempty,max=256"`
 }
 
 type UpdateGitHubCredentialRequest struct {
@@ -58,4 +65,13 @@ type UpdateBasaltPassCredentialRequest struct {
 type ShareCredentialRequest struct {
 	UserID string `json:"user_id" validate:"required,max=128"`
 	Role   string `json:"role" validate:"omitempty,oneof=owner user"`
+}
+
+type GitHubRepositoryResponse struct {
+	FullName      string `json:"full_name"`
+	Name          string `json:"name"`
+	Owner         string `json:"owner"`
+	Private       bool   `json:"private"`
+	DefaultBranch string `json:"default_branch"`
+	HTMLURL       string `json:"html_url"`
 }

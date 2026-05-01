@@ -28,6 +28,19 @@ jobs:
           go-version-file: beancs-controller/go.mod
           cache-dependency-path: beancs-controller/go.sum
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: beancs-controller/internal/web/package-lock.json
+
+      - name: Build web UI
+        working-directory: beancs-controller/internal/web
+        run: |
+          npm ci
+          npm run build
+
       - name: Test controller
         working-directory: beancs-controller
         run: go test -v -timeout=5m ./...

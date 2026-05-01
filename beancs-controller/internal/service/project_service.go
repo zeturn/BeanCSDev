@@ -2,9 +2,15 @@ package service
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/zeturn/beancs-controller/internal/basaltpass"
 	cryptoutil "github.com/zeturn/beancs-controller/internal/crypto"
@@ -31,6 +37,87 @@ func NewProjectService(db *gorm.DB, credentials *CredentialService, quota *Quota
 	return &ProjectService{db: db, credentials: credentials, quota: quota, dns: dns, gitops: gitops, k8s: k8sManager, registry: registry, cipher: cipher}
 }
 
+func (s *ProjectService) AnalyzeRepository(ctx context.Context, userID string, req dto.AnalyzeProjectRepositoryRequest) (*dto.AnalyzeProjectRepositoryResponse, error) {
+	if err := s.credentials.RequireAccess(userID, model.CredentialTypeGitHub, req.GitHubCredentialID, false); err != nil {
+		return nil, err
+	}
+	var ghCred model.GitHubCredential
+	if err := s.db.WithContext(ctx).First(&ghCred, req.GitHubCredentialID).Error; err != nil {
+		return nil, err
+	}
+	token, err := s.credentials.GitHubToken(ctx, ghCred)
+	if err != nil {
+		return nil, err
+	}
+	owner, repo, ok := splitRepo(req.GitHubRepo)
+	if !ok {
+		return nil, fmt.Errorf("github_repo must be in owner/repo format")
+	}
+	branch := strings.TrimSpace(req.GitHubBranch)
+	if branch == "" {
+		branch = "main"
+	}
+
+	out := &dto.AnalyzeProjectRepositoryResponse{DefaultPort: 8080}
+	if meta, ok, err := githubBasaltAppMeta(ctx, token, owner, repo, branch); err != nil {
+		return nil, err
+	} else if ok {
+		out.Signals = append(out.Signals, ".basalt/app.json found")
+		if len(meta.ServicePorts) > 0 {
+			out.Ports = meta.ServicePorts
+			out.DefaultPort = meta.ServicePorts[0]
+		}
+	}
+	for _, candidate := range dockerfileCandidates() {
+		exists, err := githubContentExists(ctx, token, owner, repo, candidate, branch)
+		if err != nil {
+			return nil, err
+		}
+		if exists {
+			out.Deployable = true
+			out.Containerized = true
+			out.DockerfilePath = candidate
+			out.Signals = append(out.Signals, candidate+" found")
+			break
+		}
+	}
+	for _, candidate := range composeFileCandidates() {
+		exists, err := githubContentExists(ctx, token, owner, repo, candidate, branch)
+		if err != nil {
+			return nil, err
+		}
+		if exists {
+			if !out.Containerized {
+				out.Deployable = true
+				out.Containerized = true
+				out.ComposePath = candidate
+			}
+			out.Signals = append(out.Signals, candidate+" found")
+			break
+		}
+	}
+	sourceSignals := 0
+	for _, candidate := range sourceFileCandidates() {
+		exists, err := githubContentExists(ctx, token, owner, repo, candidate, branch)
+		if err != nil {
+			return nil, err
+		}
+		if exists {
+			sourceSignals++
+			out.Signals = append(out.Signals, candidate+" found")
+		}
+	}
+	if !out.Containerized && sourceSignals > 0 {
+		out.Scaffoldable = true
+		out.Deployable = true
+		out.Warnings = append(out.Warnings, "Source layout detected, but no container recipe was found. Add a Dockerfile or Docker Compose file before deploying to avoid image build failures.")
+	}
+	if !out.Containerized {
+		out.Warnings = append(out.Warnings, "No Dockerfile, Containerfile, or Docker Compose file was found in the repository root or common app directories.")
+	}
+	return out, nil
+}
+
 func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID string, req dto.CreateProjectRequest) (*model.Project, error) {
 	normalizeProjectRequest(&req)
 	if err := validateProjectPorts(req.Name, req.Ports); err != nil {
@@ -38,6 +125,9 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 	}
 	req.ExposureMode = aggregateExposureMode(req.Ports)
 	primaryPort := req.Ports[0]
+	if err := validateProjectSource(&req); err != nil {
+		return nil, err
+	}
 	if req.ExposureMode == model.ExposurePublic {
 		if req.CloudflareCredentialID == nil {
 			return nil, fmt.Errorf("cloudflare_credential_id is required when any port is public")
@@ -47,11 +137,15 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 		return nil, fmt.Errorf("unknown resource preset")
 	}
 
-	if err := s.credentials.RequireAccess(userID, model.CredentialTypeGitHub, req.GitHubCredentialID, false); err != nil {
-		return nil, err
+	if req.GitHubCredentialID != 0 {
+		if err := s.credentials.RequireAccess(userID, model.CredentialTypeGitHub, req.GitHubCredentialID, false); err != nil {
+			return nil, err
+		}
 	}
-	if err := s.credentials.RequireAccess(userID, model.CredentialTypeBasaltPass, req.BasaltPassInstanceID, false); err != nil {
-		return nil, err
+	if req.BasaltPassInstanceID != nil {
+		if err := s.credentials.RequireAccess(userID, model.CredentialTypeBasaltPass, *req.BasaltPassInstanceID, false); err != nil {
+			return nil, err
+		}
 	}
 	if req.CloudflareCredentialID != nil {
 		if err := s.credentials.RequireAccess(userID, model.CredentialTypeCloudflare, *req.CloudflareCredentialID, false); err != nil {
@@ -83,18 +177,23 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 	}
 
 	var ghCred model.GitHubCredential
-	if err := s.db.WithContext(ctx).First(&ghCred, req.GitHubCredentialID).Error; err != nil {
-		rollback()
-		return nil, err
-	}
-	ghToken, err := s.credentials.GitHubToken(ctx, ghCred)
-	if err != nil {
-		rollback()
-		return nil, err
+	var ghToken string
+	if req.GitHubCredentialID != 0 {
+		if err := s.db.WithContext(ctx).First(&ghCred, req.GitHubCredentialID).Error; err != nil {
+			rollback()
+			return nil, err
+		}
+		var err error
+		ghToken, err = s.credentials.GitHubToken(ctx, ghCred)
+		if err != nil {
+			rollback()
+			return nil, err
+		}
 	}
 
 	var cfCred model.CloudflareCredential
 	var cfToken string
+	var err error
 	if req.CloudflareCredentialID != nil {
 		if err := s.db.WithContext(ctx).First(&cfCred, *req.CloudflareCredentialID).Error; err != nil {
 			rollback()
@@ -114,6 +213,9 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 		OwnerID:                userID,
 		TeamID:                 req.TeamID,
 		TenantID:               tenantID,
+		BuildSource:            req.BuildSource,
+		ImageReference:         req.ImageReference,
+		SourceArchiveName:      req.SourceArchiveName,
 		GitHubCredentialID:     req.GitHubCredentialID,
 		GitHubRepo:             req.GitHubRepo,
 		GitHubBranch:           req.GitHubBranch,
@@ -122,7 +224,7 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 		CloudflareCredentialID: req.CloudflareCredentialID,
 		ExposureMode:           req.ExposureMode,
 		Subdomain:              req.Subdomain,
-		Namespace:              "proj-" + req.Name,
+		Namespace:              projectNamespace(req),
 		ResourcePreset:         req.ResourcePreset,
 		Port:                   primaryPort.Port,
 		Ports:                  req.Ports,
@@ -131,32 +233,35 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 	}
 	project.Domain = firstRoutableDomain(project.Ports)
 
-	bpClient, err := s.registry.GetClientForInstance(req.BasaltPassInstanceID)
-	if err != nil {
-		rollback()
-		return nil, err
-	}
-	appResp, err := bpClient.RegisterApp(ctx, &basaltpass.RegisterAppRequest{
-		Name:           req.Name,
-		Description:    coalesce(req.Description, "BeanCS managed tenant app"),
-		HomepageURL:    projectHome(project),
-		RedirectURIs:   []string{projectHome(project) + "/callback"},
-		AllowedOrigins: []string{projectHome(project)},
-		Scopes:         []string{"openid", "profile", "email"},
-	})
-	if err != nil {
-		rollback()
-		return nil, err
-	}
-	project.BasaltAppID = appResp.Data.ID
-	project.BasaltClientID = appResp.Data.OAuthClients[0].ClientID
-	secret := appResp.Data.OAuthClients[0].ClientSecret
-	rollbacks = append(rollbacks, func() { _ = bpClient.DeleteApp(context.Background(), project.BasaltAppID) })
+	var secret string
+	if req.BasaltPassInstanceID != nil {
+		bpClient, err := s.registry.GetClientForInstance(*req.BasaltPassInstanceID)
+		if err != nil {
+			rollback()
+			return nil, err
+		}
+		appResp, err := bpClient.RegisterApp(ctx, &basaltpass.RegisterAppRequest{
+			Name:           req.Name,
+			Description:    coalesce(req.Description, "BeanCS managed tenant app"),
+			HomepageURL:    projectHome(project),
+			RedirectURIs:   []string{projectHome(project) + "/callback"},
+			AllowedOrigins: []string{projectHome(project)},
+			Scopes:         []string{"openid", "profile", "email"},
+		})
+		if err != nil {
+			rollback()
+			return nil, err
+		}
+		project.BasaltAppID = appResp.Data.ID
+		project.BasaltClientID = appResp.Data.OAuthClients[0].ClientID
+		secret = appResp.Data.OAuthClients[0].ClientSecret
+		rollbacks = append(rollbacks, func() { _ = bpClient.DeleteApp(context.Background(), project.BasaltAppID) })
 
-	project.BasaltSecretEnc, err = s.cipher.EncryptString(secret)
-	if err != nil {
-		rollback()
-		return nil, err
+		project.BasaltSecretEnc, err = s.cipher.EncryptString(secret)
+		if err != nil {
+			rollback()
+			return nil, err
+		}
 	}
 
 	if err := s.k8s.CreateNamespace(ctx, project.Namespace, project.Name); err != nil {
@@ -165,9 +270,11 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 	}
 	rollbacks = append(rollbacks, func() { _ = s.k8s.DeleteNamespace(context.Background(), project.Namespace) })
 
-	if err := s.k8s.UpsertSecret(ctx, project.Namespace, "basaltpass-keys", project.Name, map[string]string{"client_id": project.BasaltClientID, "client_secret": secret}); err != nil {
-		rollback()
-		return nil, err
+	if project.BasaltClientID != "" {
+		if err := s.k8s.UpsertSecret(ctx, project.Namespace, "basaltpass-keys", project.Name, map[string]string{"client_id": project.BasaltClientID, "client_secret": secret}); err != nil {
+			rollback()
+			return nil, err
+		}
 	}
 	if err := s.k8s.UpsertSecret(ctx, project.Namespace, "app-env-vars", project.Name, req.Env); err != nil {
 		rollback()
@@ -209,6 +316,13 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 		rollback()
 		return nil, err
 	}
+	if project.ImageReference != "" && project.BuildSource != model.BuildSourceGitHub {
+		resources := model.ResourcePresets[project.ResourcePreset]
+		if err := s.k8s.ApplyDeploymentPorts(ctx, project.Namespace, project.Name, project.ImageReference, project.Ports, int32(project.Replicas), resources.CPURequest, resources.CPULimit, resources.MemRequest, resources.MemLimit); err != nil {
+			rollback()
+			return nil, err
+		}
+	}
 
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(project).Error; err != nil {
@@ -223,6 +337,15 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 		return nil
 	})
 	if err != nil {
+		rollback()
+		return nil, err
+	}
+	deploymentRef := req.GitHubBranch
+	if deploymentRef == "" {
+		deploymentRef = project.ImageReference
+	}
+	deployment := &model.Deployment{ProjectID: project.ID, Tag: "initial", CommitSHA: deploymentRef, Status: "provisioning", TriggeredBy: userID}
+	if err := s.db.WithContext(ctx).Create(deployment).Error; err != nil {
 		rollback()
 		return nil, err
 	}
@@ -242,6 +365,7 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 		rollback()
 		return nil, err
 	}
+	_ = s.db.WithContext(ctx).Model(deployment).Updates(map[string]any{"status": "provisioned"}).Error
 	quotaReserved = false
 	return project, nil
 }
@@ -302,12 +426,14 @@ func (s *ProjectService) DeleteProject(ctx context.Context, project *model.Proje
 	if err := s.k8s.DeleteNamespace(ctx, project.Namespace); err != nil {
 		cleanupErrs = append(cleanupErrs, fmt.Errorf("delete namespace %s: %w", project.Namespace, err))
 	}
-	if client, err := s.registry.GetClientForInstance(project.BasaltPassInstanceID); err == nil && project.BasaltAppID != 0 {
-		if err := client.DeleteApp(ctx, project.BasaltAppID); err != nil {
-			cleanupErrs = append(cleanupErrs, fmt.Errorf("delete BasaltPass app %d: %w", project.BasaltAppID, err))
+	if project.BasaltPassInstanceID != nil && project.BasaltAppID != 0 {
+		if client, err := s.registry.GetClientForInstance(*project.BasaltPassInstanceID); err == nil {
+			if err := client.DeleteApp(ctx, project.BasaltAppID); err != nil {
+				cleanupErrs = append(cleanupErrs, fmt.Errorf("delete BasaltPass app %d: %w", project.BasaltAppID, err))
+			}
+		} else {
+			cleanupErrs = append(cleanupErrs, fmt.Errorf("load BasaltPass client: %w", err))
 		}
-	} else if err != nil {
-		cleanupErrs = append(cleanupErrs, fmt.Errorf("load BasaltPass client: %w", err))
 	}
 	if len(cleanupErrs) > 0 {
 		return fmt.Errorf("project cleanup failed; database record retained for retry: %v", cleanupErrs)
@@ -333,13 +459,29 @@ func (s *ProjectService) DeleteProject(ctx context.Context, project *model.Proje
 	})
 }
 
+func projectNamespace(req dto.CreateProjectRequest) string {
+	namespace := strings.TrimSpace(req.Namespace)
+	if namespace == "" {
+		return "proj-" + req.Name
+	}
+	return namespace
+}
+
 func normalizeProjectRequest(req *dto.CreateProjectRequest) {
+	req.BuildSource = strings.ToLower(strings.TrimSpace(req.BuildSource))
+	if req.BuildSource == "" {
+		req.BuildSource = model.BuildSourceGitHub
+	}
+	req.ImageReference = strings.TrimSpace(req.ImageReference)
+	req.SourceArchiveName = strings.TrimSpace(req.SourceArchiveName)
+	req.GitHubRepo = strings.TrimSpace(req.GitHubRepo)
 	if req.GitHubBranch == "" {
 		req.GitHubBranch = "main"
 	}
 	if req.DockerfilePath == "" {
 		req.DockerfilePath = "Dockerfile"
 	}
+	req.Namespace = strings.TrimSpace(req.Namespace)
 	if req.ResourcePreset == "" {
 		req.ResourcePreset = "small"
 	}
@@ -361,6 +503,98 @@ func normalizeProjectRequest(req *dto.CreateProjectRequest) {
 	if req.Env == nil {
 		req.Env = map[string]string{}
 	}
+}
+
+func validateProjectSource(req *dto.CreateProjectRequest) error {
+	switch req.BuildSource {
+	case model.BuildSourceGitHub:
+		if req.GitHubCredentialID == 0 {
+			return fmt.Errorf("github_credential_id is required for github installs")
+		}
+		if _, _, ok := splitRepo(req.GitHubRepo); !ok {
+			return fmt.Errorf("github_repo must be in owner/repo format")
+		}
+		if req.ImageReference == "" {
+			req.ImageReference = "ghcr.io/" + strings.ToLower(req.GitHubRepo) + ":latest"
+		}
+	case model.BuildSourceDockerHub:
+		if err := validateImageReference(req.ImageReference); err != nil {
+			return fmt.Errorf("docker hub image_reference: %w", err)
+		}
+		if strings.HasPrefix(strings.ToLower(req.ImageReference), "ghcr.io/") {
+			return fmt.Errorf("docker hub image_reference should not start with ghcr.io")
+		}
+	case model.BuildSourceGHCR:
+		if err := validateImageReference(req.ImageReference); err != nil {
+			return fmt.Errorf("ghcr image_reference: %w", err)
+		}
+		if !strings.HasPrefix(strings.ToLower(req.ImageReference), "ghcr.io/") {
+			return fmt.Errorf("ghcr image_reference must start with ghcr.io/")
+		}
+	case model.BuildSourceSourceUpload:
+		if req.SourceArchiveName == "" {
+			return fmt.Errorf("source_archive_name is required for source uploads")
+		}
+		if err := validateImageReference(req.ImageReference); err != nil {
+			return fmt.Errorf("source upload image_reference: %w", err)
+		}
+	default:
+		return fmt.Errorf("build_source must be github, dockerhub, ghcr, or source-upload")
+	}
+	return nil
+}
+
+func validateImageReference(image string) error {
+	image = strings.TrimSpace(image)
+	if image == "" {
+		return fmt.Errorf("is required")
+	}
+	if strings.ContainsAny(image, " \t\r\n") || strings.Contains(image, "://") {
+		return fmt.Errorf("must be a container image reference")
+	}
+	if strings.HasPrefix(image, "-") || strings.Contains(image, "..") {
+		return fmt.Errorf("must be a valid container image reference")
+	}
+	return nil
+}
+
+func composeFileCandidates() []string {
+	names := []string{
+		"compose.yaml",
+		"compose.yml",
+		"compose.prod.yaml",
+		"compose.prod.yml",
+		"docker-compose.yaml",
+		"docker-compose.yml",
+		"docker-compose.prod.yaml",
+		"docker-compose.prod.yml",
+		"docker-compose.production.yaml",
+		"docker-compose.production.yml",
+	}
+	return pathCandidates(names)
+}
+
+func dockerfileCandidates() []string {
+	return pathCandidates([]string{"Dockerfile", "dockerfile", "Containerfile"})
+}
+
+func sourceFileCandidates() []string {
+	return pathCandidates([]string{"package.json", "go.mod", "pyproject.toml", "requirements.txt", "Cargo.toml"})
+}
+
+func pathCandidates(names []string) []string {
+	dirs := []string{"", "backend", "frontend", "server", "client", "app", "api", "web", "cmd"}
+	out := make([]string, 0, len(names)*len(dirs))
+	for _, dir := range dirs {
+		for _, name := range names {
+			if dir == "" {
+				out = append(out, name)
+			} else {
+				out = append(out, dir+"/"+name)
+			}
+		}
+	}
+	return out
 }
 
 func validateProjectPorts(projectName string, ports model.ProjectPorts) error {
@@ -453,4 +687,72 @@ func coalesce(v, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func githubContentExists(ctx context.Context, token, owner, repo, filePath, ref string) (bool, error) {
+	body, ok, err := githubContentRead(ctx, token, owner, repo, filePath, ref)
+	if err != nil || !ok {
+		return ok, err
+	}
+	var payload struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return false, fmt.Errorf("GitHub returned invalid JSON")
+	}
+	return payload.Type == "file", nil
+}
+
+type basaltAppMeta struct {
+	ServicePorts []int `json:"service_ports"`
+}
+
+func githubBasaltAppMeta(ctx context.Context, token, owner, repo, ref string) (basaltAppMeta, bool, error) {
+	body, ok, err := githubContentRead(ctx, token, owner, repo, ".basalt/app.json", ref)
+	if err != nil || !ok {
+		return basaltAppMeta{}, ok, err
+	}
+	var payload struct {
+		Type    string `json:"type"`
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return basaltAppMeta{}, false, fmt.Errorf("GitHub returned invalid JSON")
+	}
+	if payload.Type != "file" {
+		return basaltAppMeta{}, false, nil
+	}
+	decoded, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(payload.Content, "\n", ""))
+	if err != nil {
+		return basaltAppMeta{}, false, fmt.Errorf("Basalt app metadata was not base64 content")
+	}
+	var meta basaltAppMeta
+	if err := json.Unmarshal(decoded, &meta); err != nil {
+		return basaltAppMeta{}, false, fmt.Errorf("Basalt app metadata was invalid JSON")
+	}
+	return meta, true, nil
+}
+
+func githubContentRead(ctx context.Context, token, owner, repo, filePath, ref string) ([]byte, bool, error) {
+	endpoint := fmt.Sprintf("https://api.github.com/repos/%s/%s/contents/%s?ref=%s", url.PathEscape(owner), url.PathEscape(repo), strings.TrimLeft(filePath, "/"), url.QueryEscape(ref))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	if err != nil {
+		return nil, false, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, false, nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, false, fmt.Errorf("GitHub content check failed: %s", strings.TrimSpace(string(body)))
+	}
+	return body, true, nil
 }

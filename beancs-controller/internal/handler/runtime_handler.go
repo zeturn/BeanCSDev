@@ -48,11 +48,11 @@ func (h *RuntimeHandler) overview(c *fiber.Ctx) error {
 
 func (h *RuntimeHandler) status(c *fiber.Ctx) error {
 	p := projectFromCtx(c)
-	pods, err := h.k8s.PodStatus(c.UserContext(), p.Namespace, p.Name)
+	out, err := h.k8s.ProjectRuntimeStatus(c.UserContext(), p.Namespace, p.Name)
 	if err != nil {
 		return fail(c, 400, err)
 	}
-	return c.JSON(fiber.Map{"pods": pods})
+	return c.JSON(out)
 }
 
 func (h *RuntimeHandler) logs(c *fiber.Ctx) error {
