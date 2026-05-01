@@ -366,10 +366,11 @@ function DeployView({credentials, namespaces, selectedCredential, setSelectedCre
         {!analysis && <p className="muted">Select a repository to check whether BeanCS can deploy it.</p>}
         {analysis && (
           <>
-            <div className={analysis.deployable ? "status good" : "status bad"}>{analysis.deployable ? "Deployable" : "Needs containerization"}</div>
+            <div className={analysis.deployable ? "status good" : "status bad"}>{analysis.containerized ? "Deployable" : analysis.scaffoldable ? "Source detected" : "Needs containerization"}</div>
             <div className="signal-list">
               {(analysis.signals || []).map((signal) => <span key={signal}>{signal}</span>)}
               {analysis.compose_path && <span>Compose: {analysis.compose_path}</span>}
+              {analysis.ports?.length > 0 && <span>Ports: {analysis.ports.join(", ")}</span>}
               {(analysis.warnings || []).map((warning) => <span className="warning" key={warning}>{warning}</span>)}
             </div>
           </>

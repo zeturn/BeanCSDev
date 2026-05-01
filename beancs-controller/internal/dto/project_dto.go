@@ -32,9 +32,11 @@ type AnalyzeProjectRepositoryRequest struct {
 type AnalyzeProjectRepositoryResponse struct {
 	Deployable     bool     `json:"deployable"`
 	Containerized  bool     `json:"containerized"`
+	Scaffoldable   bool     `json:"scaffoldable"`
 	DockerfilePath string   `json:"dockerfile_path,omitempty"`
 	ComposePath    string   `json:"compose_path,omitempty"`
 	DefaultPort    int      `json:"default_port"`
+	Ports          []int    `json:"ports,omitempty"`
 	Signals        []string `json:"signals"`
 	Warnings       []string `json:"warnings"`
 }

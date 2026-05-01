@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -58,7 +59,16 @@ func (s *ProjectService) AnalyzeRepository(ctx context.Context, userID string, r
 	}
 
 	out := &dto.AnalyzeProjectRepositoryResponse{DefaultPort: 8080}
-	for _, candidate := range []string{"Dockerfile", "dockerfile", "Containerfile"} {
+	if meta, ok, err := githubBasaltAppMeta(ctx, token, owner, repo, branch); err != nil {
+		return nil, err
+	} else if ok {
+		out.Signals = append(out.Signals, ".basalt/app.json found")
+		if len(meta.ServicePorts) > 0 {
+			out.Ports = meta.ServicePorts
+			out.DefaultPort = meta.ServicePorts[0]
+		}
+	}
+	for _, candidate := range dockerfileCandidates() {
 		exists, err := githubContentExists(ctx, token, owner, repo, candidate, branch)
 		if err != nil {
 			return nil, err
@@ -86,17 +96,24 @@ func (s *ProjectService) AnalyzeRepository(ctx context.Context, userID string, r
 			break
 		}
 	}
-	for _, candidate := range []string{"package.json", "go.mod", "pyproject.toml", "requirements.txt", "Cargo.toml"} {
+	sourceSignals := 0
+	for _, candidate := range sourceFileCandidates() {
 		exists, err := githubContentExists(ctx, token, owner, repo, candidate, branch)
 		if err != nil {
 			return nil, err
 		}
 		if exists {
+			sourceSignals++
 			out.Signals = append(out.Signals, candidate+" found")
 		}
 	}
+	if !out.Containerized && sourceSignals > 0 {
+		out.Scaffoldable = true
+		out.Deployable = true
+		out.Warnings = append(out.Warnings, "Source layout detected, but no container recipe was found. Add a Dockerfile or Docker Compose file before deploying to avoid image build failures.")
+	}
 	if !out.Containerized {
-		out.Warnings = append(out.Warnings, "No Dockerfile, Containerfile, or Docker Compose file was found at the repository root.")
+		out.Warnings = append(out.Warnings, "No Dockerfile, Containerfile, or Docker Compose file was found in the repository root or common app directories.")
 	}
 	return out, nil
 }
@@ -452,7 +469,7 @@ func normalizeProjectRequest(req *dto.CreateProjectRequest) {
 }
 
 func composeFileCandidates() []string {
-	return []string{
+	names := []string{
 		"compose.yaml",
 		"compose.yml",
 		"compose.prod.yaml",
@@ -464,6 +481,30 @@ func composeFileCandidates() []string {
 		"docker-compose.production.yaml",
 		"docker-compose.production.yml",
 	}
+	return pathCandidates(names)
+}
+
+func dockerfileCandidates() []string {
+	return pathCandidates([]string{"Dockerfile", "dockerfile", "Containerfile"})
+}
+
+func sourceFileCandidates() []string {
+	return pathCandidates([]string{"package.json", "go.mod", "pyproject.toml", "requirements.txt", "Cargo.toml"})
+}
+
+func pathCandidates(names []string) []string {
+	dirs := []string{"", "backend", "frontend", "server", "client", "app", "api", "web", "cmd"}
+	out := make([]string, 0, len(names)*len(dirs))
+	for _, dir := range dirs {
+		for _, name := range names {
+			if dir == "" {
+				out = append(out, name)
+			} else {
+				out = append(out, dir+"/"+name)
+			}
+		}
+	}
+	return out
 }
 
 func validateProjectPorts(projectName string, ports model.ProjectPorts) error {
@@ -559,25 +600,9 @@ func coalesce(v, fallback string) string {
 }
 
 func githubContentExists(ctx context.Context, token, owner, repo, filePath, ref string) (bool, error) {
-	endpoint := fmt.Sprintf("https://api.github.com/repos/%s/%s/contents/%s?ref=%s", url.PathEscape(owner), url.PathEscape(repo), strings.TrimLeft(filePath, "/"), url.QueryEscape(ref))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return false, err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
-	if err != nil {
-		return false, err
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if resp.StatusCode == http.StatusNotFound {
-		return false, nil
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return false, fmt.Errorf("GitHub content check failed: %s", strings.TrimSpace(string(body)))
+	body, ok, err := githubContentRead(ctx, token, owner, repo, filePath, ref)
+	if err != nil || !ok {
+		return ok, err
 	}
 	var payload struct {
 		Type string `json:"type"`
@@ -586,4 +611,58 @@ func githubContentExists(ctx context.Context, token, owner, repo, filePath, ref 
 		return false, fmt.Errorf("GitHub returned invalid JSON")
 	}
 	return payload.Type == "file", nil
+}
+
+type basaltAppMeta struct {
+	ServicePorts []int `json:"service_ports"`
+}
+
+func githubBasaltAppMeta(ctx context.Context, token, owner, repo, ref string) (basaltAppMeta, bool, error) {
+	body, ok, err := githubContentRead(ctx, token, owner, repo, ".basalt/app.json", ref)
+	if err != nil || !ok {
+		return basaltAppMeta{}, ok, err
+	}
+	var payload struct {
+		Type    string `json:"type"`
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return basaltAppMeta{}, false, fmt.Errorf("GitHub returned invalid JSON")
+	}
+	if payload.Type != "file" {
+		return basaltAppMeta{}, false, nil
+	}
+	decoded, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(payload.Content, "\n", ""))
+	if err != nil {
+		return basaltAppMeta{}, false, fmt.Errorf("Basalt app metadata was not base64 content")
+	}
+	var meta basaltAppMeta
+	if err := json.Unmarshal(decoded, &meta); err != nil {
+		return basaltAppMeta{}, false, fmt.Errorf("Basalt app metadata was invalid JSON")
+	}
+	return meta, true, nil
+}
+
+func githubContentRead(ctx context.Context, token, owner, repo, filePath, ref string) ([]byte, bool, error) {
+	endpoint := fmt.Sprintf("https://api.github.com/repos/%s/%s/contents/%s?ref=%s", url.PathEscape(owner), url.PathEscape(repo), strings.TrimLeft(filePath, "/"), url.QueryEscape(ref))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	if err != nil {
+		return nil, false, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, false, nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, false, fmt.Errorf("GitHub content check failed: %s", strings.TrimSpace(string(body)))
+	}
+	return body, true, nil
 }
