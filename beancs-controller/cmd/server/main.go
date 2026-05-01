@@ -130,6 +130,9 @@ func registerAPI(api fiber.Router, cfg *config.Config, db *gorm.DB, registry *ba
 		return c.JSON(fiber.Map{"status": "ok", "version": cfg.Version})
 	})
 	api.Get("/ready", func(c *fiber.Ctx) error {
+		return c.JSON(fiber.Map{"status": "ready", "version": cfg.Version})
+	})
+	api.Get("/db-ready", func(c *fiber.Ctx) error {
 		sqlDB, err := db.DB()
 		if err != nil {
 			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"status": "unavailable", "error": "database handle unavailable"})
@@ -139,7 +142,7 @@ func registerAPI(api fiber.Router, cfg *config.Config, db *gorm.DB, registry *ba
 		if err := sqlDB.PingContext(ctx); err != nil {
 			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"status": "unavailable", "error": "database unavailable"})
 		}
-		return c.JSON(fiber.Map{"status": "ready", "version": cfg.Version})
+		return c.JSON(fiber.Map{"status": "ready", "database": "ok", "version": cfg.Version})
 	})
 	api.Get("/version", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{"version": cfg.Version})
