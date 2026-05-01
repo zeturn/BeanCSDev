@@ -87,7 +87,7 @@ function App() {
   useEffect(() => {
     if (!token || view !== "progress") return;
     loadProjectProgress();
-    const timer = setInterval(loadProjectProgress, 5000);
+    const timer = setInterval(loadProjectProgress, 3000);
     return () => clearInterval(timer);
   }, [token, view, activeProgressProjectID, projects.length]);
 
@@ -293,14 +293,20 @@ function App() {
     }
     setActiveProgressProjectID(String(selected.id));
     try {
-      const [status, deployments] = await Promise.all([
+      const [status, deployments, logData] = await Promise.all([
         api.get(`/projects/${selected.id}/status`),
         api.get(`/projects/${selected.id}/deployments`),
+        api.get(`/projects/${selected.id}/logs?tail=160`),
       ]);
       setProjectProgress({
         project: selected,
         pods: status.pods || [],
+        deployment: status.deployment || null,
+        services: status.services || [],
+        ingresses: status.ingresses || [],
+        events: status.events || [],
         deployments: deployments.data || [],
+        logs: logData.logs || "",
         checked_at: new Date().toISOString(),
       });
     } catch (err) {
@@ -521,8 +527,11 @@ function DeployView({credentials, namespaces, selectedCredential, setSelectedCre
 
 function ProgressView({projects, activeProjectID, setActiveProjectID, progress, installProgress, refresh}) {
   const pods = progress?.pods || [];
+  const events = progress?.events || [];
   const deployments = progress?.deployments || [];
-  const readyPods = pods.filter((pod) => String(pod.ready || "").includes("/") ? String(pod.ready).split("/").every((v, _, a) => Number(v) === Number(a[1])) : pod.ready === true).length;
+  const readyPods = pods.filter((pod) => Number(pod.ready_containers || 0) > 0 && Number(pod.ready_containers) === Number(pod.total_containers || 0)).length;
+  const desiredReplicas = progress?.deployment?.replicas ?? progress?.project?.replicas ?? 0;
+  const readyReplicas = progress?.deployment?.ready_replicas ?? 0;
   return (
     <div className="stack">
       <section className="panel action-panel">
@@ -562,14 +571,24 @@ function ProgressView({projects, activeProjectID, setActiveProjectID, progress, 
           <section className="panel">
             <h2><Server size={18} /> Runtime</h2>
             <div className="runtime-summary">
-              <strong>{readyPods}/{pods.length}</strong>
-              <span>pods ready</span>
+              <strong>{readyReplicas}/{desiredReplicas}</strong>
+              <span>replicas ready · {readyPods}/{pods.length} pods</span>
             </div>
+            {progress.deployment && (
+              <div className="detail-list compact-details">
+                <span>Updated <b>{progress.deployment.updated_replicas}</b></span>
+                <span>Available <b>{progress.deployment.available_replicas}</b></span>
+              </div>
+            )}
             <div className="mini-table">
               {pods.map((pod) => (
                 <div key={pod.name || pod.pod || JSON.stringify(pod)}>
-                  <span>{pod.name || pod.pod || "pod"}</span>
-                  <b>{pod.phase || pod.status || pod.ready || "-"}</b>
+                  <span>
+                    {pod.name || "pod"}
+                    {pod.reason && <small>{pod.reason}</small>}
+                    {pod.containers?.length > 0 && <small>{pod.containers.join(" · ")}</small>}
+                  </span>
+                  <b>{pod.ready_containers}/{pod.total_containers} · {pod.status || "-"}</b>
                 </div>
               ))}
               {pods.length === 0 && <div className="empty">No pods reported yet.</div>}
@@ -589,6 +608,26 @@ function ProgressView({projects, activeProjectID, setActiveProjectID, progress, 
               ))}
               {deployments.length === 0 && <div className="empty">No deployment events yet.</div>}
             </div>
+          </section>
+          <section className="panel">
+            <h2><ListRestart size={18} /> Kubernetes events</h2>
+            <div className="timeline">
+              {events.map((event, index) => (
+                <div className="timeline-item" key={`${event.object}-${event.reason}-${index}`}>
+                  <span className={event.type === "Warning" ? "dot failed" : "dot done"} />
+                  <div>
+                    <b>{event.reason || event.type}</b>
+                    <small>{event.object} · {event.count || 1}x · {formatTime(event.last_seen)}</small>
+                    <p>{event.message}</p>
+                  </div>
+                </div>
+              ))}
+              {events.length === 0 && <div className="empty">No Kubernetes events yet.</div>}
+            </div>
+          </section>
+          <section className="panel log-panel">
+            <h2><Code2 size={18} /> Logs</h2>
+            <pre>{progress.logs || "No application logs yet."}</pre>
           </section>
         </div>
       ) : (
