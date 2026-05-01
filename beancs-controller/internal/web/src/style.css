@@ -49,6 +49,18 @@ button:disabled {
   color: #ffffff;
 }
 
+.danger-button {
+  border-color: #fecaca;
+  color: #991b1b;
+  background: #fff7f7;
+}
+
+.danger-button.filled {
+  background: #b91c1c;
+  border-color: #b91c1c;
+  color: #ffffff;
+}
+
 .login-screen {
   min-height: 100vh;
   display: grid;
@@ -416,6 +428,115 @@ textarea {
   color: #64748b;
 }
 
+.progress-controls {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.progress-grid {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.85fr) minmax(280px, 1fr) minmax(280px, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.step-list,
+.detail-list,
+.timeline,
+.mini-table,
+.delete-summary {
+  display: grid;
+  gap: 8px;
+}
+
+.step,
+.detail-list span,
+.mini-table div,
+.delete-summary span {
+  min-height: 38px;
+  border: 1px solid #e2e8f0;
+  border-radius: 7px;
+  background: #f8fafc;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.step {
+  justify-content: flex-start;
+}
+
+.step b {
+  margin-left: auto;
+  color: #64748b;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.step.done svg,
+.dot.done {
+  color: #166534;
+}
+
+.step.running svg {
+  color: #155e75;
+}
+
+.step.failed svg,
+.dot.failed {
+  color: #991b1b;
+}
+
+.runtime-summary {
+  border: 1px solid #dbe4ed;
+  border-radius: 8px;
+  padding: 14px;
+  margin-bottom: 12px;
+  background: #ecfeff;
+  display: grid;
+  gap: 2px;
+}
+
+.runtime-summary strong {
+  font-size: 26px;
+}
+
+.runtime-summary span,
+.timeline small {
+  color: #64748b;
+}
+
+.timeline-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid #edf2f7;
+}
+
+.timeline-item div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: currentColor;
+  color: #155e75;
+}
+
+.error-inline {
+  color: #991b1b;
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -467,6 +588,10 @@ textarea {
   }
 
   .deploy-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .progress-grid {
     grid-template-columns: 1fr;
   }
 

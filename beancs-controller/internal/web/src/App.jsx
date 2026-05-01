@@ -2,6 +2,7 @@ import React, {useEffect, useMemo, useState} from "react";
 import {createRoot} from "react-dom/client";
 import {
   Boxes,
+  CheckCircle2,
   Cloud,
   Code2,
   Database,
@@ -11,6 +12,7 @@ import {
   KeyRound,
   Layers3,
   ListRestart,
+  LoaderCircle,
   Lock,
   Network,
   Play,
@@ -37,6 +39,7 @@ const emptyRuntime = {
 
 const nav = [
   {id: "deploy", label: "Deploy", icon: Rocket},
+  {id: "progress", label: "Progress", icon: LoaderCircle},
   {id: "projects", label: "Projects", icon: Boxes},
   {id: "github", label: "GitHub", icon: Github},
   {id: "domains", label: "Domains", icon: Globe2},
@@ -66,6 +69,10 @@ function App() {
   const [analysis, setAnalysis] = useState(null);
   const [deployForm, setDeployForm] = useState(defaultDeployForm());
   const [editingProject, setEditingProject] = useState(null);
+  const [deletingProject, setDeletingProject] = useState(null);
+  const [activeProgressProjectID, setActiveProgressProjectID] = useState("");
+  const [projectProgress, setProjectProgress] = useState(null);
+  const [installProgress, setInstallProgress] = useState(null);
 
   const api = useMemo(() => makeAPI(token, logout), [token]);
 
@@ -76,6 +83,13 @@ function App() {
   useEffect(() => {
     if (token) loadWorkspace();
   }, [token]);
+
+  useEffect(() => {
+    if (!token || view !== "progress") return;
+    loadProjectProgress();
+    const timer = setInterval(loadProjectProgress, 5000);
+    return () => clearInterval(timer);
+  }, [token, view, activeProgressProjectID, projects.length]);
 
   async function boot() {
     try {
@@ -226,18 +240,71 @@ function App() {
     const payload = buildProjectPayload(deployForm, selectedCredential, credentials);
     setLoading(true);
     setError("");
+    setInstallProgress({
+      project: payload.name,
+      started_at: new Date().toISOString(),
+      steps: [
+        {label: "Validate repository", state: "done"},
+        {label: "Create namespace and secrets", state: "running"},
+        {label: "Apply service and ingress", state: "pending"},
+        {label: "Commit GitOps manifests", state: "pending"},
+      ],
+    });
+    setView("progress");
     try {
-      await api.post("/projects", payload);
+      const created = await api.post("/projects", payload);
       setNotice("Project created. BeanCS is preparing GitOps manifests and traffic routes.");
+      setActiveProgressProjectID(String(created.id));
+      setInstallProgress((current) => current ? {
+        ...current,
+        steps: current.steps.map((step) => ({...step, state: "done"})),
+      } : null);
       setDeployForm(defaultDeployForm());
       setAnalysis(null);
       setSelectedRepo("");
       await loadWorkspace();
-      setView("projects");
+      await loadProjectProgress(String(created.id));
     } catch (err) {
       setError(err.message);
+      setInstallProgress((current) => current ? {
+        ...current,
+        steps: current.steps.map((step) => step.state === "running" ? {...step, state: "failed"} : step),
+      } : null);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadProjectProgress(projectID = activeProgressProjectID) {
+    let selected = projectID
+      ? projects.find((project) => String(project.id) === String(projectID))
+      : projects[0];
+    if (!selected) {
+      if (!projectID) {
+        setProjectProgress(null);
+        return;
+      }
+      try {
+        selected = await api.get(`/projects/${projectID}`);
+      } catch (err) {
+        setProjectProgress(null);
+        return;
+      }
+    }
+    setActiveProgressProjectID(String(selected.id));
+    try {
+      const [status, deployments] = await Promise.all([
+        api.get(`/projects/${selected.id}/status`),
+        api.get(`/projects/${selected.id}/deployments`),
+      ]);
+      setProjectProgress({
+        project: selected,
+        pods: status.pods || [],
+        deployments: deployments.data || [],
+        checked_at: new Date().toISOString(),
+      });
+    } catch (err) {
+      setProjectProgress({project: selected, pods: [], deployments: [], error: err.message, checked_at: new Date().toISOString()});
     }
   }
 
@@ -251,9 +318,27 @@ function App() {
   }
 
   async function deleteProject(project) {
-    if (!confirm(`Delete ${project.name}?`)) return;
-    await api.delete(`/projects/${project.id}`);
-    await loadWorkspace();
+    setDeletingProject(project);
+  }
+
+  async function confirmDeleteProject() {
+    if (!deletingProject) return;
+    setLoading(true);
+    setError("");
+    try {
+      await api.delete(`/projects/${deletingProject.id}`);
+      setNotice(`${deletingProject.name} deleted.`);
+      setDeletingProject(null);
+      if (String(activeProgressProjectID) === String(deletingProject.id)) {
+        setActiveProgressProjectID("");
+        setProjectProgress(null);
+      }
+      await loadWorkspace();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function scaleProject(project, replicas) {
@@ -323,8 +408,18 @@ function App() {
             deployProject={deployProject}
           />
         )}
+        {view === "progress" && (
+          <ProgressView
+            projects={projects}
+            activeProjectID={activeProgressProjectID}
+            setActiveProjectID={setActiveProgressProjectID}
+            progress={projectProgress}
+            installProgress={installProgress}
+            refresh={loadProjectProgress}
+          />
+        )}
         {view === "projects" && (
-          <ProjectsView projects={projects} onEdit={setEditingProject} onDelete={deleteProject} onScale={scaleProject} onRestart={restartProject} />
+          <ProjectsView projects={projects} onEdit={setEditingProject} onDelete={deleteProject} onScale={scaleProject} onRestart={restartProject} onProgress={(project) => { setActiveProgressProjectID(String(project.id)); setView("progress"); }} />
         )}
         {view === "github" && (
           <GitHubView credentials={credentials.github} onConnect={connectGitHubApp} onRepos={loadRepos} onDelete={(id) => deleteCredential("github", id)} repos={repos} />
@@ -335,6 +430,7 @@ function App() {
         {["namespaces", "pods", "nodes", "ingresses", "services"].includes(view) && <RuntimeTable kind={view} rows={runtime[view] || []} />}
       </main>
       {editingProject && <ProjectModal project={editingProject} onClose={() => setEditingProject(null)} onSubmit={updateProject} />}
+      {deletingProject && <DeleteProjectModal project={deletingProject} busy={loading} onClose={() => setDeletingProject(null)} onDelete={confirmDeleteProject} />}
     </div>
   );
 }
@@ -423,7 +519,97 @@ function DeployView({credentials, namespaces, selectedCredential, setSelectedCre
   );
 }
 
-function ProjectsView({projects, onEdit, onDelete, onScale, onRestart}) {
+function ProgressView({projects, activeProjectID, setActiveProjectID, progress, installProgress, refresh}) {
+  const pods = progress?.pods || [];
+  const deployments = progress?.deployments || [];
+  const readyPods = pods.filter((pod) => String(pod.ready || "").includes("/") ? String(pod.ready).split("/").every((v, _, a) => Number(v) === Number(a[1])) : pod.ready === true).length;
+  return (
+    <div className="stack">
+      <section className="panel action-panel">
+        <div>
+          <h2><LoaderCircle size={18} /> Installation progress</h2>
+          <p>Track project creation, GitOps activity, and live pod readiness.</p>
+        </div>
+        <div className="progress-controls">
+          <select value={activeProjectID} onChange={(event) => setActiveProjectID(event.target.value)}>
+            <option value="">Choose project</option>
+            {projects.map((project) => <option key={project.id} value={project.id}>{project.display_name || project.name}</option>)}
+          </select>
+          <button onClick={() => refresh()}><RefreshCw size={15} /> Refresh</button>
+        </div>
+      </section>
+      {installProgress && (
+        <section className="panel">
+          <h2><Rocket size={18} /> Current install</h2>
+          <div className="step-list">
+            {installProgress.steps.map((step) => <ProgressStep key={step.label} step={step} />)}
+          </div>
+        </section>
+      )}
+      {progress ? (
+        <div className="progress-grid">
+          <section className="panel">
+            <h2><Boxes size={18} /> Project</h2>
+            <div className="detail-list">
+              <span>Name <b>{progress.project.display_name || progress.project.name}</b></span>
+              <span>Namespace <b>{progress.project.namespace}</b></span>
+              <span>Route <b>{progress.project.domain || progress.project.exposure_mode}</b></span>
+              <span>Status <b>{progress.project.status}</b></span>
+              <span>Last checked <b>{formatTime(progress.checked_at)}</b></span>
+            </div>
+            {progress.error && <p className="error-inline">{progress.error}</p>}
+          </section>
+          <section className="panel">
+            <h2><Server size={18} /> Runtime</h2>
+            <div className="runtime-summary">
+              <strong>{readyPods}/{pods.length}</strong>
+              <span>pods ready</span>
+            </div>
+            <div className="mini-table">
+              {pods.map((pod) => (
+                <div key={pod.name || pod.pod || JSON.stringify(pod)}>
+                  <span>{pod.name || pod.pod || "pod"}</span>
+                  <b>{pod.phase || pod.status || pod.ready || "-"}</b>
+                </div>
+              ))}
+              {pods.length === 0 && <div className="empty">No pods reported yet.</div>}
+            </div>
+          </section>
+          <section className="panel">
+            <h2><GitBranch size={18} /> Deployments</h2>
+            <div className="timeline">
+              {deployments.map((deployment) => (
+                <div className="timeline-item" key={deployment.id}>
+                  <span className={deployment.status === "failed" ? "dot failed" : ["deployed", "provisioned"].includes(deployment.status) ? "dot done" : "dot running"} />
+                  <div>
+                    <b>{deployment.status || "pending"}</b>
+                    <small>{deployment.tag || deployment.commit_sha || "manual"} · {formatTime(deployment.created_at)}</small>
+                  </div>
+                </div>
+              ))}
+              {deployments.length === 0 && <div className="empty">No deployment events yet.</div>}
+            </div>
+          </section>
+        </div>
+      ) : (
+        <section className="panel"><div className="empty">Choose a project to view progress.</div></section>
+      )}
+    </div>
+  );
+}
+
+function ProgressStep({step}) {
+  const Icon = step.state === "done" ? CheckCircle2 : step.state === "running" ? LoaderCircle : step.state === "failed" ? Trash2 : Play;
+  return (
+    <div className={`step ${step.state}`}>
+      <Icon size={16} />
+      <span>{step.label}</span>
+      <b>{step.state}</b>
+    </div>
+  );
+}
+
+function ProjectsView({projects, onEdit, onDelete, onScale, onRestart, onProgress}) {
   return (
     <section className="panel">
       <div className="table">
@@ -440,15 +626,35 @@ function ProjectsView({projects, onEdit, onDelete, onScale, onRestart}) {
               <button onClick={() => onScale(project, Number(project.replicas || 1) + 1)}>+</button>
             </span>
             <span className="row-actions">
+              <button onClick={() => onProgress(project)} title="Progress"><LoaderCircle size={15} /> Progress</button>
               <button onClick={() => onRestart(project)} title="Restart"><ListRestart size={15} /></button>
               <button onClick={() => onEdit(project)} title="Edit"><Plus size={15} /></button>
-              <button onClick={() => onDelete(project)} title="Delete"><Trash2 size={15} /></button>
+              <button className="danger-button" onClick={() => onDelete(project)} title="Delete"><Trash2 size={15} /> Delete</button>
             </span>
           </div>
         ))}
         {projects.length === 0 && <div className="empty">No projects yet.</div>}
       </div>
     </section>
+  );
+}
+
+function DeleteProjectModal({project, busy, onClose, onDelete}) {
+  return (
+    <div className="modal-backdrop">
+      <div className="modal">
+        <h2>Delete {project.name}</h2>
+        <p className="muted">This removes the project record, namespace, DNS records, and managed OAuth app where applicable.</p>
+        <div className="delete-summary">
+          <span>Namespace <b>{project.namespace}</b></span>
+          <span>Route <b>{project.domain || project.exposure_mode}</b></span>
+        </div>
+        <div className="modal-actions">
+          <button type="button" onClick={onClose} disabled={busy}>Cancel</button>
+          <button className="danger-button filled" type="button" onClick={onDelete} disabled={busy}><Trash2 size={15} /> Delete</button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -675,13 +881,19 @@ async function finishLogin(config) {
 }
 
 function titleFor(view) {
-  return ({deploy: "Deploy project", projects: "Projects", github: "GitHub", domains: "Domains", cloudflare: "Cloudflare", basaltpass: "BasaltPass", namespaces: "Namespaces", pods: "Pods", nodes: "Nodes", ingresses: "Ingresses", services: "Services"}[view] || "BeanCS");
+  return ({deploy: "Deploy project", progress: "Progress", projects: "Projects", github: "GitHub", domains: "Domains", cloudflare: "Cloudflare", basaltpass: "BasaltPass", namespaces: "Namespaces", pods: "Pods", nodes: "Nodes", ingresses: "Ingresses", services: "Services"}[view] || "BeanCS");
 }
 
 function subtitleFor(view, runtime, projects) {
   if (view === "projects") return `${projects.length} managed projects`;
+  if (view === "progress") return "Watch installs and runtime readiness";
   if (runtime[view]) return `${runtime[view].length} cluster resources`;
   return "Select a repository, verify containerization, and publish traffic.";
+}
+
+function formatTime(value) {
+  if (!value) return "-";
+  return new Date(value).toLocaleString();
 }
 
 function formatCell(value) {

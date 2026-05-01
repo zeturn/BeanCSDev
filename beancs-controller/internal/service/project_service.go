@@ -320,6 +320,11 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 		rollback()
 		return nil, err
 	}
+	deployment := &model.Deployment{ProjectID: project.ID, Tag: "initial", CommitSHA: req.GitHubBranch, Status: "provisioning", TriggeredBy: userID}
+	if err := s.db.WithContext(ctx).Create(deployment).Error; err != nil {
+		rollback()
+		return nil, err
+	}
 	rollbacks = append(rollbacks, func() {
 		_ = s.db.WithContext(context.Background()).Transaction(func(tx *gorm.DB) error {
 			if err := tx.Where("project_id = ?", project.ID).Delete(&model.DNSRecord{}).Error; err != nil {
@@ -336,6 +341,7 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 		rollback()
 		return nil, err
 	}
+	_ = s.db.WithContext(ctx).Model(deployment).Updates(map[string]any{"status": "provisioned"}).Error
 	quotaReserved = false
 	return project, nil
 }
