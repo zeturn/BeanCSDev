@@ -1,9 +1,20 @@
 package handler
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"net/url"
+	"strconv"
+	"strings"
+	"time"
+
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2"
 	"github.com/zeturn/beancs-controller/internal/basaltpass"
+	"github.com/zeturn/beancs-controller/internal/config"
 	"github.com/zeturn/beancs-controller/internal/dto"
 	"github.com/zeturn/beancs-controller/internal/middleware"
 	"github.com/zeturn/beancs-controller/internal/model"
@@ -16,10 +27,11 @@ type CredentialHandler struct {
 	db       *gorm.DB
 	service  *service.CredentialService
 	registry *basaltpass.ClientRegistry
+	cfg      *config.Config
 }
 
-func NewCredentialHandler(db *gorm.DB, svc *service.CredentialService, registry *basaltpass.ClientRegistry, v *validator.Validate) *CredentialHandler {
-	return &CredentialHandler{Base: NewBase(v), db: db, service: svc, registry: registry}
+func NewCredentialHandler(db *gorm.DB, svc *service.CredentialService, registry *basaltpass.ClientRegistry, cfg *config.Config, v *validator.Validate) *CredentialHandler {
+	return &CredentialHandler{Base: NewBase(v), db: db, service: svc, registry: registry, cfg: cfg}
 }
 
 func (h *CredentialHandler) Register(r fiber.Router) {
@@ -40,6 +52,7 @@ func (h *CredentialHandler) registerCloudflare(r fiber.Router) {
 }
 
 func (h *CredentialHandler) registerGitHub(r fiber.Router) {
+	r.Post("/app/start", h.startGitHubAppInstall)
 	r.Post("/", h.createGitHub)
 	r.Get("/", h.listGitHub)
 	r.Get("/:id", h.getGitHub)
@@ -48,6 +61,10 @@ func (h *CredentialHandler) registerGitHub(r fiber.Router) {
 	r.Post("/:id/share", h.share(model.CredentialTypeGitHub))
 	r.Delete("/:id/share/:user_id", h.revoke(model.CredentialTypeGitHub))
 	r.Get("/:id/verify", h.verifyOK)
+}
+
+func (h *CredentialHandler) RegisterGitHubAppCallback(r fiber.Router) {
+	r.Get("/app/callback", h.githubAppCallback)
 }
 
 func (h *CredentialHandler) registerBasaltPass(r fiber.Router) {
@@ -83,6 +100,55 @@ func (h *CredentialHandler) createGitHub(c *fiber.Ctx) error {
 		return fail(c, 400, err)
 	}
 	return c.Status(201).JSON(out)
+}
+
+type githubAppState struct {
+	UserID     string    `json:"user_id"`
+	Name       string    `json:"name"`
+	Org        string    `json:"org,omitempty"`
+	GitOpsRepo string    `json:"gitops_repo"`
+	ExpiresAt  time.Time `json:"expires_at"`
+}
+
+func (h *CredentialHandler) startGitHubAppInstall(c *fiber.Ctx) error {
+	if h.cfg == nil || h.cfg.GitHubAppID == 0 || h.cfg.GitHubAppSlug == "" || strings.TrimSpace(h.cfg.GitHubAppPrivateKey) == "" {
+		return fail(c, 400, fmt.Errorf("GitHub App is not configured"))
+	}
+	var req dto.StartGitHubAppInstallRequest
+	if err := h.parseAndValidate(c, &req); err != nil {
+		return err
+	}
+	state, err := h.signGitHubAppState(githubAppState{
+		UserID:     middleware.UserID(c),
+		Name:       req.Name,
+		Org:        req.Org,
+		GitOpsRepo: req.GitOpsRepo,
+		ExpiresAt:  time.Now().Add(15 * time.Minute),
+	})
+	if err != nil {
+		return fail(c, 500, err)
+	}
+	installURL := fmt.Sprintf("https://github.com/apps/%s/installations/new?state=%s", url.PathEscape(h.cfg.GitHubAppSlug), url.QueryEscape(state))
+	return c.JSON(fiber.Map{"install_url": installURL})
+}
+
+func (h *CredentialHandler) githubAppCallback(c *fiber.Ctx) error {
+	installationID, err := strconv.ParseInt(c.Query("installation_id"), 10, 64)
+	if err != nil || installationID <= 0 {
+		return c.Status(fiber.StatusBadRequest).SendString("GitHub App installation was missing.")
+	}
+	state, err := h.verifyGitHubAppState(c.Query("state"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).SendString("GitHub App state was invalid or expired.")
+	}
+	if _, err := h.service.CreateGitHubApp(c.UserContext(), state.UserID, dto.StartGitHubAppInstallRequest{
+		Name:       state.Name,
+		Org:        state.Org,
+		GitOpsRepo: state.GitOpsRepo,
+	}, installationID, ""); err != nil {
+		return c.Status(fiber.StatusBadRequest).SendString(err.Error())
+	}
+	return c.Redirect("/?github_app=connected", fiber.StatusFound)
 }
 
 func (h *CredentialHandler) createBasaltPass(c *fiber.Ctx) error {
@@ -306,4 +372,43 @@ func (h *CredentialHandler) healthBasaltPass(c *fiber.Ctx) error {
 		return fail(c, 502, err)
 	}
 	return c.JSON(out)
+}
+
+func (h *CredentialHandler) signGitHubAppState(state githubAppState) (string, error) {
+	body, err := json.Marshal(state)
+	if err != nil {
+		return "", err
+	}
+	payload := base64.RawURLEncoding.EncodeToString(body)
+	sig := hmacSHA256(payload, h.cfg.WebhookSecret)
+	return payload + "." + sig, nil
+}
+
+func (h *CredentialHandler) verifyGitHubAppState(raw string) (*githubAppState, error) {
+	parts := strings.Split(raw, ".")
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("invalid state")
+	}
+	expected := hmacSHA256(parts[0], h.cfg.WebhookSecret)
+	if !hmac.Equal([]byte(parts[1]), []byte(expected)) {
+		return nil, fmt.Errorf("invalid state signature")
+	}
+	body, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return nil, err
+	}
+	var state githubAppState
+	if err := json.Unmarshal(body, &state); err != nil {
+		return nil, err
+	}
+	if state.UserID == "" || state.Name == "" || state.GitOpsRepo == "" || time.Now().After(state.ExpiresAt) {
+		return nil, fmt.Errorf("invalid state payload")
+	}
+	return &state, nil
+}
+
+func hmacSHA256(value, secret string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write([]byte(value))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }

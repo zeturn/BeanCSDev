@@ -199,6 +199,9 @@ jobs:
             --from-literal=BEANCS_PUBLIC_HOST="${{ vars.BEANCS_PUBLIC_HOST }}" \
             --from-literal=BEANCS_WEBHOOK_HOST="${{ vars.BEANCS_WEBHOOK_HOST }}" \
             --from-literal=BEANCS_TAILSCALE_HOST="${{ vars.BEANCS_TAILSCALE_HOST || 'beancs-controller' }}" \
+            --from-literal=BEANCS_GITHUB_APP_ID="${{ vars.BEANCS_GITHUB_APP_ID }}" \
+            --from-literal=BEANCS_GITHUB_APP_SLUG="${{ vars.BEANCS_GITHUB_APP_SLUG }}" \
+            --from-literal=BEANCS_GITHUB_APP_PRIVATE_KEY="${{ secrets.BEANCS_GITHUB_APP_PRIVATE_KEY }}" \
             --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Deploy controller manifests
