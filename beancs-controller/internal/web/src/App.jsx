@@ -42,6 +42,7 @@ const nav = [
   {id: "domains", label: "Domains", icon: Globe2},
   {id: "cloudflare", label: "Cloudflare", icon: Cloud},
   {id: "basaltpass", label: "BasaltPass", icon: Shield},
+  {id: "namespaces", label: "Namespaces", icon: Layers3},
   {id: "pods", label: "Pods", icon: Layers3},
   {id: "nodes", label: "Nodes", icon: Server},
   {id: "ingresses", label: "Ingresses", icon: Network},
@@ -214,7 +215,7 @@ function App() {
 	  name: slugify(repoFullName.split("/")[1] || repoFullName),
 	  github_repo: repoFullName,
 	  github_branch: branch,
-	  dockerfile_path: data.dockerfile_path || "Dockerfile",
+	  dockerfile_path: data.dockerfile_path || "",
 	  port: data.default_port || 8080,
 	}));
   }
@@ -309,6 +310,7 @@ function App() {
         {view === "deploy" && (
           <DeployView
             credentials={credentials}
+            namespaces={runtime.namespaces || []}
             selectedCredential={selectedCredential}
             setSelectedCredential={setSelectedCredential}
             repos={repos}
@@ -330,14 +332,14 @@ function App() {
         {view === "domains" && <DomainsView domains={domains} />}
         {view === "cloudflare" && <CredentialManager kind="cloudflare" rows={credentials.cloudflare} onCreate={createCredential} onDelete={deleteCredential} />}
         {view === "basaltpass" && <CredentialManager kind="basaltpass" rows={credentials.basaltpass} onCreate={createCredential} onDelete={deleteCredential} />}
-        {["pods", "nodes", "ingresses", "services"].includes(view) && <RuntimeTable kind={view} rows={runtime[view] || []} />}
+        {["namespaces", "pods", "nodes", "ingresses", "services"].includes(view) && <RuntimeTable kind={view} rows={runtime[view] || []} />}
       </main>
       {editingProject && <ProjectModal project={editingProject} onClose={() => setEditingProject(null)} onSubmit={updateProject} />}
     </div>
   );
 }
 
-function DeployView({credentials, selectedCredential, setSelectedCredential, repos, selectedRepo, analysis, form, setForm, loadRepos, analyzeRepo, deployProject}) {
+function DeployView({credentials, namespaces, selectedCredential, setSelectedCredential, repos, selectedRepo, analysis, form, setForm, loadRepos, analyzeRepo, deployProject}) {
   const selectedCloudflare = credentials.cloudflare.find((cred) => String(cred.id) === String(form.cloudflare_credential_id));
   const publicHost = form.subdomain && selectedCloudflare ? `${form.subdomain}.${selectedCloudflare.domain}` : "";
   return (
@@ -367,6 +369,7 @@ function DeployView({credentials, selectedCredential, setSelectedCredential, rep
             <div className={analysis.deployable ? "status good" : "status bad"}>{analysis.deployable ? "Deployable" : "Needs containerization"}</div>
             <div className="signal-list">
               {(analysis.signals || []).map((signal) => <span key={signal}>{signal}</span>)}
+              {analysis.compose_path && <span>Compose: {analysis.compose_path}</span>}
               {(analysis.warnings || []).map((warning) => <span className="warning" key={warning}>{warning}</span>)}
             </div>
           </>
@@ -376,12 +379,22 @@ function DeployView({credentials, selectedCredential, setSelectedCredential, rep
         <h2><Rocket size={18} /> Deployment</h2>
         <div className="form-grid">
           <Field label="Project name" value={form.name} onChange={(v) => setForm({...form, name: slugify(v)})} required />
+          <label>Namespace</label>
+          <input
+            list="namespace-options"
+            value={form.namespace}
+            placeholder={form.name ? `proj-${form.name}` : "proj-my-app"}
+            onChange={(event) => setForm({...form, namespace: slugify(event.target.value)})}
+          />
+          <datalist id="namespace-options">
+            {namespaces.map((ns) => <option key={ns.name} value={ns.name} />)}
+          </datalist>
           <Field label="Branch" value={form.github_branch} onChange={(v) => setForm({...form, github_branch: v})} />
           <Field label="Dockerfile path" value={form.dockerfile_path} onChange={(v) => setForm({...form, dockerfile_path: v})} />
           <Field label="Port" type="number" value={form.port} onChange={(v) => setForm({...form, port: Number(v)})} />
-          <label>BasaltPass</label>
-          <select value={form.basaltpass_instance_id} onChange={(event) => setForm({...form, basaltpass_instance_id: event.target.value})} required>
-            <option value="">Choose instance</option>
+          <label>BasaltPass optional</label>
+          <select value={form.basaltpass_instance_id} onChange={(event) => setForm({...form, basaltpass_instance_id: event.target.value})}>
+            <option value="">Do not register OAuth app</option>
             {credentials.basaltpass.map((cred) => <option key={cred.id} value={cred.id}>{cred.name}</option>)}
           </select>
           <label>Traffic</label>
@@ -453,7 +466,8 @@ function GitHubView({credentials, onConnect, onRepos, onDelete, repos}) {
           <div className="tr head"><span>Name</span><span>Account</span><span>Type</span><span>GitOps repo</span><span>Actions</span></div>
           {credentials.map((cred) => (
             <div className="tr" key={cred.id}>
-              <span>{cred.name}</span><span>{cred.account_login || cred.org || "-"}</span><span>{cred.auth_type || "pat"}</span><span>{cred.gitops_repo || "-"}</span>
+              <span className="account-cell">{cred.avatar_url ? <img src={cred.avatar_url} alt="" /> : <Github size={18} />}{cred.name}</span>
+              <span>{cred.account_login || cred.org || "-"}</span><span>{cred.auth_type || "pat"}</span><span>{cred.gitops_repo || "-"}</span>
               <span className="row-actions">
                 <button onClick={() => onRepos(cred.id)}><GitBranch size={15} /> Repos</button>
                 <button onClick={() => onDelete(cred.id)}><Trash2 size={15} /></button>
@@ -577,6 +591,7 @@ function Field({label, value, onChange, type = "text", required = false}) {
 function defaultDeployForm() {
   return {
     name: "",
+    namespace: "",
     github_branch: "main",
     dockerfile_path: "Dockerfile",
     basaltpass_instance_id: "",
@@ -596,11 +611,12 @@ function buildProjectPayload(form, githubCredentialID, credentials) {
   const domain = exposure === "public" && selectedCF ? `${form.subdomain}.${selectedCF.domain}` : exposure === "private" ? form.private_host : "";
   return {
     name: form.name,
+    namespace: form.namespace || undefined,
     github_credential_id: Number(githubCredentialID),
     github_repo: form.github_repo,
     github_branch: form.github_branch || "main",
     dockerfile_path: form.dockerfile_path || "Dockerfile",
-    basaltpass_instance_id: Number(form.basaltpass_instance_id),
+    basaltpass_instance_id: form.basaltpass_instance_id ? Number(form.basaltpass_instance_id) : undefined,
     cloudflare_credential_id: exposure === "public" ? Number(form.cloudflare_credential_id) : undefined,
     exposure_mode: exposure,
     subdomain: form.subdomain || undefined,
@@ -658,7 +674,7 @@ async function finishLogin(config) {
 }
 
 function titleFor(view) {
-  return ({deploy: "Deploy project", projects: "Projects", github: "GitHub", domains: "Domains", cloudflare: "Cloudflare", basaltpass: "BasaltPass", pods: "Pods", nodes: "Nodes", ingresses: "Ingresses", services: "Services"}[view] || "BeanCS");
+  return ({deploy: "Deploy project", projects: "Projects", github: "GitHub", domains: "Domains", cloudflare: "Cloudflare", basaltpass: "BasaltPass", namespaces: "Namespaces", pods: "Pods", nodes: "Nodes", ingresses: "Ingresses", services: "Services"}[view] || "BeanCS");
 }
 
 function subtitleFor(view, runtime, projects) {

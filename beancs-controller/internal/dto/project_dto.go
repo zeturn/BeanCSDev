@@ -11,7 +11,8 @@ type CreateProjectRequest struct {
 	GitHubRepo             string             `json:"github_repo" validate:"required,max=256"`
 	GitHubBranch           string             `json:"github_branch" validate:"omitempty,max=128"`
 	DockerfilePath         string             `json:"dockerfile_path" validate:"omitempty,max=512"`
-	BasaltPassInstanceID   uint               `json:"basaltpass_instance_id" validate:"required"`
+	Namespace              string             `json:"namespace" validate:"omitempty,hostname_rfc1123,max=63"`
+	BasaltPassInstanceID   *uint              `json:"basaltpass_instance_id"`
 	CloudflareCredentialID *uint              `json:"cloudflare_credential_id"`
 	ExposureMode           string             `json:"exposure_mode" validate:"required,oneof=public private internal-only"`
 	Subdomain              string             `json:"subdomain" validate:"omitempty,hostname_rfc1123,max=63"`
@@ -32,6 +33,7 @@ type AnalyzeProjectRepositoryResponse struct {
 	Deployable     bool     `json:"deployable"`
 	Containerized  bool     `json:"containerized"`
 	DockerfilePath string   `json:"dockerfile_path,omitempty"`
+	ComposePath    string   `json:"compose_path,omitempty"`
 	DefaultPort    int      `json:"default_port"`
 	Signals        []string `json:"signals"`
 	Warnings       []string `json:"warnings"`

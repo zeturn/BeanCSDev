@@ -9,6 +9,7 @@ type GitHubCredential struct {
 	TokenEnc       []byte    `gorm:"type:bytea" json:"-"`
 	InstallationID int64     `gorm:"index" json:"installation_id,omitempty"`
 	AccountLogin   string    `gorm:"size:128" json:"account_login,omitempty"`
+	AvatarURL      string    `gorm:"size:512" json:"avatar_url,omitempty"`
 	Org            string    `gorm:"size:128" json:"org,omitempty"`
 	GitOpsRepo     string    `gorm:"size:256" json:"gitops_repo,omitempty"`
 	IsActive       bool      `gorm:"default:true" json:"is_active"`

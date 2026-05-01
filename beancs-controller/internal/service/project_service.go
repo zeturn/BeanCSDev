@@ -71,13 +71,19 @@ func (s *ProjectService) AnalyzeRepository(ctx context.Context, userID string, r
 			break
 		}
 	}
-	for _, candidate := range []string{"compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml"} {
+	for _, candidate := range composeFileCandidates() {
 		exists, err := githubContentExists(ctx, token, owner, repo, candidate, branch)
 		if err != nil {
 			return nil, err
 		}
 		if exists {
+			if !out.Containerized {
+				out.Deployable = true
+				out.Containerized = true
+				out.ComposePath = candidate
+			}
 			out.Signals = append(out.Signals, candidate+" found")
+			break
 		}
 	}
 	for _, candidate := range []string{"package.json", "go.mod", "pyproject.toml", "requirements.txt", "Cargo.toml"} {
@@ -90,7 +96,7 @@ func (s *ProjectService) AnalyzeRepository(ctx context.Context, userID string, r
 		}
 	}
 	if !out.Containerized {
-		out.Warnings = append(out.Warnings, "No Dockerfile or Containerfile was found at the repository root.")
+		out.Warnings = append(out.Warnings, "No Dockerfile, Containerfile, or Docker Compose file was found at the repository root.")
 	}
 	return out, nil
 }
@@ -114,8 +120,10 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 	if err := s.credentials.RequireAccess(userID, model.CredentialTypeGitHub, req.GitHubCredentialID, false); err != nil {
 		return nil, err
 	}
-	if err := s.credentials.RequireAccess(userID, model.CredentialTypeBasaltPass, req.BasaltPassInstanceID, false); err != nil {
-		return nil, err
+	if req.BasaltPassInstanceID != nil {
+		if err := s.credentials.RequireAccess(userID, model.CredentialTypeBasaltPass, *req.BasaltPassInstanceID, false); err != nil {
+			return nil, err
+		}
 	}
 	if req.CloudflareCredentialID != nil {
 		if err := s.credentials.RequireAccess(userID, model.CredentialTypeCloudflare, *req.CloudflareCredentialID, false); err != nil {
@@ -186,7 +194,7 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 		CloudflareCredentialID: req.CloudflareCredentialID,
 		ExposureMode:           req.ExposureMode,
 		Subdomain:              req.Subdomain,
-		Namespace:              "proj-" + req.Name,
+		Namespace:              projectNamespace(req),
 		ResourcePreset:         req.ResourcePreset,
 		Port:                   primaryPort.Port,
 		Ports:                  req.Ports,
@@ -195,32 +203,35 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 	}
 	project.Domain = firstRoutableDomain(project.Ports)
 
-	bpClient, err := s.registry.GetClientForInstance(req.BasaltPassInstanceID)
-	if err != nil {
-		rollback()
-		return nil, err
-	}
-	appResp, err := bpClient.RegisterApp(ctx, &basaltpass.RegisterAppRequest{
-		Name:           req.Name,
-		Description:    coalesce(req.Description, "BeanCS managed tenant app"),
-		HomepageURL:    projectHome(project),
-		RedirectURIs:   []string{projectHome(project) + "/callback"},
-		AllowedOrigins: []string{projectHome(project)},
-		Scopes:         []string{"openid", "profile", "email"},
-	})
-	if err != nil {
-		rollback()
-		return nil, err
-	}
-	project.BasaltAppID = appResp.Data.ID
-	project.BasaltClientID = appResp.Data.OAuthClients[0].ClientID
-	secret := appResp.Data.OAuthClients[0].ClientSecret
-	rollbacks = append(rollbacks, func() { _ = bpClient.DeleteApp(context.Background(), project.BasaltAppID) })
+	var secret string
+	if req.BasaltPassInstanceID != nil {
+		bpClient, err := s.registry.GetClientForInstance(*req.BasaltPassInstanceID)
+		if err != nil {
+			rollback()
+			return nil, err
+		}
+		appResp, err := bpClient.RegisterApp(ctx, &basaltpass.RegisterAppRequest{
+			Name:           req.Name,
+			Description:    coalesce(req.Description, "BeanCS managed tenant app"),
+			HomepageURL:    projectHome(project),
+			RedirectURIs:   []string{projectHome(project) + "/callback"},
+			AllowedOrigins: []string{projectHome(project)},
+			Scopes:         []string{"openid", "profile", "email"},
+		})
+		if err != nil {
+			rollback()
+			return nil, err
+		}
+		project.BasaltAppID = appResp.Data.ID
+		project.BasaltClientID = appResp.Data.OAuthClients[0].ClientID
+		secret = appResp.Data.OAuthClients[0].ClientSecret
+		rollbacks = append(rollbacks, func() { _ = bpClient.DeleteApp(context.Background(), project.BasaltAppID) })
 
-	project.BasaltSecretEnc, err = s.cipher.EncryptString(secret)
-	if err != nil {
-		rollback()
-		return nil, err
+		project.BasaltSecretEnc, err = s.cipher.EncryptString(secret)
+		if err != nil {
+			rollback()
+			return nil, err
+		}
 	}
 
 	if err := s.k8s.CreateNamespace(ctx, project.Namespace, project.Name); err != nil {
@@ -229,9 +240,11 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 	}
 	rollbacks = append(rollbacks, func() { _ = s.k8s.DeleteNamespace(context.Background(), project.Namespace) })
 
-	if err := s.k8s.UpsertSecret(ctx, project.Namespace, "basaltpass-keys", project.Name, map[string]string{"client_id": project.BasaltClientID, "client_secret": secret}); err != nil {
-		rollback()
-		return nil, err
+	if project.BasaltClientID != "" {
+		if err := s.k8s.UpsertSecret(ctx, project.Namespace, "basaltpass-keys", project.Name, map[string]string{"client_id": project.BasaltClientID, "client_secret": secret}); err != nil {
+			rollback()
+			return nil, err
+		}
 	}
 	if err := s.k8s.UpsertSecret(ctx, project.Namespace, "app-env-vars", project.Name, req.Env); err != nil {
 		rollback()
@@ -366,12 +379,14 @@ func (s *ProjectService) DeleteProject(ctx context.Context, project *model.Proje
 	if err := s.k8s.DeleteNamespace(ctx, project.Namespace); err != nil {
 		cleanupErrs = append(cleanupErrs, fmt.Errorf("delete namespace %s: %w", project.Namespace, err))
 	}
-	if client, err := s.registry.GetClientForInstance(project.BasaltPassInstanceID); err == nil && project.BasaltAppID != 0 {
-		if err := client.DeleteApp(ctx, project.BasaltAppID); err != nil {
-			cleanupErrs = append(cleanupErrs, fmt.Errorf("delete BasaltPass app %d: %w", project.BasaltAppID, err))
+	if project.BasaltPassInstanceID != nil && project.BasaltAppID != 0 {
+		if client, err := s.registry.GetClientForInstance(*project.BasaltPassInstanceID); err == nil {
+			if err := client.DeleteApp(ctx, project.BasaltAppID); err != nil {
+				cleanupErrs = append(cleanupErrs, fmt.Errorf("delete BasaltPass app %d: %w", project.BasaltAppID, err))
+			}
+		} else {
+			cleanupErrs = append(cleanupErrs, fmt.Errorf("load BasaltPass client: %w", err))
 		}
-	} else if err != nil {
-		cleanupErrs = append(cleanupErrs, fmt.Errorf("load BasaltPass client: %w", err))
 	}
 	if len(cleanupErrs) > 0 {
 		return fmt.Errorf("project cleanup failed; database record retained for retry: %v", cleanupErrs)
@@ -397,6 +412,14 @@ func (s *ProjectService) DeleteProject(ctx context.Context, project *model.Proje
 	})
 }
 
+func projectNamespace(req dto.CreateProjectRequest) string {
+	namespace := strings.TrimSpace(req.Namespace)
+	if namespace == "" {
+		return "proj-" + req.Name
+	}
+	return namespace
+}
+
 func normalizeProjectRequest(req *dto.CreateProjectRequest) {
 	if req.GitHubBranch == "" {
 		req.GitHubBranch = "main"
@@ -404,6 +427,7 @@ func normalizeProjectRequest(req *dto.CreateProjectRequest) {
 	if req.DockerfilePath == "" {
 		req.DockerfilePath = "Dockerfile"
 	}
+	req.Namespace = strings.TrimSpace(req.Namespace)
 	if req.ResourcePreset == "" {
 		req.ResourcePreset = "small"
 	}
@@ -424,6 +448,21 @@ func normalizeProjectRequest(req *dto.CreateProjectRequest) {
 	}
 	if req.Env == nil {
 		req.Env = map[string]string{}
+	}
+}
+
+func composeFileCandidates() []string {
+	return []string{
+		"compose.yaml",
+		"compose.yml",
+		"compose.prod.yaml",
+		"compose.prod.yml",
+		"docker-compose.yaml",
+		"docker-compose.yml",
+		"docker-compose.prod.yaml",
+		"docker-compose.prod.yml",
+		"docker-compose.production.yaml",
+		"docker-compose.production.yml",
 	}
 }
 

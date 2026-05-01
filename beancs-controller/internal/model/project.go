@@ -27,7 +27,7 @@ type Project struct {
 	GitHubBranch       string `gorm:"size:128;default:'main'" json:"github_branch"`
 	DockerfilePath     string `gorm:"size:512;default:'Dockerfile'" json:"dockerfile_path"`
 
-	BasaltPassInstanceID uint   `gorm:"not null;index" json:"basaltpass_instance_id"`
+	BasaltPassInstanceID *uint  `gorm:"index" json:"basaltpass_instance_id,omitempty"`
 	BasaltAppID          uint   `json:"basalt_app_id"`
 	BasaltClientID       string `gorm:"size:256" json:"basalt_client_id"`
 	BasaltSecretEnc      []byte `gorm:"type:bytea" json:"-"`

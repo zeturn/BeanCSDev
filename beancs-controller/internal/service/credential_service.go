@@ -114,31 +114,35 @@ func (s *CredentialService) CreateGitHub(ctx context.Context, userID string, req
 	if err != nil {
 		return nil, err
 	}
-	accountLogin, err := s.githubUserLogin(ctx, req.Token)
+	account, err := s.githubUserAccount(ctx, req.Token)
 	if err != nil {
 		return nil, err
 	}
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
-		name = accountLogin
+		name = account.Login
 	}
 	org := strings.TrimSpace(req.Org)
 	if org == "" {
-		org = accountLogin
+		org = account.Login
 	}
-	cred := &model.GitHubCredential{Name: name, AuthType: "pat", TokenEnc: enc, AccountLogin: accountLogin, Org: org, GitOpsRepo: strings.TrimSpace(req.GitOpsRepo), IsActive: true, CreatedBy: userID}
+	cred := &model.GitHubCredential{Name: name, AuthType: "pat", TokenEnc: enc, AccountLogin: account.Login, AvatarURL: account.AvatarURL, Org: org, GitOpsRepo: strings.TrimSpace(req.GitOpsRepo), IsActive: true, CreatedBy: userID}
 	err = s.createGitHubCredential(ctx, userID, cred)
 	return cred, err
 }
 
 func (s *CredentialService) CreateGitHubApp(ctx context.Context, userID string, req dto.StartGitHubAppInstallRequest, installationID int64, accountLogin string) (*model.GitHubCredential, error) {
+	account, err := s.GitHubAppInstallationAccount(ctx, installationID)
+	if err == nil && strings.TrimSpace(account.Login) != "" {
+		accountLogin = account.Login
+	}
 	accountLogin = strings.TrimSpace(accountLogin)
 	name := accountLogin
 	if name == "" {
 		name = fmt.Sprintf("github-app-%d", installationID)
 	}
-	cred := &model.GitHubCredential{Name: name, AuthType: "app", InstallationID: installationID, AccountLogin: accountLogin, Org: accountLogin, GitOpsRepo: strings.TrimSpace(req.GitOpsRepo), IsActive: true, CreatedBy: userID}
-	err := s.createGitHubCredential(ctx, userID, cred)
+	cred := &model.GitHubCredential{Name: name, AuthType: "app", InstallationID: installationID, AccountLogin: accountLogin, AvatarURL: account.AvatarURL, Org: accountLogin, GitOpsRepo: strings.TrimSpace(req.GitOpsRepo), IsActive: true, CreatedBy: userID}
+	err = s.createGitHubCredential(ctx, userID, cred)
 	return cred, err
 }
 
@@ -414,27 +418,30 @@ func (s *CredentialService) githubInstallationToken(ctx context.Context, install
 	return out.Token, nil
 }
 
-func (s *CredentialService) GitHubAppInstallationAccount(ctx context.Context, installationID int64) (string, error) {
+type githubAccount struct {
+	Login     string `json:"login"`
+	AvatarURL string `json:"avatar_url"`
+}
+
+func (s *CredentialService) GitHubAppInstallationAccount(ctx context.Context, installationID int64) (githubAccount, error) {
 	if s.cfg == nil || s.cfg.GitHubAppID == 0 || strings.TrimSpace(s.cfg.GitHubAppPrivateKey) == "" {
-		return "", fmt.Errorf("GitHub App is not configured")
+		return githubAccount{}, fmt.Errorf("GitHub App is not configured")
 	}
 	appJWT, err := s.githubAppJWT()
 	if err != nil {
-		return "", err
+		return githubAccount{}, err
 	}
 	var out struct {
-		Account struct {
-			Login string `json:"login"`
-		} `json:"account"`
+		Account githubAccount `json:"account"`
 	}
 	endpoint := fmt.Sprintf("https://api.github.com/app/installations/%d", installationID)
 	if err := githubJSON(ctx, http.MethodGet, endpoint, appJWT, &out); err != nil {
-		return "", err
+		return githubAccount{}, err
 	}
 	if strings.TrimSpace(out.Account.Login) == "" {
-		return "", fmt.Errorf("GitHub installation account was not returned")
+		return githubAccount{}, fmt.Errorf("GitHub installation account was not returned")
 	}
-	return out.Account.Login, nil
+	return out.Account, nil
 }
 
 func (s *CredentialService) ListGitHubRepositories(ctx context.Context, id uint) ([]dto.GitHubRepositoryResponse, error) {
@@ -478,17 +485,15 @@ func (s *CredentialService) ListGitHubRepositories(ctx context.Context, id uint)
 	return repos, nil
 }
 
-func (s *CredentialService) githubUserLogin(ctx context.Context, token string) (string, error) {
-	var out struct {
-		Login string `json:"login"`
-	}
+func (s *CredentialService) githubUserAccount(ctx context.Context, token string) (githubAccount, error) {
+	var out githubAccount
 	if err := githubJSON(ctx, http.MethodGet, "https://api.github.com/user", token, &out); err != nil {
-		return "", err
+		return githubAccount{}, err
 	}
 	if strings.TrimSpace(out.Login) == "" {
-		return "", fmt.Errorf("GitHub user login was not returned")
+		return githubAccount{}, fmt.Errorf("GitHub user login was not returned")
 	}
-	return out.Login, nil
+	return out, nil
 }
 
 func (s *CredentialService) githubAppJWT() (string, error) {

@@ -380,6 +380,19 @@ textarea {
   font-weight: 700;
 }
 
+.account-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.account-cell img {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+}
+
 .row-actions {
   display: flex;
   gap: 6px;

@@ -139,13 +139,13 @@ func (h *CredentialHandler) githubAppCallback(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).SendString("GitHub App state was invalid or expired.")
 	}
-	accountLogin, err := h.service.GitHubAppInstallationAccount(c.UserContext(), installationID)
+	account, err := h.service.GitHubAppInstallationAccount(c.UserContext(), installationID)
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).SendString(err.Error())
 	}
 	if _, err := h.service.CreateGitHubApp(c.UserContext(), state.UserID, dto.StartGitHubAppInstallRequest{
 		GitOpsRepo: state.GitOpsRepo,
-	}, installationID, accountLogin); err != nil {
+	}, installationID, account.Login); err != nil {
 		return c.Status(fiber.StatusBadRequest).SendString(err.Error())
 	}
 	return c.Redirect("/?github_app=connected", fiber.StatusFound)
