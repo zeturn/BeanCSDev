@@ -129,6 +129,18 @@ func registerAPI(api fiber.Router, cfg *config.Config, db *gorm.DB, registry *ba
 	api.Get("/health", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{"status": "ok", "version": cfg.Version})
 	})
+	api.Get("/ready", func(c *fiber.Ctx) error {
+		sqlDB, err := db.DB()
+		if err != nil {
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"status": "unavailable", "error": "database handle unavailable"})
+		}
+		ctx, cancel := context.WithTimeout(c.UserContext(), 2*time.Second)
+		defer cancel()
+		if err := sqlDB.PingContext(ctx); err != nil {
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"status": "unavailable", "error": "database unavailable"})
+		}
+		return c.JSON(fiber.Map{"status": "ready", "version": cfg.Version})
+	})
 	api.Get("/version", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{"version": cfg.Version})
 	})
@@ -169,15 +181,16 @@ func registerAPI(api fiber.Router, cfg *config.Config, db *gorm.DB, registry *ba
 }
 
 func openDatabase(log *zap.Logger, databaseURL string) (*gorm.DB, error) {
-	dsn := databaseURLWithConnectTimeout(databaseURL, "5")
-	deadline := time.Now().Add(2 * time.Minute)
+	dsn := databaseURLWithConnectTimeout(databaseURL, "15")
+	deadline := time.Now().Add(5 * time.Minute)
 	var lastErr error
 	for {
 		db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 		if err == nil {
 			sqlDB, sqlErr := db.DB()
 			if sqlErr == nil {
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				configureDatabasePool(sqlDB)
+				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 				sqlErr = sqlDB.PingContext(ctx)
 				cancel()
 			}
@@ -197,6 +210,20 @@ func openDatabase(log *zap.Logger, databaseURL string) (*gorm.DB, error) {
 		log.Warn("database unavailable; retrying", zap.Error(lastErr))
 		time.Sleep(3 * time.Second)
 	}
+}
+
+type databasePool interface {
+	SetMaxOpenConns(int)
+	SetMaxIdleConns(int)
+	SetConnMaxLifetime(time.Duration)
+	SetConnMaxIdleTime(time.Duration)
+}
+
+func configureDatabasePool(db databasePool) {
+	db.SetMaxOpenConns(10)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(30 * time.Minute)
+	db.SetConnMaxIdleTime(5 * time.Minute)
 }
 
 func databaseURLWithConnectTimeout(databaseURL, timeout string) string {

@@ -35,6 +35,7 @@ spec:
         app: beancs-postgres
         managed-by: beancs
     spec:
+      terminationGracePeriodSeconds: 60
       containers:
         - name: postgres
           image: postgres:17-alpine
@@ -58,6 +59,8 @@ spec:
                 - beancs
             initialDelaySeconds: 5
             periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 12
           livenessProbe:
             exec:
               command:
@@ -68,13 +71,26 @@ spec:
                 - beancs
             initialDelaySeconds: 20
             periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          startupProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - beancs
+                - -d
+                - beancs
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 60
           resources:
             requests:
               cpu: 100m
               memory: 256Mi
             limits:
-              cpu: 500m
-              memory: 512Mi
+              cpu: "1"
+              memory: 1Gi
   volumeClaimTemplates:
     - metadata:
         name: data

@@ -63,7 +63,7 @@ spec:
               value: "true"
           readinessProbe:
             httpGet:
-              path: /api/v1/health
+              path: /api/v1/ready
               port: http
             initialDelaySeconds: 10
             periodSeconds: 5
