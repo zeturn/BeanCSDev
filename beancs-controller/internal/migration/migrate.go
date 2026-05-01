@@ -19,5 +19,8 @@ func AutoMigrate(db *gorm.DB) error {
 	); err != nil {
 		return err
 	}
-	return db.Exec("ALTER TABLE git_hub_credentials ALTER COLUMN token_enc DROP NOT NULL").Error
+	if err := db.Exec("ALTER TABLE git_hub_credentials ALTER COLUMN token_enc DROP NOT NULL").Error; err != nil {
+		return err
+	}
+	return db.Exec("ALTER TABLE git_hub_credentials ALTER COLUMN git_ops_repo DROP NOT NULL").Error
 }

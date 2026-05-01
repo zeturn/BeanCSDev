@@ -55,6 +55,7 @@ func (h *CredentialHandler) registerGitHub(r fiber.Router) {
 	r.Post("/app/start", h.startGitHubAppInstall)
 	r.Post("/", h.createGitHub)
 	r.Get("/", h.listGitHub)
+	r.Get("/:id/repositories", h.listGitHubRepositories)
 	r.Get("/:id", h.getGitHub)
 	r.Patch("/:id", h.updateGitHub)
 	r.Delete("/:id", h.delete(model.CredentialTypeGitHub))
@@ -104,9 +105,7 @@ func (h *CredentialHandler) createGitHub(c *fiber.Ctx) error {
 
 type githubAppState struct {
 	UserID     string    `json:"user_id"`
-	Name       string    `json:"name"`
-	Org        string    `json:"org,omitempty"`
-	GitOpsRepo string    `json:"gitops_repo"`
+	GitOpsRepo string    `json:"gitops_repo,omitempty"`
 	ExpiresAt  time.Time `json:"expires_at"`
 }
 
@@ -120,9 +119,7 @@ func (h *CredentialHandler) startGitHubAppInstall(c *fiber.Ctx) error {
 	}
 	state, err := h.signGitHubAppState(githubAppState{
 		UserID:     middleware.UserID(c),
-		Name:       req.Name,
-		Org:        req.Org,
-		GitOpsRepo: req.GitOpsRepo,
+		GitOpsRepo: strings.TrimSpace(req.GitOpsRepo),
 		ExpiresAt:  time.Now().Add(15 * time.Minute),
 	})
 	if err != nil {
@@ -141,11 +138,13 @@ func (h *CredentialHandler) githubAppCallback(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).SendString("GitHub App state was invalid or expired.")
 	}
+	accountLogin, err := h.service.GitHubAppInstallationAccount(c.UserContext(), installationID)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).SendString(err.Error())
+	}
 	if _, err := h.service.CreateGitHubApp(c.UserContext(), state.UserID, dto.StartGitHubAppInstallRequest{
-		Name:       state.Name,
-		Org:        state.Org,
 		GitOpsRepo: state.GitOpsRepo,
-	}, installationID, ""); err != nil {
+	}, installationID, accountLogin); err != nil {
 		return c.Status(fiber.StatusBadRequest).SendString(err.Error())
 	}
 	return c.Redirect("/?github_app=connected", fiber.StatusFound)
@@ -215,6 +214,21 @@ func (h *CredentialHandler) getGitHub(c *fiber.Ctx) error {
 		return fail(c, 404, err)
 	}
 	return c.JSON(out)
+}
+
+func (h *CredentialHandler) listGitHubRepositories(c *fiber.Ctx) error {
+	id, err := idParam(c, "id")
+	if err != nil {
+		return fail(c, 400, err)
+	}
+	if err := h.service.RequireAccess(middleware.UserID(c), model.CredentialTypeGitHub, id, false); err != nil {
+		return fail(c, 403, err)
+	}
+	out, err := h.service.ListGitHubRepositories(c.UserContext(), id)
+	if err != nil {
+		return fail(c, 400, err)
+	}
+	return c.JSON(fiber.Map{"data": out})
 }
 
 func (h *CredentialHandler) getBasaltPass(c *fiber.Ctx) error {
@@ -401,7 +415,7 @@ func (h *CredentialHandler) verifyGitHubAppState(raw string) (*githubAppState, e
 	if err := json.Unmarshal(body, &state); err != nil {
 		return nil, err
 	}
-	if state.UserID == "" || state.Name == "" || state.GitOpsRepo == "" || time.Now().After(state.ExpiresAt) {
+	if state.UserID == "" || time.Now().After(state.ExpiresAt) {
 		return nil, fmt.Errorf("invalid state payload")
 	}
 	return &state, nil

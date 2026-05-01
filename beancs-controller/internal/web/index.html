@@ -431,9 +431,9 @@
         <div id="credentialPanel" class="credential-panel hidden">
           <form id="githubForm" class="hidden">
             <div class="form-grid">
-              <input name="name" placeholder="Credential name" required />
+              <input name="name" placeholder="Credential name, optional" />
               <input name="org" placeholder="GitHub org or user" />
-              <input name="gitops_repo" class="wide" placeholder="GitOps repo, e.g. zeturn/gitops" required />
+              <input name="gitops_repo" class="wide" placeholder="GitOps repo, optional, e.g. zeturn/gitops" />
               <input name="token" class="wide" type="password" placeholder="GitHub token" required />
             </div>
             <div class="form-actions">
@@ -443,9 +443,7 @@
 
           <form id="githubAppForm" class="hidden">
             <div class="form-grid">
-              <input name="name" placeholder="Credential name" required />
-              <input name="org" placeholder="GitHub org or user" />
-              <input name="gitops_repo" class="wide" placeholder="GitOps repo, e.g. zeturn/gitops" required />
+              <input name="gitops_repo" class="wide" placeholder="GitOps repo, optional, e.g. zeturn/gitops" />
             </div>
             <div class="form-actions">
               <button class="button primary" type="submit">Connect GitHub App</button>
@@ -635,18 +633,19 @@
         github_credentials: {
           title: "GitHub Keys",
           label: "GitHub key",
-          columns: ["Name", "Type", "Org", "GitOps repo", "Installation", "Active", "Created", "Actions"],
-          search: (cred) => `${cred.name || ""} ${cred.auth_type || ""} ${cred.org || ""} ${cred.gitops_repo || ""} ${cred.installation_id || ""}`.toLowerCase(),
+          columns: ["Name", "Type", "Account", "GitOps repo", "Installation", "Active", "Created", "Actions"],
+          search: (cred) => `${cred.name || ""} ${cred.auth_type || ""} ${cred.account_login || ""} ${cred.org || ""} ${cred.gitops_repo || ""} ${cred.installation_id || ""}`.toLowerCase(),
           row: (cred) => `
             <tr>
               <td class="name">${escapeHTML(cred.name)}</td>
               <td>${escapeHTML((cred.auth_type || "pat").toUpperCase())}</td>
-              <td>${escapeHTML(cred.org || "-")}</td>
+              <td>${escapeHTML(cred.account_login || cred.org || "-")}</td>
               <td>${escapeHTML(cred.gitops_repo || "-")}</td>
               <td>${escapeHTML(cred.installation_id || "-")}</td>
               <td>${statusPill(cred.is_active ? "Active" : "Inactive", Boolean(cred.is_active))}</td>
               <td>${formatDate(cred.created_at)}</td>
               <td>
+                <button class="button" type="button" data-action="repos" data-kind="github" data-id="${Number(cred.id)}">Repos</button>
                 <button class="button" type="button" data-action="verify" data-kind="github" data-id="${Number(cred.id)}">Verify</button>
                 <button class="button" type="button" data-action="delete" data-kind="github" data-id="${Number(cred.id)}">Delete</button>
               </td>
@@ -901,6 +900,11 @@
           if (button.dataset.action === "verify") {
             await apiJSON(`/api/v1/credentials/${kind}/${id}/verify`);
             showInfo(`${kindLabel(kind)} credential verified.`);
+          } else if (button.dataset.action === "repos") {
+            const data = await apiJSON(`/api/v1/credentials/github/${id}/repositories`);
+            const repos = data.data || [];
+            const names = repos.slice(0, 20).map((repo) => repo.full_name).join(", ");
+            showInfo(repos.length ? `${repos.length} repositories: ${names}${repos.length > 20 ? ", ..." : ""}` : "No repositories found.");
           } else if (button.dataset.action === "delete") {
             if (!confirm(`Delete this ${kindLabel(kind)} credential?`)) return;
             await apiJSON(`/api/v1/credentials/${kind}/${id}`, {method: "DELETE"});

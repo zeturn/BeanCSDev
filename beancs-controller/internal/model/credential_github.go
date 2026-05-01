@@ -10,7 +10,7 @@ type GitHubCredential struct {
 	InstallationID int64     `gorm:"index" json:"installation_id,omitempty"`
 	AccountLogin   string    `gorm:"size:128" json:"account_login,omitempty"`
 	Org            string    `gorm:"size:128" json:"org,omitempty"`
-	GitOpsRepo     string    `gorm:"size:256;not null" json:"gitops_repo"`
+	GitOpsRepo     string    `gorm:"size:256" json:"gitops_repo,omitempty"`
 	IsActive       bool      `gorm:"default:true" json:"is_active"`
 	CreatedBy      string    `gorm:"size:128;not null;index" json:"created_by"`
 	CreatedAt      time.Time `json:"created_at"`

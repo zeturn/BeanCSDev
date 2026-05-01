@@ -77,13 +77,30 @@ func (s *CredentialService) CreateGitHub(ctx context.Context, userID string, req
 	if err != nil {
 		return nil, err
 	}
-	cred := &model.GitHubCredential{Name: req.Name, AuthType: "pat", TokenEnc: enc, Org: req.Org, GitOpsRepo: req.GitOpsRepo, IsActive: true, CreatedBy: userID}
+	accountLogin, err := s.githubUserLogin(ctx, req.Token)
+	if err != nil {
+		return nil, err
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		name = accountLogin
+	}
+	org := strings.TrimSpace(req.Org)
+	if org == "" {
+		org = accountLogin
+	}
+	cred := &model.GitHubCredential{Name: name, AuthType: "pat", TokenEnc: enc, AccountLogin: accountLogin, Org: org, GitOpsRepo: strings.TrimSpace(req.GitOpsRepo), IsActive: true, CreatedBy: userID}
 	err = s.createGitHubCredential(ctx, userID, cred)
 	return cred, err
 }
 
 func (s *CredentialService) CreateGitHubApp(ctx context.Context, userID string, req dto.StartGitHubAppInstallRequest, installationID int64, accountLogin string) (*model.GitHubCredential, error) {
-	cred := &model.GitHubCredential{Name: req.Name, AuthType: "app", InstallationID: installationID, AccountLogin: accountLogin, Org: req.Org, GitOpsRepo: req.GitOpsRepo, IsActive: true, CreatedBy: userID}
+	accountLogin = strings.TrimSpace(accountLogin)
+	name := accountLogin
+	if name == "" {
+		name = fmt.Sprintf("github-app-%d", installationID)
+	}
+	cred := &model.GitHubCredential{Name: name, AuthType: "app", InstallationID: installationID, AccountLogin: accountLogin, Org: accountLogin, GitOpsRepo: strings.TrimSpace(req.GitOpsRepo), IsActive: true, CreatedBy: userID}
 	err := s.createGitHubCredential(ctx, userID, cred)
 	return cred, err
 }
@@ -285,6 +302,83 @@ func (s *CredentialService) githubInstallationToken(ctx context.Context, install
 	return out.Token, nil
 }
 
+func (s *CredentialService) GitHubAppInstallationAccount(ctx context.Context, installationID int64) (string, error) {
+	if s.cfg == nil || s.cfg.GitHubAppID == 0 || strings.TrimSpace(s.cfg.GitHubAppPrivateKey) == "" {
+		return "", fmt.Errorf("GitHub App is not configured")
+	}
+	appJWT, err := s.githubAppJWT()
+	if err != nil {
+		return "", err
+	}
+	var out struct {
+		Account struct {
+			Login string `json:"login"`
+		} `json:"account"`
+	}
+	endpoint := fmt.Sprintf("https://api.github.com/app/installations/%d", installationID)
+	if err := githubJSON(ctx, http.MethodGet, endpoint, appJWT, &out); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(out.Account.Login) == "" {
+		return "", fmt.Errorf("GitHub installation account was not returned")
+	}
+	return out.Account.Login, nil
+}
+
+func (s *CredentialService) ListGitHubRepositories(ctx context.Context, id uint) ([]dto.GitHubRepositoryResponse, error) {
+	var cred model.GitHubCredential
+	if err := s.db.WithContext(ctx).First(&cred, id).Error; err != nil {
+		return nil, err
+	}
+	token, err := s.GitHubToken(ctx, cred)
+	if err != nil {
+		return nil, err
+	}
+	endpoint := "https://api.github.com/user/repos?affiliation=owner,collaborator,organization_member&sort=updated&per_page=100"
+	if cred.AuthType == "app" || cred.InstallationID != 0 {
+		endpoint = "https://api.github.com/installation/repositories?per_page=100"
+	}
+	repos := make([]dto.GitHubRepositoryResponse, 0)
+	for page := 1; page <= 10; page++ {
+		pageURL := fmt.Sprintf("%s&page=%d", endpoint, page)
+		var batch []githubRepositoryPayload
+		if cred.AuthType == "app" || cred.InstallationID != 0 {
+			var out struct {
+				Repositories []githubRepositoryPayload `json:"repositories"`
+			}
+			if err := githubJSON(ctx, http.MethodGet, pageURL, token, &out); err != nil {
+				return nil, err
+			}
+			batch = out.Repositories
+		} else if err := githubJSON(ctx, http.MethodGet, pageURL, token, &batch); err != nil {
+			return nil, err
+		}
+		if len(batch) == 0 {
+			break
+		}
+		for _, repo := range batch {
+			repos = append(repos, repo.toResponse())
+		}
+		if len(batch) < 100 {
+			break
+		}
+	}
+	return repos, nil
+}
+
+func (s *CredentialService) githubUserLogin(ctx context.Context, token string) (string, error) {
+	var out struct {
+		Login string `json:"login"`
+	}
+	if err := githubJSON(ctx, http.MethodGet, "https://api.github.com/user", token, &out); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(out.Login) == "" {
+		return "", fmt.Errorf("GitHub user login was not returned")
+	}
+	return out.Login, nil
+}
+
 func (s *CredentialService) githubAppJWT() (string, error) {
 	rawKey := strings.TrimSpace(s.cfg.GitHubAppPrivateKey)
 	if decoded, err := base64.StdEncoding.DecodeString(rawKey); err == nil && strings.Contains(string(decoded), "PRIVATE KEY") {
@@ -314,6 +408,51 @@ func (s *CredentialService) githubAppJWT() (string, error) {
 		"iss": s.cfg.GitHubAppID,
 	}
 	return jwt.NewWithClaims(jwt.SigningMethodRS256, claims).SignedString(key)
+}
+
+type githubRepositoryPayload struct {
+	FullName      string `json:"full_name"`
+	Name          string `json:"name"`
+	Private       bool   `json:"private"`
+	DefaultBranch string `json:"default_branch"`
+	HTMLURL       string `json:"html_url"`
+	Owner         struct {
+		Login string `json:"login"`
+	} `json:"owner"`
+}
+
+func (r githubRepositoryPayload) toResponse() dto.GitHubRepositoryResponse {
+	return dto.GitHubRepositoryResponse{
+		FullName:      r.FullName,
+		Name:          r.Name,
+		Owner:         r.Owner.Login,
+		Private:       r.Private,
+		DefaultBranch: r.DefaultBranch,
+		HTMLURL:       r.HTMLURL,
+	}
+}
+
+func githubJSON(ctx context.Context, method, endpoint, token string, out any) error {
+	req, err := http.NewRequestWithContext(ctx, method, endpoint, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("GitHub API request failed: %s", strings.TrimSpace(string(body)))
+	}
+	if err := json.Unmarshal(body, out); err != nil {
+		return fmt.Errorf("GitHub returned invalid JSON")
+	}
+	return nil
 }
 
 func cloudflareGET(ctx context.Context, client *http.Client, token, endpoint string) (map[string]any, error) {
