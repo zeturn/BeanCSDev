@@ -7,8 +7,11 @@ type CreateProjectRequest struct {
 	DisplayName            string             `json:"display_name" validate:"omitempty,max=256"`
 	Description            string             `json:"description" validate:"omitempty,max=2000"`
 	TeamID                 string             `json:"team_id" validate:"omitempty,max=128"`
-	GitHubCredentialID     uint               `json:"github_credential_id" validate:"required"`
-	GitHubRepo             string             `json:"github_repo" validate:"required,max=256"`
+	BuildSource            string             `json:"build_source" validate:"omitempty,oneof=github dockerhub ghcr source-upload"`
+	ImageReference         string             `json:"image_reference" validate:"omitempty,max=512"`
+	SourceArchiveName      string             `json:"source_archive_name" validate:"omitempty,max=256"`
+	GitHubCredentialID     uint               `json:"github_credential_id" validate:"omitempty"`
+	GitHubRepo             string             `json:"github_repo" validate:"omitempty,max=256"`
 	GitHubBranch           string             `json:"github_branch" validate:"omitempty,max=128"`
 	DockerfilePath         string             `json:"dockerfile_path" validate:"omitempty,max=512"`
 	Namespace              string             `json:"namespace" validate:"omitempty,hostname_rfc1123,max=63"`

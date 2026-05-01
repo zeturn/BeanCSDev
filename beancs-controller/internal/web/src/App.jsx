@@ -15,6 +15,7 @@ import {
   LoaderCircle,
   Lock,
   Network,
+  Package,
   Play,
   Plus,
   RefreshCw,
@@ -22,6 +23,7 @@ import {
   Server,
   Shield,
   Trash2,
+  Upload,
 } from "lucide-react";
 import "./style.css";
 
@@ -234,6 +236,41 @@ function App() {
 	}));
   }
 
+  function checkInstallSource(nextForm = deployForm) {
+    const source = nextForm.build_source || "github";
+    setError("");
+    setNotice("");
+    if (source === "github") {
+      return analyzeRepo(nextForm.github_repo || selectedRepo, nextForm.github_branch);
+    }
+    const image = (nextForm.image_reference || "").trim();
+    if (!image) {
+      setError("Image reference is required for this install method.");
+      return;
+    }
+    if (source === "ghcr" && !image.toLowerCase().startsWith("ghcr.io/")) {
+      setError("GHCR image references must start with ghcr.io/.");
+      return;
+    }
+    if (source === "source-upload" && !nextForm.source_archive_name) {
+      setError("Choose a source archive before checking installability.");
+      return;
+    }
+    const label = sourceLabel(source);
+    setAnalysis({
+      deployable: true,
+      containerized: source !== "source-upload",
+      scaffoldable: source === "source-upload",
+      default_port: nextForm.port || 8080,
+      ports: [Number(nextForm.port || 8080)],
+      signals: source === "source-upload" ? [`Source archive: ${nextForm.source_archive_name}`, `Target image: ${image}`] : [`${label} image: ${image}`],
+      warnings: source === "source-upload" ? ["Source upload is recorded with a target image. Make sure your build runner publishes that image before rollout."] : [],
+    });
+    if (!nextForm.name) {
+      setDeployForm((current) => ({...current, name: slugify(imageName(image))}));
+    }
+  }
+
   async function deployProject(event) {
     event.preventDefault();
     if (!analysis?.deployable) return;
@@ -244,10 +281,10 @@ function App() {
       project: payload.name,
       started_at: new Date().toISOString(),
       steps: [
-        {label: "Validate repository", state: "done"},
+        {label: "Validate install source", state: "done"},
         {label: "Create namespace and secrets", state: "running"},
         {label: "Apply service and ingress", state: "pending"},
-        {label: "Commit GitOps manifests", state: "pending"},
+        {label: "Apply deployment or GitOps manifests", state: "pending"},
       ],
     });
     setView("progress");
@@ -407,10 +444,12 @@ function App() {
             repos={repos}
             selectedRepo={selectedRepo}
             analysis={analysis}
+            setAnalysis={setAnalysis}
             form={deployForm}
             setForm={setDeployForm}
             loadRepos={loadRepos}
             analyzeRepo={analyzeRepo}
+            checkInstallSource={checkInstallSource}
             deployProject={deployProject}
           />
         )}
@@ -441,85 +480,189 @@ function App() {
   );
 }
 
-function DeployView({credentials, namespaces, selectedCredential, setSelectedCredential, repos, selectedRepo, analysis, form, setForm, loadRepos, analyzeRepo, deployProject}) {
+function DeployView({credentials, namespaces, selectedCredential, setSelectedCredential, repos, selectedRepo, analysis, setAnalysis, form, setForm, loadRepos, analyzeRepo, checkInstallSource, deployProject}) {
+  const [stepIndex, setStepIndex] = useState(0);
   const selectedCloudflare = credentials.cloudflare.find((cred) => String(cred.id) === String(form.cloudflare_credential_id));
   const publicHost = form.subdomain && selectedCloudflare ? `${form.subdomain}.${selectedCloudflare.domain}` : "";
+  const step = deploySteps[stepIndex];
+  const canContinue = canContinueDeployStep(step.id, form, selectedCredential, analysis);
+  const setSource = (buildSource) => {
+    setAnalysis(null);
+    setForm({...defaultDeployForm(), build_source: buildSource, github_branch: form.github_branch || "main", port: form.port || 8080});
+  };
+  const updateSourceForm = (nextForm) => {
+    setAnalysis(null);
+    setForm(nextForm);
+  };
+  const next = () => {
+    if (step.id === "check") checkInstallSource(form);
+    if (stepIndex < deploySteps.length - 1) setStepIndex(stepIndex + 1);
+  };
+  const back = () => setStepIndex(Math.max(0, stepIndex - 1));
   return (
-    <div className="deploy-grid">
+    <div className="deploy-wizard">
       <section className="panel">
-        <h2><Github size={18} /> Repository</h2>
-        <label>GitHub credential</label>
-        <select value={selectedCredential} onChange={(event) => { setSelectedCredential(event.target.value); loadRepos(event.target.value); }}>
-          <option value="">Choose credential</option>
-          {credentials.github.map((cred) => <option key={cred.id} value={cred.id}>{cred.name} ({cred.account_login || cred.auth_type})</option>)}
-        </select>
-        <div className="repo-list">
-          {repos.map((repo) => (
-            <button key={repo.full_name} className={selectedRepo === repo.full_name ? "repo active" : "repo"} onClick={() => analyzeRepo(repo.full_name, repo.default_branch)}>
-              <Code2 size={15} />
-              <span>{repo.full_name}</span>
-              <small>{repo.private ? "Private" : "Public"} · {repo.default_branch}</small>
+        <div className="wizard-steps">
+          {deploySteps.map((item, index) => (
+            <button key={item.id} type="button" className={index === stepIndex ? "wizard-step active" : index < stepIndex ? "wizard-step done" : "wizard-step"} onClick={() => setStepIndex(index)}>
+              <b>{index + 1}</b>
+              <span>{item.label}</span>
             </button>
           ))}
         </div>
       </section>
-      <section className="panel">
-        <h2><Shield size={18} /> Readiness</h2>
-        {!analysis && <p className="muted">Select a repository to check whether BeanCS can deploy it.</p>}
-        {analysis && (
-          <>
-            <div className={analysis.deployable ? "status good" : "status bad"}>{analysis.containerized ? "Deployable" : analysis.scaffoldable ? "Source detected" : "Needs containerization"}</div>
-            <div className="signal-list">
-              {(analysis.signals || []).map((signal) => <span key={signal}>{signal}</span>)}
-              {analysis.compose_path && <span>Compose: {analysis.compose_path}</span>}
-              {analysis.ports?.length > 0 && <span>Ports: {analysis.ports.join(", ")}</span>}
-              {(analysis.warnings || []).map((warning) => <span className="warning" key={warning}>{warning}</span>)}
-            </div>
-          </>
+      <form className="panel deploy-form wizard-panel" onSubmit={deployProject}>
+        <h2><Rocket size={18} /> {step.title}</h2>
+        {step.id === "method" && (
+          <div className="method-grid">
+            {installMethods.map((method) => {
+              const Icon = method.icon;
+              return (
+                <button key={method.id} type="button" className={form.build_source === method.id ? "method-card active" : "method-card"} onClick={() => setSource(method.id)}>
+                  <Icon size={22} />
+                  <b>{method.label}</b>
+                  <span>{method.description}</span>
+                </button>
+              );
+            })}
+          </div>
         )}
-      </section>
-      <form className="panel deploy-form" onSubmit={deployProject}>
-        <h2><Rocket size={18} /> Deployment</h2>
-        <div className="form-grid">
-          <Field label="Project name" value={form.name} onChange={(v) => setForm({...form, name: slugify(v)})} required />
-          <label>Namespace</label>
-          <input
-            list="namespace-options"
-            value={form.namespace}
-            placeholder={form.name ? `proj-${form.name}` : "proj-my-app"}
-            onChange={(event) => setForm({...form, namespace: slugify(event.target.value)})}
-          />
-          <datalist id="namespace-options">
-            {namespaces.map((ns) => <option key={ns.name} value={ns.name} />)}
-          </datalist>
-          <Field label="Branch" value={form.github_branch} onChange={(v) => setForm({...form, github_branch: v})} />
-          <Field label="Dockerfile path" value={form.dockerfile_path} onChange={(v) => setForm({...form, dockerfile_path: v})} />
-          <Field label="Port" type="number" value={form.port} onChange={(v) => setForm({...form, port: Number(v)})} />
-          <label>BasaltPass optional</label>
-          <select value={form.basaltpass_instance_id} onChange={(event) => setForm({...form, basaltpass_instance_id: event.target.value})}>
-            <option value="">Do not register OAuth app</option>
-            {credentials.basaltpass.map((cred) => <option key={cred.id} value={cred.id}>{cred.name}</option>)}
-          </select>
-          <label>Traffic</label>
-          <select value={form.exposure_mode} onChange={(event) => setForm({...form, exposure_mode: event.target.value})}>
-            <option value="public">Traefik public ingress</option>
-            <option value="private">Tailscale private ingress</option>
-            <option value="internal-only">Cluster internal only</option>
-          </select>
-          {form.exposure_mode === "public" && (
-            <>
-              <label>Cloudflare credential</label>
-              <select value={form.cloudflare_credential_id} onChange={(event) => setForm({...form, cloudflare_credential_id: event.target.value})} required>
-                <option value="">Choose Cloudflare zone</option>
-                {credentials.cloudflare.map((cred) => <option key={cred.id} value={cred.id}>{cred.name} · {cred.domain}</option>)}
-              </select>
-              <Field label="Subdomain" value={form.subdomain} onChange={(v) => setForm({...form, subdomain: slugify(v)})} required />
-              <div className="computed-host">{publicHost || "Subdomain preview"}</div>
-            </>
+        {step.id === "source" && (
+          <div className="form-grid">
+            {form.build_source === "github" && (
+              <>
+                <label>GitHub credential</label>
+                <select value={selectedCredential} onChange={(event) => { setAnalysis(null); setSelectedCredential(event.target.value); loadRepos(event.target.value); }}>
+                  <option value="">Choose credential</option>
+                  {credentials.github.map((cred) => <option key={cred.id} value={cred.id}>{cred.name} ({cred.account_login || cred.auth_type})</option>)}
+                </select>
+                <Field label="Repository" value={form.github_repo} onChange={(v) => updateSourceForm({...form, github_repo: v.trim()})} required />
+                <Field label="Branch" value={form.github_branch} onChange={(v) => updateSourceForm({...form, github_branch: v})} />
+                <div className="repo-list compact-repos">
+                  {repos.map((repo) => (
+                    <button key={repo.full_name} type="button" className={selectedRepo === repo.full_name ? "repo active" : "repo"} onClick={() => { setForm({...form, github_repo: repo.full_name, github_branch: repo.default_branch || "main", name: slugify(repo.name || repo.full_name.split("/")[1])}); analyzeRepo(repo.full_name, repo.default_branch); }}>
+                      <Code2 size={15} />
+                      <span>{repo.full_name}</span>
+                      <small>{repo.private ? "Private" : "Public"} · {repo.default_branch}</small>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+            {form.build_source === "dockerhub" && (
+              <>
+                <Field label="Docker Hub image" value={form.image_reference} onChange={(v) => updateSourceForm({...form, image_reference: v.trim(), name: form.name || slugify(imageName(v))})} required />
+                <p className="muted">Example: nginx:1.27 or your-org/your-app:latest.</p>
+              </>
+            )}
+            {form.build_source === "ghcr" && (
+              <>
+                <Field label="GHCR image" value={form.image_reference} onChange={(v) => updateSourceForm({...form, image_reference: v.trim(), name: form.name || slugify(imageName(v))})} required />
+                <p className="muted">Example: ghcr.io/owner/repo:latest.</p>
+              </>
+            )}
+            {form.build_source === "source-upload" && (
+              <>
+                <label>Source archive</label>
+                <input type="file" accept=".zip,.tar,.tgz,.tar.gz" onChange={(event) => updateSourceForm({...form, source_archive_name: event.target.files?.[0]?.name || ""})} required />
+                <Field label="Target image after build" value={form.image_reference} onChange={(v) => updateSourceForm({...form, image_reference: v.trim(), name: form.name || slugify(imageName(v))})} required />
+                <Field label="Dockerfile path" value={form.dockerfile_path} onChange={(v) => updateSourceForm({...form, dockerfile_path: v})} />
+              </>
+            )}
+          </div>
+        )}
+        {step.id === "check" && (
+          <div className="readiness-card">
+            <button type="button" className="primary" onClick={() => checkInstallSource(form)}><Shield size={16} /> Check installability</button>
+            {!analysis && <p className="muted">BeanCS will verify repository signals or image/source inputs before continuing.</p>}
+            {analysis && (
+              <>
+                <div className={analysis.deployable ? "status good" : "status bad"}>{analysis.containerized ? "Deployable" : analysis.scaffoldable ? "Source detected" : "Needs containerization"}</div>
+                <div className="signal-list">
+                  {(analysis.signals || []).map((signal) => <span key={signal}>{signal}</span>)}
+                  {analysis.compose_path && <span>Compose: {analysis.compose_path}</span>}
+                  {analysis.ports?.length > 0 && <span>Ports: {analysis.ports.join(", ")}</span>}
+                  {(analysis.warnings || []).map((warning) => <span className="warning" key={warning}>{warning}</span>)}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+        {step.id === "params" && (
+          <div className="form-grid">
+            <Field label="Project name" value={form.name} onChange={(v) => setForm({...form, name: slugify(v)})} required />
+            <Field label="Port" type="number" value={form.port} onChange={(v) => setForm({...form, port: Number(v)})} />
+            <Field label="Replicas" type="number" value={form.replicas} onChange={(v) => setForm({...form, replicas: Number(v)})} />
+            <label>Resource preset</label>
+            <select value={form.resource_preset} onChange={(event) => setForm({...form, resource_preset: event.target.value})}>
+              <option value="nano">Nano</option>
+              <option value="small">Small</option>
+              <option value="medium">Medium</option>
+              <option value="large">Large</option>
+            </select>
+            <label>BasaltPass optional</label>
+            <select value={form.basaltpass_instance_id} onChange={(event) => setForm({...form, basaltpass_instance_id: event.target.value})}>
+              <option value="">Do not register OAuth app</option>
+              {credentials.basaltpass.map((cred) => <option key={cred.id} value={cred.id}>{cred.name}</option>)}
+            </select>
+          </div>
+        )}
+        {step.id === "namespace" && (
+          <div className="form-grid">
+            <label>Namespace</label>
+            <input list="namespace-options" value={form.namespace} placeholder={form.name ? `proj-${form.name}` : "proj-my-app"} onChange={(event) => setForm({...form, namespace: slugify(event.target.value)})} />
+            <datalist id="namespace-options">
+              {namespaces.map((ns) => <option key={ns.name} value={ns.name} />)}
+            </datalist>
+            <p className="muted">Leave empty to create {form.name ? <b>proj-{form.name}</b> : "a project namespace"} automatically.</p>
+          </div>
+        )}
+        {step.id === "ingress" && (
+          <div className="form-grid">
+            <label>Traffic</label>
+            <select value={form.exposure_mode} onChange={(event) => setForm({...form, exposure_mode: event.target.value})}>
+              <option value="public">Traefik public ingress</option>
+              <option value="private">Tailscale private ingress</option>
+              <option value="internal-only">Cluster internal only</option>
+            </select>
+          </div>
+        )}
+        {step.id === "domain" && (
+          <div className="form-grid">
+            {form.exposure_mode === "public" && (
+              <>
+                <label>Cloudflare credential</label>
+                <select value={form.cloudflare_credential_id} onChange={(event) => setForm({...form, cloudflare_credential_id: event.target.value})} required>
+                  <option value="">Choose Cloudflare zone</option>
+                  {credentials.cloudflare.map((cred) => <option key={cred.id} value={cred.id}>{cred.name} · {cred.domain}</option>)}
+                </select>
+                <Field label="Subdomain" value={form.subdomain} onChange={(v) => setForm({...form, subdomain: slugify(v)})} required />
+                <div className="computed-host">{publicHost || "Subdomain preview"}</div>
+              </>
+            )}
+            {form.exposure_mode === "private" && <Field label="Tailscale host" value={form.private_host} onChange={(v) => setForm({...form, private_host: v.trim().toLowerCase()})} required />}
+            {form.exposure_mode === "internal-only" && <p className="muted">No domain is required for internal-only projects.</p>}
+          </div>
+        )}
+        {step.id === "confirm" && (
+          <div className="detail-list">
+            <span>Install method <b>{sourceLabel(form.build_source)}</b></span>
+            <span>Source <b>{sourceSummary(form)}</b></span>
+            <span>Project <b>{form.name || "-"}</b></span>
+            <span>Namespace <b>{form.namespace || (form.name ? `proj-${form.name}` : "-")}</b></span>
+            <span>Ingress <b>{form.exposure_mode}</b></span>
+            <span>Domain <b>{publicHost || form.private_host || "internal only"}</b></span>
+            <span>Port <b>{form.port}</b></span>
+          </div>
+        )}
+        <div className="wizard-actions">
+          <button type="button" onClick={back} disabled={stepIndex === 0}>Back</button>
+          {step.id === "confirm" ? (
+            <button className="primary" disabled={!analysis?.deployable} type="submit"><Play size={16} /> Build</button>
+          ) : (
+            <button className="primary" type="button" disabled={!canContinue} onClick={next}>Next</button>
           )}
-          {form.exposure_mode === "private" && <Field label="Tailscale host" value={form.private_host} onChange={(v) => setForm({...form, private_host: v.trim().toLowerCase()})} required />}
         </div>
-        <button className="primary" disabled={!analysis?.deployable} type="submit"><Play size={16} /> Deploy</button>
       </form>
     </div>
   );
@@ -648,6 +791,50 @@ function ProgressStep({step}) {
   );
 }
 
+const deploySteps = [
+  {id: "method", label: "Method", title: "Choose install method"},
+  {id: "source", label: "Source", title: "Choose or enter source"},
+  {id: "check", label: "Check", title: "Check installability"},
+  {id: "params", label: "Params", title: "Configure parameters"},
+  {id: "namespace", label: "Namespace", title: "Choose namespace"},
+  {id: "ingress", label: "Ingress", title: "Choose ingress mode"},
+  {id: "domain", label: "Domain", title: "Choose domain"},
+  {id: "confirm", label: "Confirm", title: "Confirm and build"},
+];
+
+const installMethods = [
+  {id: "github", label: "GitHub", icon: Github, description: "Analyze a GitHub repository and deploy the matching GHCR image."},
+  {id: "dockerhub", label: "Docker Hub", icon: Package, description: "Deploy an existing Docker Hub image."},
+  {id: "ghcr", label: "GHCR", icon: Github, description: "Deploy an existing GitHub Container Registry image."},
+  {id: "source-upload", label: "Upload source", icon: Upload, description: "Upload a source archive and record the target image to build."},
+];
+
+function canContinueDeployStep(stepID, form, selectedCredential, analysis) {
+  if (stepID === "method") return Boolean(form.build_source);
+  if (stepID === "source") {
+    if (form.build_source === "github") return Boolean(selectedCredential && form.github_repo);
+    if (form.build_source === "source-upload") return Boolean(form.source_archive_name && form.image_reference);
+    return Boolean(form.image_reference);
+  }
+  if (stepID === "check") return Boolean(analysis?.deployable);
+  if (stepID === "params") return Boolean(form.name && Number(form.port || 0) > 0 && Number(form.replicas || 0) > 0);
+  if (stepID === "domain") {
+    if (form.exposure_mode === "public") return Boolean(form.cloudflare_credential_id && form.subdomain);
+    if (form.exposure_mode === "private") return Boolean(form.private_host);
+  }
+  return true;
+}
+
+function sourceLabel(source) {
+  return ({github: "GitHub", dockerhub: "Docker Hub", ghcr: "GHCR", "source-upload": "Source upload"}[source || "github"] || source);
+}
+
+function sourceSummary(form) {
+  if (form.build_source === "github") return `${form.github_repo || "-"} @ ${form.github_branch || "main"}`;
+  if (form.build_source === "source-upload") return `${form.source_archive_name || "-"} -> ${form.image_reference || "-"}`;
+  return form.image_reference || "-";
+}
+
 function ProjectsView({projects, onEdit, onDelete, onScale, onRestart, onProgress}) {
   return (
     <section className="panel">
@@ -656,7 +843,7 @@ function ProjectsView({projects, onEdit, onDelete, onScale, onRestart, onProgres
         {projects.map((project) => (
           <div className="tr" key={project.id}>
             <span className="strong">{project.display_name || project.name}</span>
-            <span>{project.github_repo}</span>
+            <span>{project.github_repo || project.image_reference || project.source_archive_name || project.build_source}</span>
             <span>{project.domain || project.exposure_mode}</span>
             <span>{project.status}</span>
             <span>
@@ -836,10 +1023,14 @@ function Field({label, value, onChange, type = "text", required = false}) {
 
 function defaultDeployForm() {
   return {
+    build_source: "github",
     name: "",
     namespace: "",
+    github_repo: "",
     github_branch: "main",
     dockerfile_path: "Dockerfile",
+    image_reference: "",
+    source_archive_name: "",
     basaltpass_instance_id: "",
     cloudflare_credential_id: "",
     exposure_mode: "private",
@@ -855,11 +1046,15 @@ function buildProjectPayload(form, githubCredentialID, credentials) {
   const exposure = form.exposure_mode;
   const selectedCF = credentials.cloudflare.find((cred) => String(cred.id) === String(form.cloudflare_credential_id));
   const domain = exposure === "public" && selectedCF ? `${form.subdomain}.${selectedCF.domain}` : exposure === "private" ? form.private_host : "";
+  const source = form.build_source || "github";
   return {
+    build_source: source,
     name: form.name,
     namespace: form.namespace || undefined,
-    github_credential_id: Number(githubCredentialID),
-    github_repo: form.github_repo,
+    image_reference: form.image_reference || undefined,
+    source_archive_name: form.source_archive_name || undefined,
+    github_credential_id: source === "github" ? Number(githubCredentialID) : undefined,
+    github_repo: source === "github" ? form.github_repo : undefined,
     github_branch: form.github_branch || "main",
     dockerfile_path: form.dockerfile_path || "Dockerfile",
     basaltpass_instance_id: form.basaltpass_instance_id ? Number(form.basaltpass_instance_id) : undefined,
@@ -872,6 +1067,14 @@ function buildProjectPayload(form, githubCredentialID, credentials) {
     ports: [{name: "http", port: Number(form.port || 8080), protocol: "http", exposure, domain}],
     env: {},
   };
+}
+
+function imageName(image) {
+  const withoutDigest = String(image || "").split("@")[0];
+  const slash = withoutDigest.lastIndexOf("/");
+  const colon = withoutDigest.lastIndexOf(":");
+  const value = colon > slash ? withoutDigest.slice(0, colon) : withoutDigest;
+  return value.split("/").filter(Boolean).pop() || "app";
 }
 
 function makeAPI(token, onUnauthorized) {

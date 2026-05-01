@@ -179,6 +179,91 @@ button:disabled {
   align-items: start;
 }
 
+.deploy-wizard {
+  display: grid;
+  gap: 16px;
+  max-width: 980px;
+}
+
+.wizard-steps {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.wizard-step {
+  min-height: 58px;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  color: #64748b;
+}
+
+.wizard-step b {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.wizard-step.active,
+.wizard-step.done {
+  border-color: #155e75;
+  background: #ecfeff;
+  color: #155e75;
+}
+
+.wizard-step.active b,
+.wizard-step.done b {
+  background: #155e75;
+  color: #ffffff;
+}
+
+.wizard-panel {
+  min-height: 430px;
+}
+
+.method-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+}
+
+.method-card {
+  min-height: 150px;
+  align-items: flex-start;
+  justify-content: flex-start;
+  flex-direction: column;
+  text-align: left;
+  padding: 14px;
+}
+
+.method-card span {
+  color: #64748b;
+  line-height: 1.4;
+}
+
+.method-card.active {
+  border-color: #155e75;
+  background: #ecfeff;
+}
+
+.wizard-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.readiness-card {
+  display: grid;
+  gap: 12px;
+}
+
 .stack {
   display: grid;
   gap: 16px;
@@ -252,6 +337,10 @@ textarea {
   margin-top: 12px;
   max-height: 620px;
   overflow: auto;
+}
+
+.compact-repos {
+  max-height: 260px;
 }
 
 .repo {

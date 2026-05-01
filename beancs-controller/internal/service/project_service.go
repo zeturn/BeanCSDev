@@ -125,6 +125,9 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 	}
 	req.ExposureMode = aggregateExposureMode(req.Ports)
 	primaryPort := req.Ports[0]
+	if err := validateProjectSource(&req); err != nil {
+		return nil, err
+	}
 	if req.ExposureMode == model.ExposurePublic {
 		if req.CloudflareCredentialID == nil {
 			return nil, fmt.Errorf("cloudflare_credential_id is required when any port is public")
@@ -134,8 +137,10 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 		return nil, fmt.Errorf("unknown resource preset")
 	}
 
-	if err := s.credentials.RequireAccess(userID, model.CredentialTypeGitHub, req.GitHubCredentialID, false); err != nil {
-		return nil, err
+	if req.GitHubCredentialID != 0 {
+		if err := s.credentials.RequireAccess(userID, model.CredentialTypeGitHub, req.GitHubCredentialID, false); err != nil {
+			return nil, err
+		}
 	}
 	if req.BasaltPassInstanceID != nil {
 		if err := s.credentials.RequireAccess(userID, model.CredentialTypeBasaltPass, *req.BasaltPassInstanceID, false); err != nil {
@@ -172,18 +177,23 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 	}
 
 	var ghCred model.GitHubCredential
-	if err := s.db.WithContext(ctx).First(&ghCred, req.GitHubCredentialID).Error; err != nil {
-		rollback()
-		return nil, err
-	}
-	ghToken, err := s.credentials.GitHubToken(ctx, ghCred)
-	if err != nil {
-		rollback()
-		return nil, err
+	var ghToken string
+	if req.GitHubCredentialID != 0 {
+		if err := s.db.WithContext(ctx).First(&ghCred, req.GitHubCredentialID).Error; err != nil {
+			rollback()
+			return nil, err
+		}
+		var err error
+		ghToken, err = s.credentials.GitHubToken(ctx, ghCred)
+		if err != nil {
+			rollback()
+			return nil, err
+		}
 	}
 
 	var cfCred model.CloudflareCredential
 	var cfToken string
+	var err error
 	if req.CloudflareCredentialID != nil {
 		if err := s.db.WithContext(ctx).First(&cfCred, *req.CloudflareCredentialID).Error; err != nil {
 			rollback()
@@ -203,6 +213,9 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 		OwnerID:                userID,
 		TeamID:                 req.TeamID,
 		TenantID:               tenantID,
+		BuildSource:            req.BuildSource,
+		ImageReference:         req.ImageReference,
+		SourceArchiveName:      req.SourceArchiveName,
 		GitHubCredentialID:     req.GitHubCredentialID,
 		GitHubRepo:             req.GitHubRepo,
 		GitHubBranch:           req.GitHubBranch,
@@ -303,6 +316,13 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 		rollback()
 		return nil, err
 	}
+	if project.ImageReference != "" && project.BuildSource != model.BuildSourceGitHub {
+		resources := model.ResourcePresets[project.ResourcePreset]
+		if err := s.k8s.ApplyDeploymentPorts(ctx, project.Namespace, project.Name, project.ImageReference, project.Ports, int32(project.Replicas), resources.CPURequest, resources.CPULimit, resources.MemRequest, resources.MemLimit); err != nil {
+			rollback()
+			return nil, err
+		}
+	}
 
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(project).Error; err != nil {
@@ -320,7 +340,11 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 		rollback()
 		return nil, err
 	}
-	deployment := &model.Deployment{ProjectID: project.ID, Tag: "initial", CommitSHA: req.GitHubBranch, Status: "provisioning", TriggeredBy: userID}
+	deploymentRef := req.GitHubBranch
+	if deploymentRef == "" {
+		deploymentRef = project.ImageReference
+	}
+	deployment := &model.Deployment{ProjectID: project.ID, Tag: "initial", CommitSHA: deploymentRef, Status: "provisioning", TriggeredBy: userID}
 	if err := s.db.WithContext(ctx).Create(deployment).Error; err != nil {
 		rollback()
 		return nil, err
@@ -444,6 +468,13 @@ func projectNamespace(req dto.CreateProjectRequest) string {
 }
 
 func normalizeProjectRequest(req *dto.CreateProjectRequest) {
+	req.BuildSource = strings.ToLower(strings.TrimSpace(req.BuildSource))
+	if req.BuildSource == "" {
+		req.BuildSource = model.BuildSourceGitHub
+	}
+	req.ImageReference = strings.TrimSpace(req.ImageReference)
+	req.SourceArchiveName = strings.TrimSpace(req.SourceArchiveName)
+	req.GitHubRepo = strings.TrimSpace(req.GitHubRepo)
 	if req.GitHubBranch == "" {
 		req.GitHubBranch = "main"
 	}
@@ -472,6 +503,59 @@ func normalizeProjectRequest(req *dto.CreateProjectRequest) {
 	if req.Env == nil {
 		req.Env = map[string]string{}
 	}
+}
+
+func validateProjectSource(req *dto.CreateProjectRequest) error {
+	switch req.BuildSource {
+	case model.BuildSourceGitHub:
+		if req.GitHubCredentialID == 0 {
+			return fmt.Errorf("github_credential_id is required for github installs")
+		}
+		if _, _, ok := splitRepo(req.GitHubRepo); !ok {
+			return fmt.Errorf("github_repo must be in owner/repo format")
+		}
+		if req.ImageReference == "" {
+			req.ImageReference = "ghcr.io/" + strings.ToLower(req.GitHubRepo) + ":latest"
+		}
+	case model.BuildSourceDockerHub:
+		if err := validateImageReference(req.ImageReference); err != nil {
+			return fmt.Errorf("docker hub image_reference: %w", err)
+		}
+		if strings.HasPrefix(strings.ToLower(req.ImageReference), "ghcr.io/") {
+			return fmt.Errorf("docker hub image_reference should not start with ghcr.io")
+		}
+	case model.BuildSourceGHCR:
+		if err := validateImageReference(req.ImageReference); err != nil {
+			return fmt.Errorf("ghcr image_reference: %w", err)
+		}
+		if !strings.HasPrefix(strings.ToLower(req.ImageReference), "ghcr.io/") {
+			return fmt.Errorf("ghcr image_reference must start with ghcr.io/")
+		}
+	case model.BuildSourceSourceUpload:
+		if req.SourceArchiveName == "" {
+			return fmt.Errorf("source_archive_name is required for source uploads")
+		}
+		if err := validateImageReference(req.ImageReference); err != nil {
+			return fmt.Errorf("source upload image_reference: %w", err)
+		}
+	default:
+		return fmt.Errorf("build_source must be github, dockerhub, ghcr, or source-upload")
+	}
+	return nil
+}
+
+func validateImageReference(image string) error {
+	image = strings.TrimSpace(image)
+	if image == "" {
+		return fmt.Errorf("is required")
+	}
+	if strings.ContainsAny(image, " \t\r\n") || strings.Contains(image, "://") {
+		return fmt.Errorf("must be a container image reference")
+	}
+	if strings.HasPrefix(image, "-") || strings.Contains(image, "..") {
+		return fmt.Errorf("must be a valid container image reference")
+	}
+	return nil
 }
 
 func composeFileCandidates() []string {
