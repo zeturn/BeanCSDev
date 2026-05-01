@@ -299,6 +299,51 @@ textarea {
   font-size: 13px;
 }
 
+.domain-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.domain-tile {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid #dbe4ed;
+  border-radius: 8px;
+  padding: 12px;
+  background: #f8fafc;
+}
+
+.domain-tile div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.domain-tile b,
+.domain-tile span,
+.domain-tile small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.domain-tile span,
+.domain-tile small {
+  color: #64748b;
+}
+
+.domain-tile em {
+  font-style: normal;
+  color: #166534;
+  background: #dcfce7;
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
 .signal-list .warning {
   background: #fff7ed;
   color: #9a3412;

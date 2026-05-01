@@ -39,6 +39,7 @@ const nav = [
   {id: "deploy", label: "Deploy", icon: Rocket},
   {id: "projects", label: "Projects", icon: Boxes},
   {id: "github", label: "GitHub", icon: Github},
+  {id: "domains", label: "Domains", icon: Globe2},
   {id: "cloudflare", label: "Cloudflare", icon: Cloud},
   {id: "basaltpass", label: "BasaltPass", icon: Shield},
   {id: "pods", label: "Pods", icon: Layers3},
@@ -57,6 +58,7 @@ function App() {
   const [runtime, setRuntime] = useState(emptyRuntime);
   const [projects, setProjects] = useState([]);
   const [credentials, setCredentials] = useState({github: [], cloudflare: [], basaltpass: []});
+  const [domains, setDomains] = useState([]);
   const [repos, setRepos] = useState([]);
   const [selectedCredential, setSelectedCredential] = useState("");
   const [selectedRepo, setSelectedRepo] = useState("");
@@ -97,11 +99,12 @@ function App() {
     setLoading(true);
     setError("");
     try {
-      const [runtimeData, projectData, githubData, cloudflareData, basaltpassData] = await Promise.all([
+      const [runtimeData, projectData, githubData, cloudflareData, domainsData, basaltpassData] = await Promise.all([
         api.get("/runtime/overview"),
         api.get("/projects"),
         api.get("/credentials/github/"),
         api.get("/credentials/cloudflare/"),
+        api.get("/credentials/cloudflare/domains"),
         api.get("/credentials/basaltpass/"),
       ]);
       setRuntime(runtimeData.data || emptyRuntime);
@@ -111,6 +114,7 @@ function App() {
         cloudflare: cloudflareData.data || [],
         basaltpass: basaltpassData.data || [],
       });
+      setDomains(domainsData.data || []);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -323,6 +327,7 @@ function App() {
         {view === "github" && (
           <GitHubView credentials={credentials.github} onConnect={connectGitHubApp} onRepos={loadRepos} onDelete={(id) => deleteCredential("github", id)} repos={repos} />
         )}
+        {view === "domains" && <DomainsView domains={domains} />}
         {view === "cloudflare" && <CredentialManager kind="cloudflare" rows={credentials.cloudflare} onCreate={createCredential} onDelete={deleteCredential} />}
         {view === "basaltpass" && <CredentialManager kind="basaltpass" rows={credentials.basaltpass} onCreate={createCredential} onDelete={deleteCredential} />}
         {["pods", "nodes", "ingresses", "services"].includes(view) && <RuntimeTable kind={view} rows={runtime[view] || []} />}
@@ -462,6 +467,28 @@ function GitHubView({credentials, onConnect, onRepos, onDelete, repos}) {
   );
 }
 
+function DomainsView({domains}) {
+  return (
+    <section className="panel">
+      <h2><Globe2 size={18} /> Cloudflare domains</h2>
+      <div className="domain-grid">
+        {domains.map((domain) => (
+          <div className="domain-tile" key={`${domain.credential_id}-${domain.zone_id}`}>
+            <Globe2 size={20} />
+            <div>
+              <b>{domain.domain}</b>
+              <span>{domain.credential}</span>
+              <small>{domain.zone_id}</small>
+            </div>
+            <em>{domain.active ? "Active" : "Inactive"}</em>
+          </div>
+        ))}
+        {domains.length === 0 && <div className="empty">No Cloudflare domains linked yet.</div>}
+      </div>
+    </section>
+  );
+}
+
 function RuntimeTable({kind, rows}) {
   const keys = rows[0] ? Object.keys(rows[0]).slice(0, 7) : [];
   return (
@@ -487,8 +514,6 @@ function CredentialManager({kind, rows, onCreate, onDelete}) {
           <input name="name" placeholder="Name" required />
           {isCloudflare ? (
             <>
-              <input name="domain" placeholder="Domain, e.g. hollowdata.com" required />
-              <input name="zone_id" placeholder="Zone ID" required />
               <input name="account_id" placeholder="Account ID, optional" />
               <input name="api_token" type="password" placeholder="Cloudflare API token" required />
             </>
@@ -633,7 +658,7 @@ async function finishLogin(config) {
 }
 
 function titleFor(view) {
-  return ({deploy: "Deploy project", projects: "Projects", github: "GitHub", cloudflare: "Cloudflare", basaltpass: "BasaltPass", pods: "Pods", nodes: "Nodes", ingresses: "Ingresses", services: "Services"}[view] || "BeanCS");
+  return ({deploy: "Deploy project", projects: "Projects", github: "GitHub", domains: "Domains", cloudflare: "Cloudflare", basaltpass: "BasaltPass", pods: "Pods", nodes: "Nodes", ingresses: "Ingresses", services: "Services"}[view] || "BeanCS");
 }
 
 function subtitleFor(view, runtime, projects) {

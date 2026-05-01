@@ -1,11 +1,20 @@
 package dto
 
 type CreateCloudflareCredentialRequest struct {
-	Name      string `json:"name" validate:"required,max=128"`
+	Name      string `json:"name" validate:"omitempty,max=128"`
 	APIToken  string `json:"api_token" validate:"required"`
-	ZoneID    string `json:"zone_id" validate:"required,max=128"`
-	Domain    string `json:"domain" validate:"required,fqdn"`
+	ZoneID    string `json:"zone_id" validate:"omitempty,max=128"`
+	Domain    string `json:"domain" validate:"omitempty,fqdn"`
 	AccountID string `json:"account_id" validate:"omitempty,max=128"`
+}
+
+type CloudflareDomainResponse struct {
+	CredentialID uint   `json:"credential_id"`
+	Credential   string `json:"credential"`
+	ZoneID       string `json:"zone_id"`
+	Domain       string `json:"domain"`
+	AccountID    string `json:"account_id,omitempty"`
+	Active       bool   `json:"active"`
 }
 
 type UpdateCloudflareCredentialRequest struct {

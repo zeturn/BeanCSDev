@@ -43,6 +43,7 @@ func (h *CredentialHandler) Register(r fiber.Router) {
 func (h *CredentialHandler) registerCloudflare(r fiber.Router) {
 	r.Post("/", h.createCloudflare)
 	r.Get("/", h.listCloudflare)
+	r.Get("/domains", h.listCloudflareDomains)
 	r.Get("/:id", h.getCloudflare)
 	r.Patch("/:id", h.updateCloudflare)
 	r.Delete("/:id", h.delete(model.CredentialTypeCloudflare))
@@ -88,7 +89,7 @@ func (h *CredentialHandler) createCloudflare(c *fiber.Ctx) error {
 	if err != nil {
 		return fail(c, 400, err)
 	}
-	return c.Status(201).JSON(out)
+	return c.Status(201).JSON(fiber.Map{"data": out})
 }
 
 func (h *CredentialHandler) createGitHub(c *fiber.Ctx) error {
@@ -164,6 +165,14 @@ func (h *CredentialHandler) createBasaltPass(c *fiber.Ctx) error {
 
 func (h *CredentialHandler) listCloudflare(c *fiber.Ctx) error {
 	out, err := h.service.ListCloudflare(c.UserContext(), middleware.UserID(c))
+	if err != nil {
+		return fail(c, 500, err)
+	}
+	return c.JSON(fiber.Map{"data": out})
+}
+
+func (h *CredentialHandler) listCloudflareDomains(c *fiber.Ctx) error {
+	out, err := h.service.ListCloudflareDomains(c.UserContext(), middleware.UserID(c))
 	if err != nil {
 		return fail(c, 500, err)
 	}
