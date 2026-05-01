@@ -46,6 +46,10 @@ type Config struct {
 	SelfTailscaleHost   string `env:"BEANCS_TAILSCALE_HOST" envDefault:"beancs-controller"`
 	SelfWebhookHost     string `env:"BEANCS_WEBHOOK_HOST"`
 	SelfServicePort     int    `env:"BEANCS_SELF_SERVICE_PORT" envDefault:"8080"`
+
+	GitHubAppID         int64  `env:"BEANCS_GITHUB_APP_ID"`
+	GitHubAppSlug       string `env:"BEANCS_GITHUB_APP_SLUG"`
+	GitHubAppPrivateKey string `env:"BEANCS_GITHUB_APP_PRIVATE_KEY"`
 }
 
 func Load() (*Config, error) {

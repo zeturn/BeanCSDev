@@ -27,3 +27,7 @@ stringData:
   BEANCS_PUBLIC_HOST: beancs.example.com
   BEANCS_WEBHOOK_HOST: hooks.beancs.example.com
   BEANCS_TAILSCALE_HOST: beancs-controller
+  BEANCS_GITHUB_APP_ID: "123456"
+  BEANCS_GITHUB_APP_SLUG: beancs
+  # PEM with escaped newlines or base64-encoded PEM.
+  BEANCS_GITHUB_APP_PRIVATE_KEY: replace-me

@@ -2,7 +2,11 @@ package service
 
 import (
 	"context"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net"
@@ -11,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/zeturn/beancs-controller/internal/config"
 	cryptoutil "github.com/zeturn/beancs-controller/internal/crypto"
 	"github.com/zeturn/beancs-controller/internal/dto"
 	"github.com/zeturn/beancs-controller/internal/model"
@@ -21,10 +27,11 @@ import (
 type CredentialService struct {
 	db     *gorm.DB
 	cipher cryptoutil.Cipher
+	cfg    *config.Config
 }
 
-func NewCredentialService(db *gorm.DB, cipher cryptoutil.Cipher) *CredentialService {
-	return &CredentialService{db: db, cipher: cipher}
+func NewCredentialService(db *gorm.DB, cipher cryptoutil.Cipher, cfg *config.Config) *CredentialService {
+	return &CredentialService{db: db, cipher: cipher, cfg: cfg}
 }
 
 func (s *CredentialService) HasAccess(userID, typ string, id uint, ownerOnly bool) (bool, error) {
@@ -70,14 +77,25 @@ func (s *CredentialService) CreateGitHub(ctx context.Context, userID string, req
 	if err != nil {
 		return nil, err
 	}
-	cred := &model.GitHubCredential{Name: req.Name, TokenEnc: enc, Org: req.Org, GitOpsRepo: req.GitOpsRepo, IsActive: true, CreatedBy: userID}
-	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	cred := &model.GitHubCredential{Name: req.Name, AuthType: "pat", TokenEnc: enc, Org: req.Org, GitOpsRepo: req.GitOpsRepo, IsActive: true, CreatedBy: userID}
+	err = s.createGitHubCredential(ctx, userID, cred)
+	return cred, err
+}
+
+func (s *CredentialService) CreateGitHubApp(ctx context.Context, userID string, req dto.StartGitHubAppInstallRequest, installationID int64, accountLogin string) (*model.GitHubCredential, error) {
+	cred := &model.GitHubCredential{Name: req.Name, AuthType: "app", InstallationID: installationID, AccountLogin: accountLogin, Org: req.Org, GitOpsRepo: req.GitOpsRepo, IsActive: true, CreatedBy: userID}
+	err := s.createGitHubCredential(ctx, userID, cred)
+	return cred, err
+}
+
+func (s *CredentialService) createGitHubCredential(ctx context.Context, userID string, cred *model.GitHubCredential) error {
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(cred).Error; err != nil {
 			return err
 		}
 		return tx.Create(&model.UserCredential{UserID: userID, CredentialType: model.CredentialTypeGitHub, CredentialID: cred.ID, Role: model.CredentialRoleOwner}).Error
 	})
-	return cred, err
+	return err
 }
 
 func (s *CredentialService) CreateBasaltPass(ctx context.Context, userID string, req dto.CreateBasaltPassCredentialRequest) (*model.BasaltPassInstance, error) {
@@ -224,6 +242,78 @@ func (s *CredentialService) VerifyCloudflare(ctx context.Context, id uint) (map[
 
 func (s *CredentialService) DecryptGitHubToken(cred model.GitHubCredential) (string, error) {
 	return s.cipher.DecryptString(cred.TokenEnc)
+}
+
+func (s *CredentialService) GitHubToken(ctx context.Context, cred model.GitHubCredential) (string, error) {
+	if cred.AuthType == "app" || cred.InstallationID != 0 {
+		return s.githubInstallationToken(ctx, cred.InstallationID)
+	}
+	return s.DecryptGitHubToken(cred)
+}
+
+func (s *CredentialService) githubInstallationToken(ctx context.Context, installationID int64) (string, error) {
+	if s.cfg == nil || s.cfg.GitHubAppID == 0 || strings.TrimSpace(s.cfg.GitHubAppPrivateKey) == "" {
+		return "", fmt.Errorf("GitHub App is not configured")
+	}
+	appJWT, err := s.githubAppJWT()
+	if err != nil {
+		return "", err
+	}
+	endpoint := fmt.Sprintf("https://api.github.com/app/installations/%d/access_tokens", installationID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+appJWT)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("GitHub App token request failed: %s", strings.TrimSpace(string(body)))
+	}
+	var out struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil || out.Token == "" {
+		return "", fmt.Errorf("GitHub App token response was invalid")
+	}
+	return out.Token, nil
+}
+
+func (s *CredentialService) githubAppJWT() (string, error) {
+	rawKey := strings.TrimSpace(s.cfg.GitHubAppPrivateKey)
+	if decoded, err := base64.StdEncoding.DecodeString(rawKey); err == nil && strings.Contains(string(decoded), "PRIVATE KEY") {
+		rawKey = string(decoded)
+	}
+	rawKey = strings.ReplaceAll(rawKey, `\n`, "\n")
+	block, _ := pem.Decode([]byte(rawKey))
+	if block == nil {
+		return "", fmt.Errorf("GitHub App private key must be PEM or base64 PEM")
+	}
+	key, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+	if err != nil {
+		parsed, parseErr := x509.ParsePKCS8PrivateKey(block.Bytes)
+		if parseErr != nil {
+			return "", err
+		}
+		var ok bool
+		key, ok = parsed.(*rsa.PrivateKey)
+		if !ok {
+			return "", fmt.Errorf("GitHub App private key must be RSA")
+		}
+	}
+	now := time.Now()
+	claims := jwt.MapClaims{
+		"iat": now.Add(-time.Minute).Unix(),
+		"exp": now.Add(9 * time.Minute).Unix(),
+		"iss": s.cfg.GitHubAppID,
+	}
+	return jwt.NewWithClaims(jwt.SigningMethodRS256, claims).SignedString(key)
 }
 
 func cloudflareGET(ctx context.Context, client *http.Client, token, endpoint string) (map[string]any, error) {

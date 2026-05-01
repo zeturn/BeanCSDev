@@ -87,7 +87,7 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 		rollback()
 		return nil, err
 	}
-	ghToken, err := s.credentials.DecryptGitHubToken(ghCred)
+	ghToken, err := s.credentials.GitHubToken(ctx, ghCred)
 	if err != nil {
 		rollback()
 		return nil, err

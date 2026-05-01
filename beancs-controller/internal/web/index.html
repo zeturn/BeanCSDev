@@ -441,6 +441,17 @@
             </div>
           </form>
 
+          <form id="githubAppForm" class="hidden">
+            <div class="form-grid">
+              <input name="name" placeholder="Credential name" required />
+              <input name="org" placeholder="GitHub org or user" />
+              <input name="gitops_repo" class="wide" placeholder="GitOps repo, e.g. zeturn/gitops" required />
+            </div>
+            <div class="form-actions">
+              <button class="button primary" type="submit">Connect GitHub App</button>
+            </div>
+          </form>
+
           <form id="cloudflareForm" class="hidden">
             <div class="form-grid">
               <input name="name" placeholder="Credential name" required />
@@ -486,6 +497,7 @@
       const resourceRows = document.getElementById("resourceRows");
       const credentialPanel = document.getElementById("credentialPanel");
       const githubForm = document.getElementById("githubForm");
+      const githubAppForm = document.getElementById("githubAppForm");
       const cloudflareForm = document.getElementById("cloudflareForm");
       const viewTitle = document.getElementById("viewTitle");
       const summary = document.getElementById("summary");
@@ -502,6 +514,7 @@
       refreshButton.addEventListener("click", loadCurrentView);
       filterInput.addEventListener("input", renderCurrentView);
       githubForm.addEventListener("submit", (event) => createCredential(event, "github"));
+      githubAppForm.addEventListener("submit", startGitHubAppInstall);
       cloudflareForm.addEventListener("submit", (event) => createCredential(event, "cloudflare"));
       resourceRows.addEventListener("click", handleTableAction);
       document.querySelectorAll(".nav-item[data-resource]").forEach((button) => {
@@ -622,13 +635,15 @@
         github_credentials: {
           title: "GitHub Keys",
           label: "GitHub key",
-          columns: ["Name", "Org", "GitOps repo", "Active", "Created", "Actions"],
-          search: (cred) => `${cred.name || ""} ${cred.org || ""} ${cred.gitops_repo || ""}`.toLowerCase(),
+          columns: ["Name", "Type", "Org", "GitOps repo", "Installation", "Active", "Created", "Actions"],
+          search: (cred) => `${cred.name || ""} ${cred.auth_type || ""} ${cred.org || ""} ${cred.gitops_repo || ""} ${cred.installation_id || ""}`.toLowerCase(),
           row: (cred) => `
             <tr>
               <td class="name">${escapeHTML(cred.name)}</td>
+              <td>${escapeHTML((cred.auth_type || "pat").toUpperCase())}</td>
               <td>${escapeHTML(cred.org || "-")}</td>
               <td>${escapeHTML(cred.gitops_repo || "-")}</td>
+              <td>${escapeHTML(cred.installation_id || "-")}</td>
               <td>${statusPill(cred.is_active ? "Active" : "Inactive", Boolean(cred.is_active))}</td>
               <td>${formatDate(cred.created_at)}</td>
               <td>
@@ -668,6 +683,11 @@
           if (location.search.includes("code=")) {
             await finishLogin();
             history.replaceState({}, "", location.pathname);
+          }
+          if (location.search.includes("github_app=connected")) {
+            state.view = "github_credentials";
+            history.replaceState({}, "", location.pathname);
+            showInfo("GitHub App connected.");
           }
           setView(Boolean(state.token));
           if (state.token) {
@@ -825,6 +845,7 @@
         const isCloudflare = state.view === "cloudflare_credentials";
         credentialPanel.classList.toggle("hidden", !isGitHub && !isCloudflare);
         githubForm.classList.toggle("hidden", !isGitHub);
+        githubAppForm.classList.toggle("hidden", !isGitHub);
         cloudflareForm.classList.toggle("hidden", !isCloudflare);
       }
 
@@ -845,6 +866,26 @@
           });
           form.reset();
           await loadCredentials(kind);
+        } catch (err) {
+          showError(err.message);
+        }
+      }
+
+      async function startGitHubAppInstall(event) {
+        event.preventDefault();
+        clearNotice();
+        const body = Object.fromEntries(new FormData(event.currentTarget).entries());
+        Object.keys(body).forEach((key) => {
+          if (typeof body[key] === "string") body[key] = body[key].trim();
+          if (body[key] === "") delete body[key];
+        });
+        try {
+          const data = await apiJSON("/api/v1/credentials/github/app/start", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify(body),
+          });
+          location.href = data.install_url;
         } catch (err) {
           showError(err.message);
         }

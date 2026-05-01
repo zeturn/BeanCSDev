@@ -6,7 +6,7 @@ import (
 )
 
 func AutoMigrate(db *gorm.DB) error {
-	return db.AutoMigrate(
+	if err := db.AutoMigrate(
 		&model.CloudflareCredential{},
 		&model.GitHubCredential{},
 		&model.BasaltPassInstance{},
@@ -16,5 +16,8 @@ func AutoMigrate(db *gorm.DB) error {
 		&model.DNSRecord{},
 		&model.ResourceQuota{},
 		&model.AuditLog{},
-	)
+	); err != nil {
+		return err
+	}
+	return db.Exec("ALTER TABLE git_hub_credentials ALTER COLUMN token_enc DROP NOT NULL").Error
 }

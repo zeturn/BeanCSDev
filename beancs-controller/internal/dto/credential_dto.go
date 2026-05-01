@@ -24,6 +24,12 @@ type CreateGitHubCredentialRequest struct {
 	GitOpsRepo string `json:"gitops_repo" validate:"required,max=256"`
 }
 
+type StartGitHubAppInstallRequest struct {
+	Name       string `json:"name" validate:"required,max=128"`
+	Org        string `json:"org" validate:"omitempty,max=128"`
+	GitOpsRepo string `json:"gitops_repo" validate:"required,max=256"`
+}
+
 type UpdateGitHubCredentialRequest struct {
 	Name       *string `json:"name" validate:"omitempty,max=128"`
 	Token      *string `json:"token"`
