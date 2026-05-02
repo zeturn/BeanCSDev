@@ -44,6 +44,10 @@ func (h *CredentialHandler) registerCloudflare(r fiber.Router) {
 	r.Post("/", h.createCloudflare)
 	r.Get("/", h.listCloudflare)
 	r.Get("/domains", h.listCloudflareDomains)
+	r.Get("/:id/dns-records", h.listCloudflareDNSRecords)
+	r.Post("/:id/dns-records", h.createCloudflareDNSRecord)
+	r.Put("/:id/dns-records/:record_id", h.updateCloudflareDNSRecord)
+	r.Delete("/:id/dns-records/:record_id", h.deleteCloudflareDNSRecord)
 	r.Get("/:id", h.getCloudflare)
 	r.Patch("/:id", h.updateCloudflare)
 	r.Delete("/:id", h.delete(model.CredentialTypeCloudflare))
@@ -372,6 +376,73 @@ func (h *CredentialHandler) verifyCloudflare(c *fiber.Ctx) error {
 		return fail(c, 400, err)
 	}
 	return c.JSON(out)
+}
+
+func (h *CredentialHandler) listCloudflareDNSRecords(c *fiber.Ctx) error {
+	id, err := idParam(c, "id")
+	if err != nil {
+		return fail(c, 400, err)
+	}
+	if err := h.service.RequireAccess(middleware.UserID(c), model.CredentialTypeCloudflare, id, false); err != nil {
+		return fail(c, 403, err)
+	}
+	out, err := h.service.ListCloudflareDNSRecords(c.UserContext(), id)
+	if err != nil {
+		return fail(c, 400, err)
+	}
+	return c.JSON(fiber.Map{"data": out})
+}
+
+func (h *CredentialHandler) createCloudflareDNSRecord(c *fiber.Ctx) error {
+	id, err := idParam(c, "id")
+	if err != nil {
+		return fail(c, 400, err)
+	}
+	if err := h.service.RequireAccess(middleware.UserID(c), model.CredentialTypeCloudflare, id, true); err != nil {
+		return fail(c, 403, err)
+	}
+	var req dto.CreateCloudflareDNSRecordRequest
+	if err := h.parseAndValidate(c, &req); err != nil {
+		return err
+	}
+	out, err := h.service.CreateCloudflareDNSRecord(c.UserContext(), id, req)
+	if err != nil {
+		return fail(c, 400, err)
+	}
+	return c.Status(201).JSON(out)
+}
+
+func (h *CredentialHandler) updateCloudflareDNSRecord(c *fiber.Ctx) error {
+	id, err := idParam(c, "id")
+	if err != nil {
+		return fail(c, 400, err)
+	}
+	if err := h.service.RequireAccess(middleware.UserID(c), model.CredentialTypeCloudflare, id, true); err != nil {
+		return fail(c, 403, err)
+	}
+	var req dto.UpdateCloudflareDNSRecordRequest
+	if err := h.parseAndValidate(c, &req); err != nil {
+		return err
+	}
+	out, err := h.service.UpdateCloudflareDNSRecord(c.UserContext(), id, c.Params("record_id"), req)
+	if err != nil {
+		return fail(c, 400, err)
+	}
+	return c.JSON(out)
+}
+
+func (h *CredentialHandler) deleteCloudflareDNSRecord(c *fiber.Ctx) error {
+	id, err := idParam(c, "id")
+	if err != nil {
+		return fail(c, 400, err)
+	}
+	if err := h.service.RequireAccess(middleware.UserID(c), model.CredentialTypeCloudflare, id, true); err != nil {
+		return fail(c, 403, err)
+	}
+	if err := h.service.DeleteCloudflareDNSRecord(c.UserContext(), id, c.Params("record_id")); err != nil {
+		return fail(c, 400, err)
+	}
+	return c.SendStatus(204)
 }
 
 func (h *CredentialHandler) verifyOK(c *fiber.Ctx) error {

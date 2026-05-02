@@ -333,6 +333,122 @@ func (s *CredentialService) VerifyCloudflare(ctx context.Context, id uint) (map[
 	}, nil
 }
 
+func (s *CredentialService) ListCloudflareDNSRecords(ctx context.Context, id uint) ([]dto.CloudflareDNSRecordResponse, error) {
+	cred, token, err := s.cloudflareCredentialToken(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(cred.ZoneID) == "" {
+		return nil, fmt.Errorf("cloudflare credential has no zone_id")
+	}
+	endpoint := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/dns_records?per_page=100", url.PathEscape(cred.ZoneID))
+	result, err := cloudflareGET(ctx, &http.Client{Timeout: 15 * time.Second}, token, endpoint)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := json.Marshal(result["result"])
+	if err != nil {
+		return nil, err
+	}
+	var records []dto.CloudflareDNSRecordResponse
+	if err := json.Unmarshal(raw, &records); err != nil {
+		return nil, fmt.Errorf("cloudflare returned invalid DNS record JSON")
+	}
+	return records, nil
+}
+
+func (s *CredentialService) CreateCloudflareDNSRecord(ctx context.Context, id uint, req dto.CreateCloudflareDNSRecordRequest) (dto.CloudflareDNSRecordResponse, error) {
+	return s.writeCloudflareDNSRecord(ctx, id, "", dto.UpdateCloudflareDNSRecordRequest(req), http.MethodPost)
+}
+
+func (s *CredentialService) UpdateCloudflareDNSRecord(ctx context.Context, id uint, recordID string, req dto.UpdateCloudflareDNSRecordRequest) (dto.CloudflareDNSRecordResponse, error) {
+	return s.writeCloudflareDNSRecord(ctx, id, recordID, req, http.MethodPut)
+}
+
+func (s *CredentialService) DeleteCloudflareDNSRecord(ctx context.Context, id uint, recordID string) error {
+	cred, token, err := s.cloudflareCredentialToken(ctx, id)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(recordID) == "" {
+		return fmt.Errorf("record id is required")
+	}
+	endpoint := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/dns_records/%s", url.PathEscape(cred.ZoneID), url.PathEscape(recordID))
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, endpoint, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("Cloudflare DNS delete failed: %s", strings.TrimSpace(string(body)))
+	}
+	return nil
+}
+
+func (s *CredentialService) writeCloudflareDNSRecord(ctx context.Context, id uint, recordID string, req dto.UpdateCloudflareDNSRecordRequest, method string) (dto.CloudflareDNSRecordResponse, error) {
+	cred, token, err := s.cloudflareCredentialToken(ctx, id)
+	if err != nil {
+		return dto.CloudflareDNSRecordResponse{}, err
+	}
+	if strings.TrimSpace(cred.ZoneID) == "" {
+		return dto.CloudflareDNSRecordResponse{}, fmt.Errorf("cloudflare credential has no zone_id")
+	}
+	ttl := req.TTL
+	if ttl == 0 {
+		ttl = 1
+	}
+	payload := map[string]any{
+		"type":    strings.ToUpper(strings.TrimSpace(req.Type)),
+		"name":    strings.TrimSpace(req.Name),
+		"content": strings.TrimSpace(req.Content),
+		"ttl":     ttl,
+		"proxied": req.Proxied,
+		"comment": strings.TrimSpace(req.Comment),
+	}
+	body, _ := json.Marshal(payload)
+	endpoint := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/dns_records", url.PathEscape(cred.ZoneID))
+	if method == http.MethodPut {
+		if strings.TrimSpace(recordID) == "" {
+			return dto.CloudflareDNSRecordResponse{}, fmt.Errorf("record id is required")
+		}
+		endpoint += "/" + url.PathEscape(recordID)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, method, endpoint, strings.NewReader(string(body)))
+	if err != nil {
+		return dto.CloudflareDNSRecordResponse{}, err
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+token)
+	httpReq.Header.Set("Content-Type", "application/json")
+	result, err := cloudflareDo(ctx, &http.Client{Timeout: 15 * time.Second}, httpReq)
+	if err != nil {
+		return dto.CloudflareDNSRecordResponse{}, err
+	}
+	raw, err := json.Marshal(result["result"])
+	if err != nil {
+		return dto.CloudflareDNSRecordResponse{}, err
+	}
+	var out dto.CloudflareDNSRecordResponse
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return dto.CloudflareDNSRecordResponse{}, fmt.Errorf("cloudflare returned invalid DNS record JSON")
+	}
+	return out, nil
+}
+
+func (s *CredentialService) cloudflareCredentialToken(ctx context.Context, id uint) (model.CloudflareCredential, string, error) {
+	var cred model.CloudflareCredential
+	if err := s.db.WithContext(ctx).First(&cred, id).Error; err != nil {
+		return cred, "", err
+	}
+	token, err := s.DecryptCloudflareToken(cred)
+	return cred, token, err
+}
+
 type cloudflareZoneAccount struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
@@ -591,6 +707,23 @@ func cloudflareGET(ctx context.Context, client *http.Client, token, endpoint str
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 || out["success"] != true {
 		return nil, fmt.Errorf("cloudflare verification failed")
+	}
+	return out, nil
+}
+
+func cloudflareDo(ctx context.Context, client *http.Client, req *http.Request) (map[string]any, error) {
+	resp, err := client.Do(req.WithContext(ctx))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	var out map[string]any
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, fmt.Errorf("cloudflare returned invalid JSON")
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 || out["success"] != true {
+		return nil, fmt.Errorf("cloudflare request failed: %s", strings.TrimSpace(string(body)))
 	}
 	return out, nil
 }

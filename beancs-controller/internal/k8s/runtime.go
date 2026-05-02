@@ -36,16 +36,18 @@ type NodeSummary struct {
 }
 
 type PodSummary struct {
-	Namespace       string    `json:"namespace"`
-	Name            string    `json:"name"`
-	Status          string    `json:"status"`
-	ReadyContainers int       `json:"ready_containers"`
-	TotalContainers int       `json:"total_containers"`
-	Restarts        int32     `json:"restarts"`
-	NodeName        string    `json:"node_name,omitempty"`
-	PodIP           string    `json:"pod_ip,omitempty"`
-	AgeSeconds      int64     `json:"age_seconds"`
-	CreatedAt       time.Time `json:"created_at"`
+	Namespace       string            `json:"namespace"`
+	Name            string            `json:"name"`
+	Status          string            `json:"status"`
+	ReadyContainers int               `json:"ready_containers"`
+	TotalContainers int               `json:"total_containers"`
+	Restarts        int32             `json:"restarts"`
+	NodeName        string            `json:"node_name,omitempty"`
+	PodIP           string            `json:"pod_ip,omitempty"`
+	Containers      []string          `json:"containers,omitempty"`
+	Labels          map[string]string `json:"labels,omitempty"`
+	AgeSeconds      int64             `json:"age_seconds"`
+	CreatedAt       time.Time         `json:"created_at"`
 }
 
 type DeploymentSummary struct {
@@ -60,14 +62,16 @@ type DeploymentSummary struct {
 }
 
 type ServiceSummary struct {
-	Namespace  string    `json:"namespace"`
-	Name       string    `json:"name"`
-	Type       string    `json:"type"`
-	ClusterIP  string    `json:"cluster_ip,omitempty"`
-	ExternalIP string    `json:"external_ip,omitempty"`
-	Ports      []string  `json:"ports"`
-	AgeSeconds int64     `json:"age_seconds"`
-	CreatedAt  time.Time `json:"created_at"`
+	Namespace  string            `json:"namespace"`
+	Name       string            `json:"name"`
+	Type       string            `json:"type"`
+	ClusterIP  string            `json:"cluster_ip,omitempty"`
+	ExternalIP string            `json:"external_ip,omitempty"`
+	Ports      []string          `json:"ports"`
+	Selector   map[string]string `json:"selector,omitempty"`
+	Labels     map[string]string `json:"labels,omitempty"`
+	AgeSeconds int64             `json:"age_seconds"`
+	CreatedAt  time.Time         `json:"created_at"`
 }
 
 type IngressSummary struct {
@@ -166,6 +170,8 @@ func (m *Manager) ProjectRuntimeStatus(ctx context.Context, namespace, projectNa
 			ClusterIP:  serviceClusterIP(svc),
 			ExternalIP: serviceExternalIP(svc),
 			Ports:      servicePorts(svc),
+			Selector:   svc.Spec.Selector,
+			Labels:     svc.Labels,
 			AgeSeconds: int64(now.Sub(created).Seconds()),
 			CreatedAt:  created,
 		})
@@ -266,6 +272,10 @@ func (m *Manager) Logs(ctx context.Context, namespace, projectName string, tail 
 	if len(pods) == 0 {
 		return "", nil
 	}
+	return m.logsForPods(ctx, pods, tail)
+}
+
+func (m *Manager) logsForPods(ctx context.Context, pods []corev1.Pod, tail int64) (string, error) {
 	var buf bytes.Buffer
 	for _, pod := range pods {
 		for _, container := range pod.Spec.Containers {
@@ -274,7 +284,7 @@ func (m *Manager) Logs(ctx context.Context, namespace, projectName string, tail 
 			buf.WriteString("/")
 			buf.WriteString(container.Name)
 			buf.WriteString(" <==\n")
-			req := m.Clientset.CoreV1().Pods(namespace).GetLogs(pod.Name, &corev1.PodLogOptions{Container: container.Name, TailLines: &tail, Timestamps: true})
+			req := m.Clientset.CoreV1().Pods(pod.Namespace).GetLogs(pod.Name, &corev1.PodLogOptions{Container: container.Name, TailLines: &tail, Timestamps: true})
 			stream, err := req.Stream(ctx)
 			if err != nil {
 				buf.WriteString("log stream unavailable: ")
@@ -348,6 +358,8 @@ func (m *Manager) listPodSummaries(ctx context.Context) ([]PodSummary, error) {
 			Restarts:        restarts,
 			NodeName:        pod.Spec.NodeName,
 			PodIP:           pod.Status.PodIP,
+			Containers:      podContainerNames(pod),
+			Labels:          pod.Labels,
 			AgeSeconds:      int64(now.Sub(created).Seconds()),
 			CreatedAt:       created,
 		})
@@ -394,11 +406,21 @@ func (m *Manager) listServiceSummaries(ctx context.Context) ([]ServiceSummary, e
 			ClusterIP:  serviceClusterIP(svc),
 			ExternalIP: serviceExternalIP(svc),
 			Ports:      servicePorts(svc),
+			Selector:   svc.Spec.Selector,
+			Labels:     svc.Labels,
 			AgeSeconds: int64(now.Sub(created).Seconds()),
 			CreatedAt:  created,
 		})
 	}
 	return out, nil
+}
+
+func podContainerNames(pod corev1.Pod) []string {
+	out := make([]string, 0, len(pod.Spec.Containers))
+	for _, container := range pod.Spec.Containers {
+		out = append(out, container.Name+":"+container.Image)
+	}
+	return out
 }
 
 func (m *Manager) listIngressSummaries(ctx context.Context) ([]IngressSummary, error) {
