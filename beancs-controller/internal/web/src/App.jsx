@@ -66,6 +66,13 @@ function App() {
   const [credentials, setCredentials] = useState({github: [], cloudflare: [], basaltpass: []});
   const [domains, setDomains] = useState([]);
   const [repos, setRepos] = useState([]);
+  const [reposByCredential, setReposByCredential] = useState({});
+  const [repoFilters, setRepoFilters] = useState({});
+  const [selectedCloudflareID, setSelectedCloudflareID] = useState("");
+  const [dnsRecords, setDNSRecords] = useState([]);
+  const [editingDNSRecord, setEditingDNSRecord] = useState(null);
+  const [runtimeDetail, setRuntimeDetail] = useState(null);
+  const [runtimeLogs, setRuntimeLogs] = useState("");
   const [selectedCredential, setSelectedCredential] = useState("");
   const [selectedRepo, setSelectedRepo] = useState("");
   const [analysis, setAnalysis] = useState(null);
@@ -77,6 +84,7 @@ function App() {
   const [installProgress, setInstallProgress] = useState(null);
 
   const api = useMemo(() => makeAPI(token, logout), [token]);
+  const userProfile = useMemo(() => profileFromToken(token), [token]);
 
   useEffect(() => {
     boot();
@@ -207,10 +215,139 @@ function App() {
     try {
       const data = await api.get(`/credentials/github/${credentialID}/repositories`);
       setRepos(data.data || []);
+      setReposByCredential((current) => ({...current, [credentialID]: data.data || []}));
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadDNSRecords(credentialID = selectedCloudflareID) {
+    if (!credentialID) return;
+    setSelectedCloudflareID(String(credentialID));
+    setLoading(true);
+    setError("");
+    try {
+      const data = await api.get(`/credentials/cloudflare/${credentialID}/dns-records`);
+      setDNSRecords(data.data || []);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function saveDNSRecord(event) {
+    event.preventDefault();
+    if (!selectedCloudflareID) return;
+    const body = Object.fromEntries(new FormData(event.currentTarget).entries());
+    body.ttl = Number(body.ttl || 1);
+    body.proxied = Boolean(body.proxied);
+    try {
+      if (editingDNSRecord?.id) {
+        await api.put(`/credentials/cloudflare/${selectedCloudflareID}/dns-records/${editingDNSRecord.id}`, body);
+      } else {
+        await api.post(`/credentials/cloudflare/${selectedCloudflareID}/dns-records`, body);
+      }
+      event.currentTarget.reset();
+      setEditingDNSRecord(null);
+      await loadDNSRecords(selectedCloudflareID);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function deleteDNSRecord(record) {
+    if (!selectedCloudflareID || !confirm(`Delete DNS record ${record.name}?`)) return;
+    try {
+      await api.delete(`/credentials/cloudflare/${selectedCloudflareID}/dns-records/${record.id}`);
+      await loadDNSRecords(selectedCloudflareID);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function createNamespace(event) {
+    event.preventDefault();
+    const body = Object.fromEntries(new FormData(event.currentTarget).entries());
+    body.labels = parseKeyValues(body.labels);
+    delete body.labels_raw;
+    try {
+      await api.post("/runtime/namespaces", body);
+      event.currentTarget.reset();
+      await loadWorkspace();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function patchNamespaceLabels(namespace, labelsText) {
+    try {
+      await api.patch(`/runtime/namespaces/${namespace}`, {labels: parseKeyValues(labelsText)});
+      await loadWorkspace();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function deleteNamespace(namespace) {
+    if (!confirm(`Delete namespace ${namespace}? This removes resources inside it.`)) return;
+    try {
+      await api.delete(`/runtime/namespaces/${namespace}`);
+      await loadWorkspace();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function deletePod(pod) {
+    if (!confirm(`Delete pod ${pod.name}? Kubernetes may recreate it.`)) return;
+    try {
+      await api.delete(`/runtime/pods/${pod.namespace}/${pod.name}`);
+      await loadWorkspace();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function loadPodLogs(pod) {
+    setRuntimeDetail({kind: "pod", row: pod});
+    try {
+      const data = await api.get(`/runtime/pods/${pod.namespace}/${pod.name}/logs?tail=160`);
+      setRuntimeLogs(data.logs || "");
+    } catch (err) {
+      setRuntimeLogs(err.message);
+    }
+  }
+
+  async function saveService(event, existing = null) {
+    event.preventDefault();
+    const body = Object.fromEntries(new FormData(event.currentTarget).entries());
+    body.selector = parseKeyValues(body.selector);
+    body.labels = parseKeyValues(body.labels);
+    body.ports = parseServicePorts(body.ports);
+    try {
+      if (existing) {
+        await api.put(`/runtime/services/${existing.namespace}/${existing.name}`, body);
+      } else {
+        await api.post("/runtime/services", body);
+        event.currentTarget.reset();
+      }
+      setRuntimeDetail(null);
+      await loadWorkspace();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function deleteService(service) {
+    if (!confirm(`Delete service ${service.name}?`)) return;
+    try {
+      await api.delete(`/runtime/services/${service.namespace}/${service.name}`);
+      await loadWorkspace();
+    } catch (err) {
+      setError(err.message);
     }
   }
 
@@ -421,6 +558,14 @@ function App() {
             </button>
           );
         })}
+        <div className="sidebar-user">
+          <div className="user-avatar">{userProfile.initial}</div>
+          <div className="user-copy">
+            <b>{userProfile.name}</b>
+            <span>{userProfile.detail}</span>
+          </div>
+          <button className="signout-button" onClick={logout}>Sign out</button>
+        </div>
       </aside>
       <main className="workspace">
         <header className="topbar">
@@ -430,7 +575,6 @@ function App() {
           </div>
           <div className="top-actions">
             <button onClick={loadWorkspace} disabled={loading}><RefreshCw size={16} /> Refresh</button>
-            <button onClick={logout}>Sign out</button>
           </div>
         </header>
         {notice && <div className="notice">{notice}</div>}
@@ -467,15 +611,16 @@ function App() {
           <ProjectsView projects={projects} onEdit={setEditingProject} onDelete={deleteProject} onScale={scaleProject} onRestart={restartProject} onProgress={(project) => { setActiveProgressProjectID(String(project.id)); setView("progress"); }} />
         )}
         {view === "github" && (
-          <GitHubView credentials={credentials.github} onConnect={connectGitHubApp} onRepos={loadRepos} onDelete={(id) => deleteCredential("github", id)} repos={repos} />
+          <GitHubView credentials={credentials.github} onConnect={connectGitHubApp} onRepos={loadRepos} onDelete={(id) => deleteCredential("github", id)} reposByCredential={reposByCredential} repoFilters={repoFilters} setRepoFilters={setRepoFilters} />
         )}
         {view === "domains" && <DomainsView domains={domains} />}
-        {view === "cloudflare" && <CredentialManager kind="cloudflare" rows={credentials.cloudflare} onCreate={createCredential} onDelete={deleteCredential} />}
+        {view === "cloudflare" && <CloudflareView credentials={credentials.cloudflare} domains={domains} selectedID={selectedCloudflareID} setSelectedID={setSelectedCloudflareID} dnsRecords={dnsRecords} editingRecord={editingDNSRecord} setEditingRecord={setEditingDNSRecord} onCreate={createCredential} onDelete={(id) => deleteCredential("cloudflare", id)} onLoadDNS={loadDNSRecords} onSaveDNS={saveDNSRecord} onDeleteDNS={deleteDNSRecord} />}
         {view === "basaltpass" && <CredentialManager kind="basaltpass" rows={credentials.basaltpass} onCreate={createCredential} onDelete={deleteCredential} />}
-        {["namespaces", "pods", "nodes", "ingresses", "services"].includes(view) && <RuntimeTable kind={view} rows={runtime[view] || []} />}
+        {["namespaces", "pods", "nodes", "ingresses", "services"].includes(view) && <RuntimeTable kind={view} rows={runtime[view] || []} onCreateNamespace={createNamespace} onPatchNamespace={patchNamespaceLabels} onDeleteNamespace={deleteNamespace} onDeletePod={deletePod} onPodLogs={loadPodLogs} onSaveService={saveService} onDeleteService={deleteService} onDetail={setRuntimeDetail} />}
       </main>
       {editingProject && <ProjectModal project={editingProject} onClose={() => setEditingProject(null)} onSubmit={updateProject} />}
       {deletingProject && <DeleteProjectModal project={deletingProject} busy={loading} onClose={() => setDeletingProject(null)} onDelete={confirmDeleteProject} />}
+      {runtimeDetail && <RuntimeDetailModal detail={runtimeDetail} logs={runtimeLogs} onClose={() => { setRuntimeDetail(null); setRuntimeLogs(""); }} onSaveService={saveService} onPatchNamespace={patchNamespaceLabels} />}
     </div>
   );
 }
@@ -884,7 +1029,7 @@ function DeleteProjectModal({project, busy, onClose, onDelete}) {
   );
 }
 
-function GitHubView({credentials, onConnect, onRepos, onDelete, repos}) {
+function GitHubView({credentials, onConnect, onRepos, onDelete, reposByCredential, repoFilters, setRepoFilters}) {
   return (
     <div className="stack">
       <section className="panel action-panel">
@@ -894,22 +1039,87 @@ function GitHubView({credentials, onConnect, onRepos, onDelete, repos}) {
         </div>
         <form onSubmit={onConnect}><button className="primary"><Github size={16} /> Connect GitHub App</button></form>
       </section>
-      <section className="panel">
-        <div className="table compact">
-          <div className="tr head"><span>Name</span><span>Account</span><span>Type</span><span>GitOps repo</span><span>Actions</span></div>
-          {credentials.map((cred) => (
-            <div className="tr" key={cred.id}>
-              <span className="account-cell">{cred.avatar_url ? <img src={cred.avatar_url} alt="" /> : <Github size={18} />}{cred.name}</span>
-              <span>{cred.account_login || cred.org || "-"}</span><span>{cred.auth_type || "pat"}</span><span>{cred.gitops_repo || "-"}</span>
-              <span className="row-actions">
-                <button onClick={() => onRepos(cred.id)}><GitBranch size={15} /> Repos</button>
+      {credentials.map((cred) => {
+        const repos = reposByCredential[cred.id] || [];
+        const filter = repoFilters[cred.id] || "";
+        const visible = repos.filter((repo) => repo.full_name.toLowerCase().includes(filter.toLowerCase()));
+        return (
+          <section className="panel" key={cred.id}>
+            <div className="account-header">
+              <div className="account-cell">{cred.avatar_url ? <img src={cred.avatar_url} alt="" /> : <Github size={18} />}<div><b>{cred.name}</b><small>{cred.account_login || cred.org || "-"} · {cred.auth_type || "pat"} · GitOps {cred.gitops_repo || "-"}</small></div></div>
+              <div className="row-actions">
+                <button onClick={() => onRepos(cred.id)}><RefreshCw size={15} /> Load repos</button>
                 <button onClick={() => onDelete(cred.id)}><Trash2 size={15} /></button>
-              </span>
+              </div>
             </div>
+            <div className="repo-toolbar">
+              <input placeholder="Search repositories" value={filter} onChange={(event) => setRepoFilters((current) => ({...current, [cred.id]: event.target.value}))} />
+              <span>{visible.length}/{repos.length} repos</span>
+            </div>
+            <div className="repo-grid">
+              {visible.map((repo) => (
+                <a key={repo.full_name} className="repo-card" href={repo.html_url} target="_blank" rel="noreferrer">
+                  <b>{repo.full_name}</b>
+                  <span>{repo.private ? "Private" : "Public"} · {repo.default_branch || "main"}</span>
+                </a>
+              ))}
+              {repos.length === 0 && <div className="empty">Click Load repos to inspect this account.</div>}
+            </div>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+function CloudflareView({credentials, domains, selectedID, setSelectedID, dnsRecords, editingRecord, setEditingRecord, onCreate, onDelete, onLoadDNS, onSaveDNS, onDeleteDNS}) {
+  const selected = credentials.find((cred) => String(cred.id) === String(selectedID));
+  return (
+    <div className="stack">
+      <CredentialManager kind="cloudflare" rows={credentials} onCreate={onCreate} onDelete={(_, id) => onDelete(id)} />
+      <section className="panel">
+        <h2><Globe2 size={18} /> Zones and DNS tools</h2>
+        <div className="domain-grid">
+          {domains.map((domain) => (
+            <button type="button" className={String(selectedID) === String(domain.credential_id) ? "domain-tile active" : "domain-tile"} key={`${domain.credential_id}-${domain.zone_id}`} onClick={() => { setSelectedID(String(domain.credential_id)); onLoadDNS(domain.credential_id); }}>
+              <Globe2 size={20} />
+              <div>
+                <b>{domain.domain}</b>
+                <span>{domain.credential}</span>
+                <small>{domain.zone_id}</small>
+              </div>
+              <em>{domain.active ? "Active" : "Inactive"}</em>
+            </button>
           ))}
+          {domains.length === 0 && <div className="empty">No Cloudflare domains linked yet.</div>}
         </div>
       </section>
-      {repos.length > 0 && <section className="panel repo-cloud">{repos.slice(0, 80).map((repo) => <span key={repo.full_name}>{repo.full_name}</span>)}</section>}
+      <section className="panel">
+        <div className="account-header">
+          <h2><Network size={18} /> DNS records {selected ? `for ${selected.domain || selected.name}` : ""}</h2>
+          <button disabled={!selectedID} onClick={() => onLoadDNS(selectedID)}><RefreshCw size={15} /> Refresh DNS</button>
+        </div>
+        <form className="form-grid dns-form" onSubmit={onSaveDNS} key={editingRecord?.id || "new-dns"}>
+          <select name="type" defaultValue={editingRecord?.type || "A"}><option>A</option><option>AAAA</option><option>CNAME</option><option>TXT</option><option>MX</option></select>
+          <input name="name" placeholder="app.example.com" defaultValue={editingRecord?.name || ""} required />
+          <input name="content" placeholder="Target content" defaultValue={editingRecord?.content || ""} required />
+          <input name="ttl" type="number" min="1" defaultValue={editingRecord?.ttl || 1} />
+          <label className="check-row"><input name="proxied" type="checkbox" defaultChecked={Boolean(editingRecord?.proxied)} /> Proxied</label>
+          <input name="comment" placeholder="Comment" defaultValue={editingRecord?.comment || ""} />
+          <button className="primary" disabled={!selectedID} type="submit">{editingRecord ? "Save DNS" : "Add DNS"}</button>
+          {editingRecord && <button type="button" onClick={() => setEditingRecord(null)}>Cancel</button>}
+        </form>
+        <div className="table dns-table">
+          <div className="tr head"><span>Type</span><span>Name</span><span>Content</span><span>TTL</span><span>Proxy</span><span>Actions</span></div>
+          {dnsRecords.map((record) => (
+            <div className="tr" key={record.id}>
+              <span>{record.type}</span><span>{record.name}</span><span>{record.content}</span><span>{record.ttl}</span><span>{record.proxied ? "Yes" : "No"}</span>
+              <span className="row-actions"><button onClick={() => setEditingRecord(record)}>Edit</button><button className="danger-button" onClick={() => onDeleteDNS(record)}><Trash2 size={15} /></button></span>
+            </div>
+          ))}
+          {dnsRecords.length === 0 && <div className="empty">{selectedID ? "No DNS records loaded." : "Choose a zone to view DNS records."}</div>}
+        </div>
+      </section>
     </div>
   );
 }
@@ -936,16 +1146,83 @@ function DomainsView({domains}) {
   );
 }
 
-function RuntimeTable({kind, rows}) {
+function RuntimeTable({kind, rows, onCreateNamespace, onPatchNamespace, onDeleteNamespace, onDeletePod, onPodLogs, onSaveService, onDeleteService, onDetail}) {
   const keys = rows[0] ? Object.keys(rows[0]).slice(0, 7) : [];
   return (
-    <section className="panel">
-      <div className="table compact">
-        <div className="tr head">{keys.map((key) => <span key={key}>{key.replaceAll("_", " ")}</span>)}</div>
-        {rows.map((row, index) => <div className="tr" key={`${kind}-${index}`}>{keys.map((key) => <span key={key}>{formatCell(row[key])}</span>)}</div>)}
-        {rows.length === 0 && <div className="empty">No {kind} found.</div>}
+    <div className="stack">
+      {kind === "namespaces" && (
+        <section className="panel">
+          <h2><Layers3 size={18} /> Create namespace</h2>
+          <form className="form-grid inline-form" onSubmit={onCreateNamespace}>
+            <input name="name" placeholder="namespace-name" required />
+            <input name="labels" placeholder="labels: env=dev,team=platform" />
+            <button className="primary" type="submit"><Plus size={15} /> Create</button>
+          </form>
+        </section>
+      )}
+      {kind === "services" && (
+        <section className="panel">
+          <h2><Database size={18} /> Create service</h2>
+          <ServiceForm onSubmit={(event) => onSaveService(event)} namespaces={[]} />
+        </section>
+      )}
+      <section className="panel">
+        <div className="table runtime-table">
+          <div className="tr head">{keys.map((key) => <span key={key}>{key.replaceAll("_", " ")}</span>)}<span>Actions</span></div>
+          {rows.map((row, index) => (
+            <div className="tr" key={`${kind}-${row.namespace || ""}-${row.name || index}`}>
+              {keys.map((key) => <span key={key}>{formatCell(row[key])}</span>)}
+              <span className="row-actions">
+                <button onClick={() => onDetail({kind, row})}>Details</button>
+                {kind === "namespaces" && <button onClick={() => onDeleteNamespace(row.name)} className="danger-button"><Trash2 size={15} /></button>}
+                {kind === "pods" && <><button onClick={() => onPodLogs(row)}>Logs</button><button onClick={() => onDeletePod(row)} className="danger-button"><Trash2 size={15} /></button></>}
+                {kind === "services" && <><button onClick={() => onDetail({kind: "service-edit", row})}>Edit</button><button onClick={() => onDeleteService(row)} className="danger-button"><Trash2 size={15} /></button></>}
+              </span>
+            </div>
+          ))}
+          {rows.length === 0 && <div className="empty">No {kind} found.</div>}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function RuntimeDetailModal({detail, logs, onClose, onSaveService, onPatchNamespace}) {
+  const row = detail.row || {};
+  return (
+    <div className="modal-backdrop">
+      <div className="modal wide-modal">
+        <h2>{detail.kind} · {row.namespace ? `${row.namespace}/` : ""}{row.name}</h2>
+        {detail.kind === "service-edit" ? (
+          <ServiceForm existing={row} onSubmit={(event) => onSaveService(event, row)} />
+        ) : detail.kind === "namespaces" ? (
+          <form className="form-grid" onSubmit={(event) => { event.preventDefault(); onPatchNamespace(row.name, event.currentTarget.labels.value); onClose(); }}>
+            <label>Labels</label>
+            <textarea name="labels" defaultValue={formatKeyValues(row.labels)} />
+            <button className="primary">Save labels</button>
+          </form>
+        ) : detail.kind === "pod" ? (
+          <pre className="modal-log">{logs || "No logs loaded."}</pre>
+        ) : (
+          <div className="detail-list">{Object.entries(row).map(([key, value]) => <span key={key}>{key.replaceAll("_", " ")} <b>{formatCell(value)}</b></span>)}</div>
+        )}
+        <div className="modal-actions"><button type="button" onClick={onClose}>Close</button></div>
       </div>
-    </section>
+    </div>
+  );
+}
+
+function ServiceForm({existing, onSubmit}) {
+  return (
+    <form className="form-grid inline-form service-form" onSubmit={onSubmit}>
+      {!existing && <input name="namespace" placeholder="namespace" required />}
+      {!existing && <input name="name" placeholder="service-name" required />}
+      <select name="type" defaultValue={existing?.type || "ClusterIP"}><option>ClusterIP</option><option>NodePort</option><option>LoadBalancer</option></select>
+      <input name="selector" placeholder="selector: app=my-app,managed-by=beancs" defaultValue={formatKeyValues(existing?.selector)} />
+      <input name="ports" placeholder="ports: http:80:8080/TCP,https:443:8443/TCP" defaultValue={portsToForm(existing?.ports)} required />
+      <input name="labels" placeholder="labels: app=my-app" defaultValue={formatKeyValues(existing?.labels)} />
+      <button className="primary" type="submit">{existing ? "Save service" : "Create service"}</button>
+    </form>
   );
 }
 
@@ -1077,6 +1354,25 @@ function imageName(image) {
   return value.split("/").filter(Boolean).pop() || "app";
 }
 
+function profileFromToken(token) {
+  const fallback = {name: "Signed in user", detail: "BeanCS session", initial: "U"};
+  if (!token || !token.includes(".")) return fallback;
+  try {
+    const payload = JSON.parse(base64URLDecode(token.split(".")[1]));
+    const name = payload.name || payload.preferred_username || payload.email || payload.sub || fallback.name;
+    const detail = payload.email && payload.email !== name ? payload.email : payload.preferred_username && payload.preferred_username !== name ? payload.preferred_username : "BeanCS session";
+    return {name, detail, initial: String(name).trim().slice(0, 1).toUpperCase() || "U"};
+  } catch {
+    return fallback;
+  }
+}
+
+function base64URLDecode(value) {
+  const normalized = String(value || "").replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+  return decodeURIComponent(Array.from(atob(padded), (char) => `%${char.charCodeAt(0).toString(16).padStart(2, "0")}`).join(""));
+}
+
 function makeAPI(token, onUnauthorized) {
   async function request(path, options = {}) {
     const res = await fetch(API + path, {
@@ -1095,6 +1391,7 @@ function makeAPI(token, onUnauthorized) {
   return {
     get: (path) => request(path),
     post: (path, body) => request(path, {method: "POST", body: JSON.stringify(body)}),
+    put: (path, body) => request(path, {method: "PUT", body: JSON.stringify(body)}),
     patch: (path, body) => request(path, {method: "PATCH", body: JSON.stringify(body)}),
     delete: (path) => request(path, {method: "DELETE"}),
   };
@@ -1140,9 +1437,44 @@ function formatTime(value) {
 
 function formatCell(value) {
   if (Array.isArray(value)) return value.join(", ") || "-";
+  if (typeof value === "object" && value !== null) return formatKeyValues(value);
   if (typeof value === "boolean") return value ? "Yes" : "No";
   if (value === null || value === undefined || value === "") return "-";
   return String(value);
+}
+
+function parseKeyValues(value) {
+  if (!value) return {};
+  return String(value).split(",").map((item) => item.trim()).filter(Boolean).reduce((out, item) => {
+    const [key, ...rest] = item.split("=");
+    if (key?.trim()) out[key.trim()] = rest.join("=").trim();
+    return out;
+  }, {});
+}
+
+function formatKeyValues(value) {
+  if (!value || typeof value !== "object") return "";
+  return Object.entries(value).map(([key, val]) => `${key}=${val}`).join(",");
+}
+
+function parseServicePorts(value) {
+  return String(value || "").split(",").map((item) => item.trim()).filter(Boolean).map((item) => {
+    const [left, protocol = "TCP"] = item.split("/");
+    const parts = left.split(":");
+    const hasName = parts.length > 1 && Number.isNaN(Number(parts[0]));
+    const port = hasName ? Number(parts[1]) : Number(parts[0]);
+    return {
+      name: hasName ? parts[0] : "",
+      port,
+      target_port: Number(hasName ? (parts[2] || parts[1]) : (parts[1] || parts[0])),
+      protocol: protocol || "TCP",
+    };
+  });
+}
+
+function portsToForm(ports) {
+  if (!Array.isArray(ports)) return "";
+  return ports.map((port) => String(port)).join(",");
 }
 
 function slugify(value) {

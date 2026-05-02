@@ -17,6 +17,35 @@ type CloudflareDomainResponse struct {
 	Active       bool   `json:"active"`
 }
 
+type CloudflareDNSRecordResponse struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Name     string `json:"name"`
+	Content  string `json:"content"`
+	TTL      int    `json:"ttl"`
+	Proxied  bool   `json:"proxied"`
+	Comment  string `json:"comment,omitempty"`
+	Modified string `json:"modified_on,omitempty"`
+}
+
+type CreateCloudflareDNSRecordRequest struct {
+	Type    string `json:"type" validate:"required,oneof=A AAAA CNAME TXT MX"`
+	Name    string `json:"name" validate:"required,max=256"`
+	Content string `json:"content" validate:"required,max=2048"`
+	TTL     int    `json:"ttl" validate:"omitempty,min=1"`
+	Proxied bool   `json:"proxied"`
+	Comment string `json:"comment" validate:"omitempty,max=500"`
+}
+
+type UpdateCloudflareDNSRecordRequest struct {
+	Type    string `json:"type" validate:"required,oneof=A AAAA CNAME TXT MX"`
+	Name    string `json:"name" validate:"required,max=256"`
+	Content string `json:"content" validate:"required,max=2048"`
+	TTL     int    `json:"ttl" validate:"omitempty,min=1"`
+	Proxied bool   `json:"proxied"`
+	Comment string `json:"comment" validate:"omitempty,max=500"`
+}
+
 type UpdateCloudflareCredentialRequest struct {
 	Name      *string `json:"name" validate:"omitempty,max=128"`
 	APIToken  *string `json:"api_token"`

@@ -5,6 +5,7 @@ on:
     branches: [main, deploy]
     tags:
       - "v*"
+      - "beancs-v*"
   workflow_dispatch:
 
 permissions:
@@ -69,7 +70,7 @@ jobs:
             echo "tags<<EOF"
             echo "${IMAGE}:${GITHUB_SHA}"
             echo "${IMAGE}:latest"
-            if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            if [[ "${GITHUB_REF}" == refs/tags/v* || "${GITHUB_REF}" == refs/tags/beancs-v* ]]; then
               echo "${IMAGE}:${GITHUB_REF_NAME}"
             fi
             echo "EOF"
@@ -102,7 +103,7 @@ jobs:
 
   deploy_k3s:
     needs: build_and_push
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/beancs-v')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -144,8 +145,12 @@ jobs:
           kubectl wait --for=condition=Established crd/certificates.cert-manager.io --timeout=120s
           kubectl wait --for=condition=Established crd/clusterissuers.cert-manager.io --timeout=120s
           kubectl -n cert-manager rollout status deployment/cert-manager --timeout=180s
-          kubectl -n cert-manager rollout status deployment/cert-manager-cainjector --timeout=180s
-          kubectl -n cert-manager rollout status deployment/cert-manager-webhook --timeout=180s
+          if ! kubectl -n cert-manager rollout status deployment/cert-manager-cainjector --timeout=420s; then
+            kubectl -n cert-manager get pods -o wide
+            kubectl -n cert-manager describe deployment/cert-manager-cainjector || true
+            echo "::warning::cert-manager-cainjector did not become ready; continuing because controller rollout can proceed with existing cert-manager CRDs."
+          fi
+          kubectl -n cert-manager rollout status deployment/cert-manager-webhook --timeout=420s
           kubectl apply -f beancs-controller/deploy/clusterissuer-letsencrypt.yaml
 
       - name: Configure GHCR pull secret
