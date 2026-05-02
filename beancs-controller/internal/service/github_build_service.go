@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -102,17 +103,27 @@ func (s *GitHubBuildService) ensureWorkflow(ctx context.Context, token, owner, r
 	if project.AutoDeploy && webhookURL == "" {
 		return fmt.Errorf("BEANCS_WEBHOOK_HOST or BEANCS_PUBLIC_HOST is required for automatic GitHub push deployment")
 	}
+	callbackEnabled := false
 	if webhookURL != "" {
-		if err := s.putRepositorySecret(ctx, token, owner, repo, "BEANCS_WEBHOOK_URL", webhookURL); err != nil {
+		var err error
+		callbackEnabled, err = s.ensureWebhookSecrets(ctx, token, owner, repo, webhookURL)
+		if err != nil {
 			return err
 		}
-		if s.cfg != nil && s.cfg.WebhookSecret != "" {
-			if err := s.putRepositorySecret(ctx, token, owner, repo, "BEANCS_WEBHOOK_SECRET", s.cfg.WebhookSecret); err != nil {
-				return err
-			}
+	}
+	return putFile(ctx, client, owner, repo, beancsBuildWorkflowPath, beancsBuildWorkflow(project, callbackEnabled), "beancs: add build workflow")
+}
+
+func (s *GitHubBuildService) ensureWebhookSecrets(ctx context.Context, token, owner, repo, webhookURL string) (bool, error) {
+	if err := s.putRepositorySecret(ctx, token, owner, repo, "BEANCS_WEBHOOK_URL", webhookURL); err != nil {
+		return false, githubSecretsPermissionError(owner, repo, err)
+	}
+	if s.cfg != nil && s.cfg.WebhookSecret != "" {
+		if err := s.putRepositorySecret(ctx, token, owner, repo, "BEANCS_WEBHOOK_SECRET", s.cfg.WebhookSecret); err != nil {
+			return false, githubSecretsPermissionError(owner, repo, err)
 		}
 	}
-	return putFile(ctx, client, owner, repo, beancsBuildWorkflowPath, beancsBuildWorkflow(project, webhookURL != ""), "beancs: add build workflow")
+	return true, nil
 }
 
 func (s *GitHubBuildService) dispatchWorkflow(ctx context.Context, token, owner, repo, branch string, project *model.Project, image string) error {
@@ -123,21 +134,8 @@ func (s *GitHubBuildService) dispatchWorkflow(ctx context.Context, token, owner,
 	}
 	body, _ := json.Marshal(map[string]any{"ref": branch, "inputs": inputs})
 	endpoint := fmt.Sprintf("https://api.github.com/repos/%s/%s/actions/workflows/%s/dispatches", url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(beancsBuildWorkflowFile))
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := (&http.Client{Timeout: 20 * time.Second}).Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("github workflow dispatch failed: %s", strings.TrimSpace(string(raw)))
+	if err := githubRequest(ctx, http.MethodPost, endpoint, token, body, nil); err != nil {
+		return githubActionsPermissionError(owner, repo, err)
 	}
 	return nil
 }
@@ -381,7 +379,7 @@ func githubRequest(ctx context.Context, method, endpoint, token string, body []b
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("GitHub API request failed: %s", strings.TrimSpace(string(raw)))
+		return &githubAPIError{StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(raw))}
 	}
 	if out != nil && len(raw) > 0 {
 		if err := json.Unmarshal(raw, out); err != nil {
@@ -389,6 +387,31 @@ func githubRequest(ctx context.Context, method, endpoint, token string, body []b
 		}
 	}
 	return nil
+}
+
+type githubAPIError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *githubAPIError) Error() string {
+	return fmt.Sprintf("GitHub API request failed: %s", e.Body)
+}
+
+func githubSecretsPermissionError(owner, repo string, err error) error {
+	var apiErr *githubAPIError
+	if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusForbidden && strings.Contains(apiErr.Body, "Resource not accessible by integration") {
+		return fmt.Errorf("GitHub App installation for %s/%s cannot manage repository Actions secrets. Update the GitHub App permissions to include Repository permissions: Contents read/write, Actions read/write, and Secrets read/write, then reinstall or approve the app installation", owner, repo)
+	}
+	return err
+}
+
+func githubActionsPermissionError(owner, repo string, err error) error {
+	var apiErr *githubAPIError
+	if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusForbidden && strings.Contains(apiErr.Body, "Resource not accessible by integration") {
+		return fmt.Errorf("GitHub App installation for %s/%s cannot dispatch GitHub Actions workflows. Update the GitHub App permissions to include Repository permissions: Actions read/write and Contents read/write, then reinstall or approve the app installation", owner, repo)
+	}
+	return err
 }
 
 func truncateFailure(value string) string {
