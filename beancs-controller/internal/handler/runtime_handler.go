@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"bufio"
 	"strconv"
+	"strings"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2"
@@ -69,6 +71,13 @@ func (h *RuntimeHandler) deleteNamespace(c *fiber.Ctx) error {
 
 func (h *RuntimeHandler) podLogs(c *fiber.Ctx) error {
 	tail, _ := strconv.ParseInt(c.Query("tail", "160"), 10, 64)
+	if shouldFollowLogs(c) {
+		targets, err := h.k8s.PodLogTargets(c.UserContext(), c.Params("namespace"), c.Params("name"), c.Query("container"))
+		if err != nil {
+			return fail(c, 400, err)
+		}
+		return h.streamLogs(c, targets, tail)
+	}
 	out, err := h.k8s.PodLogs(c.UserContext(), c.Params("namespace"), c.Params("name"), tail)
 	if err != nil {
 		return fail(c, 400, err)
@@ -148,11 +157,34 @@ func (h *RuntimeHandler) status(c *fiber.Ctx) error {
 func (h *RuntimeHandler) logs(c *fiber.Ctx) error {
 	p := projectFromCtx(c)
 	tail, _ := strconv.ParseInt(c.Query("tail", "100"), 10, 64)
+	if shouldFollowLogs(c) {
+		targets, err := h.k8s.ProjectLogTargets(c.UserContext(), p.Namespace, p.Name, c.Query("container"))
+		if err != nil {
+			return fail(c, 400, err)
+		}
+		return h.streamLogs(c, targets, tail)
+	}
 	out, err := h.k8s.Logs(c.UserContext(), p.Namespace, p.Name, tail)
 	if err != nil {
 		return fail(c, 400, err)
 	}
 	return c.JSON(fiber.Map{"logs": out})
+}
+
+func (h *RuntimeHandler) streamLogs(c *fiber.Ctx, targets []k8s.LogTarget, tail int64) error {
+	ctx := c.UserContext()
+	c.Set(fiber.HeaderContentType, "text/plain; charset=utf-8")
+	c.Set(fiber.HeaderCacheControl, "no-cache")
+	c.Set("X-Accel-Buffering", "no")
+	c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
+		h.k8s.StreamLogs(ctx, targets, tail, true, w)
+	})
+	return nil
+}
+
+func shouldFollowLogs(c *fiber.Ctx) bool {
+	value := strings.ToLower(strings.TrimSpace(c.Query("follow")))
+	return value == "1" || value == "true" || value == "yes"
 }
 
 func (h *RuntimeHandler) restart(c *fiber.Ctx) error {

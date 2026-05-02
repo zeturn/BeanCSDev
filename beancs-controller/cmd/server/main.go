@@ -64,8 +64,9 @@ func main() {
 	quotaSvc := service.NewQuotaService(db)
 	dnsSvc := service.NewDNSService(cfg.IngressIP)
 	gitopsSvc := service.NewGitOpsService()
-	projectSvc := service.NewProjectService(db, credentialSvc, quotaSvc, dnsSvc, gitopsSvc, k8sManager, registry, cipher)
-	deploymentSvc := service.NewDeploymentService(db)
+	buildSvc := service.NewGitHubBuildService(db, cfg, credentialSvc, gitopsSvc)
+	projectSvc := service.NewProjectService(db, credentialSvc, quotaSvc, dnsSvc, gitopsSvc, buildSvc, k8sManager, registry, cipher)
+	deploymentSvc := service.NewDeploymentService(db, buildSvc, credentialSvc, gitopsSvc)
 
 	app := fiber.New(fiber.Config{
 		ErrorHandler: func(c *fiber.Ctx, err error) error {
@@ -113,6 +114,7 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	go buildSvc.StartReconciler(ctx)
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

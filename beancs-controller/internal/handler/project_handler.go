@@ -79,7 +79,7 @@ func (h *ProjectHandler) update(c *fiber.Ctx) error {
 	if err := h.parseAndValidate(c, &req); err != nil {
 		return err
 	}
-	out, err := h.service.UpdateProject(c.UserContext(), projectFromCtx(c), req)
+	out, err := h.service.UpdateProject(c.UserContext(), projectFromCtx(c), req, middleware.UserID(c))
 	if err != nil {
 		return fail(c, 400, err)
 	}

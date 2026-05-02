@@ -1,4 +1,4 @@
-import React, {useEffect, useMemo, useState} from "react";
+import React, {useEffect, useMemo, useRef, useState} from "react";
 import {createRoot} from "react-dom/client";
 import {
   Boxes,
@@ -82,6 +82,13 @@ function App() {
   const [activeProgressProjectID, setActiveProgressProjectID] = useState("");
   const [projectProgress, setProjectProgress] = useState(null);
   const [installProgress, setInstallProgress] = useState(null);
+  const [projectLogFollow, setProjectLogFollow] = useState(false);
+  const [projectLiveLogs, setProjectLiveLogs] = useState("");
+  const [projectLogStatus, setProjectLogStatus] = useState("");
+  const [runtimeLogFollow, setRuntimeLogFollow] = useState(false);
+  const [runtimeLogStatus, setRuntimeLogStatus] = useState("");
+  const projectLogController = useRef(null);
+  const runtimeLogController = useRef(null);
 
   const api = useMemo(() => makeAPI(token, logout), [token]);
   const userProfile = useMemo(() => profileFromToken(token), [token]);
@@ -99,7 +106,14 @@ function App() {
     loadProjectProgress();
     const timer = setInterval(loadProjectProgress, 3000);
     return () => clearInterval(timer);
-  }, [token, view, activeProgressProjectID, projects.length]);
+  }, [token, view, activeProgressProjectID, projects.length, projectLogFollow]);
+
+  useEffect(() => {
+    return () => {
+      projectLogController.current?.abort();
+      runtimeLogController.current?.abort();
+    };
+  }, []);
 
   async function boot() {
     try {
@@ -312,6 +326,7 @@ function App() {
   }
 
   async function loadPodLogs(pod) {
+    stopRuntimeLogFollow();
     setRuntimeDetail({kind: "pod", row: pod});
     try {
       const data = await api.get(`/runtime/pods/${pod.namespace}/${pod.name}/logs?tail=160`);
@@ -319,6 +334,37 @@ function App() {
     } catch (err) {
       setRuntimeLogs(err.message);
     }
+  }
+
+  async function startRuntimeLogFollow(pod) {
+    runtimeLogController.current?.abort();
+    const controller = new AbortController();
+    runtimeLogController.current = controller;
+    setRuntimeLogFollow(true);
+    setRuntimeLogStatus("Connecting...");
+    setRuntimeLogs("");
+    try {
+      const namespace = encodeURIComponent(pod.namespace);
+      const name = encodeURIComponent(pod.name);
+      const res = await api.stream(`/runtime/pods/${namespace}/${name}/logs?tail=160&follow=true`, {signal: controller.signal});
+      setRuntimeLogStatus("Following live logs");
+      await consumeTextStream(res, (chunk) => setRuntimeLogs((current) => trimLiveLog(current + chunk)));
+      setRuntimeLogStatus("Log stream ended");
+    } catch (err) {
+      if (err.name !== "AbortError") setRuntimeLogStatus(err.message);
+    } finally {
+      if (runtimeLogController.current === controller) {
+        runtimeLogController.current = null;
+        setRuntimeLogFollow(false);
+      }
+    }
+  }
+
+  function stopRuntimeLogFollow() {
+    runtimeLogController.current?.abort();
+    runtimeLogController.current = null;
+    setRuntimeLogFollow(false);
+    setRuntimeLogStatus("");
   }
 
   async function saveService(event, existing = null) {
@@ -467,10 +513,11 @@ function App() {
     }
     setActiveProgressProjectID(String(selected.id));
     try {
+      const logRequest = projectLogFollow ? Promise.resolve({logs: projectProgress?.logs || ""}) : api.get(`/projects/${selected.id}/logs?tail=160`);
       const [status, deployments, logData] = await Promise.all([
         api.get(`/projects/${selected.id}/status`),
         api.get(`/projects/${selected.id}/deployments`),
-        api.get(`/projects/${selected.id}/logs?tail=160`),
+        logRequest,
       ]);
       setProjectProgress({
         project: selected,
@@ -488,10 +535,56 @@ function App() {
     }
   }
 
+  async function startProjectLogFollow(projectID = activeProgressProjectID) {
+    let selected = projectID
+      ? projects.find((project) => String(project.id) === String(projectID))
+      : projectProgress?.project || projects[0];
+    if (!selected && projectID) {
+      try {
+        selected = await api.get(`/projects/${projectID}`);
+      } catch (err) {
+        setProjectLogStatus(err.message);
+        return;
+      }
+    }
+    if (!selected) {
+      setProjectLogStatus("Choose a project before following logs.");
+      return;
+    }
+    projectLogController.current?.abort();
+    const controller = new AbortController();
+    projectLogController.current = controller;
+    setActiveProgressProjectID(String(selected.id));
+    setProjectLogFollow(true);
+    setProjectLiveLogs("");
+    setProjectLogStatus("Connecting...");
+    try {
+      const res = await api.stream(`/projects/${selected.id}/logs?tail=160&follow=true`, {signal: controller.signal});
+      setProjectLogStatus("Following live logs");
+      await consumeTextStream(res, (chunk) => setProjectLiveLogs((current) => trimLiveLog(current + chunk)));
+      setProjectLogStatus("Log stream ended");
+    } catch (err) {
+      if (err.name !== "AbortError") setProjectLogStatus(err.message);
+    } finally {
+      if (projectLogController.current === controller) {
+        projectLogController.current = null;
+        setProjectLogFollow(false);
+      }
+    }
+  }
+
+  function stopProjectLogFollow() {
+    projectLogController.current?.abort();
+    projectLogController.current = null;
+    setProjectLogFollow(false);
+    setProjectLogStatus("");
+  }
+
   async function updateProject(event) {
     event.preventDefault();
     const body = Object.fromEntries(new FormData(event.currentTarget).entries());
     body.replicas = Number(body.replicas || 1);
+    body.auto_deploy = body.auto_deploy === "on";
     await api.patch(`/projects/${editingProject.id}`, body);
     setEditingProject(null);
     await loadWorkspace();
@@ -529,6 +622,18 @@ function App() {
   async function restartProject(project) {
     await api.post(`/projects/${project.id}/restart`, {});
     setNotice(`${project.name} restarted.`);
+  }
+
+  async function buildProject(project) {
+    try {
+      await api.post(`/projects/${project.id}/deployments`, {tag: "github-actions", commit_sha: project.github_branch || ""});
+      setNotice(`${project.name} build started.`);
+      setActiveProgressProjectID(String(project.id));
+      setView("progress");
+      await loadProjectProgress(String(project.id));
+    } catch (err) {
+      setError(err.message);
+    }
   }
 
   if (!token) {
@@ -605,10 +710,15 @@ function App() {
             progress={projectProgress}
             installProgress={installProgress}
             refresh={loadProjectProgress}
+            logFollow={projectLogFollow}
+            liveLogs={projectLiveLogs}
+            logStatus={projectLogStatus}
+            onStartLogFollow={startProjectLogFollow}
+            onStopLogFollow={stopProjectLogFollow}
           />
         )}
         {view === "projects" && (
-          <ProjectsView projects={projects} onEdit={setEditingProject} onDelete={deleteProject} onScale={scaleProject} onRestart={restartProject} onProgress={(project) => { setActiveProgressProjectID(String(project.id)); setView("progress"); }} />
+          <ProjectsView projects={projects} onEdit={setEditingProject} onDelete={deleteProject} onScale={scaleProject} onRestart={restartProject} onBuild={buildProject} onProgress={(project) => { setActiveProgressProjectID(String(project.id)); setView("progress"); }} />
         )}
         {view === "github" && (
           <GitHubView credentials={credentials.github} onConnect={connectGitHubApp} onRepos={loadRepos} onDelete={(id) => deleteCredential("github", id)} reposByCredential={reposByCredential} repoFilters={repoFilters} setRepoFilters={setRepoFilters} />
@@ -620,7 +730,7 @@ function App() {
       </main>
       {editingProject && <ProjectModal project={editingProject} onClose={() => setEditingProject(null)} onSubmit={updateProject} />}
       {deletingProject && <DeleteProjectModal project={deletingProject} busy={loading} onClose={() => setDeletingProject(null)} onDelete={confirmDeleteProject} />}
-      {runtimeDetail && <RuntimeDetailModal detail={runtimeDetail} logs={runtimeLogs} onClose={() => { setRuntimeDetail(null); setRuntimeLogs(""); }} onSaveService={saveService} onPatchNamespace={patchNamespaceLabels} />}
+      {runtimeDetail && <RuntimeDetailModal detail={runtimeDetail} logs={runtimeLogs} logFollow={runtimeLogFollow} logStatus={runtimeLogStatus} onFollowPodLogs={startRuntimeLogFollow} onStopPodLogs={stopRuntimeLogFollow} onClose={() => { stopRuntimeLogFollow(); setRuntimeDetail(null); setRuntimeLogs(""); }} onSaveService={saveService} onPatchNamespace={patchNamespaceLabels} />}
     </div>
   );
 }
@@ -745,6 +855,12 @@ function DeployView({credentials, namespaces, selectedCredential, setSelectedCre
               <option value="medium">Medium</option>
               <option value="large">Large</option>
             </select>
+            {form.build_source === "github" && (
+              <label className="checkbox-row">
+                <input type="checkbox" checked={form.auto_deploy !== false} onChange={(event) => setForm({...form, auto_deploy: event.target.checked})} />
+                Auto build and deploy on GitHub push
+              </label>
+            )}
             <label>BasaltPass optional</label>
             <select value={form.basaltpass_instance_id} onChange={(event) => setForm({...form, basaltpass_instance_id: event.target.value})}>
               <option value="">Do not register OAuth app</option>
@@ -798,6 +914,7 @@ function DeployView({credentials, namespaces, selectedCredential, setSelectedCre
             <span>Ingress <b>{form.exposure_mode}</b></span>
             <span>Domain <b>{publicHost || form.private_host || "internal only"}</b></span>
             <span>Port <b>{form.port}</b></span>
+            {form.build_source === "github" && <span>Deploy mode <b>{form.auto_deploy !== false ? "Auto GitOps tracking" : "Manual deployments only"}</b></span>}
           </div>
         )}
         <div className="wizard-actions">
@@ -813,13 +930,14 @@ function DeployView({credentials, namespaces, selectedCredential, setSelectedCre
   );
 }
 
-function ProgressView({projects, activeProjectID, setActiveProjectID, progress, installProgress, refresh}) {
+function ProgressView({projects, activeProjectID, setActiveProjectID, progress, installProgress, refresh, logFollow, liveLogs, logStatus, onStartLogFollow, onStopLogFollow}) {
   const pods = progress?.pods || [];
   const events = progress?.events || [];
   const deployments = progress?.deployments || [];
   const readyPods = pods.filter((pod) => Number(pod.ready_containers || 0) > 0 && Number(pod.ready_containers) === Number(pod.total_containers || 0)).length;
   const desiredReplicas = progress?.deployment?.replicas ?? progress?.project?.replicas ?? 0;
   const readyReplicas = progress?.deployment?.ready_replicas ?? 0;
+  const logs = logFollow ? liveLogs : progress?.logs;
   return (
     <div className="stack">
       <section className="panel action-panel">
@@ -852,6 +970,8 @@ function ProgressView({projects, activeProjectID, setActiveProjectID, progress, 
               <span>Namespace <b>{progress.project.namespace}</b></span>
               <span>Route <b>{progress.project.domain || progress.project.exposure_mode}</b></span>
               <span>Status <b>{progress.project.status}</b></span>
+            <span>Deploy mode <b>{progress.project.auto_deploy ? "Auto GitOps" : "Manual only"}</b></span>
+            <span>Image <b>{progress.project.image_reference || "-"}</b></span>
               <span>Last checked <b>{formatTime(progress.checked_at)}</b></span>
             </div>
             {progress.error && <p className="error-inline">{progress.error}</p>}
@@ -890,7 +1010,10 @@ function ProgressView({projects, activeProjectID, setActiveProjectID, progress, 
                   <span className={deployment.status === "failed" ? "dot failed" : ["deployed", "provisioned"].includes(deployment.status) ? "dot done" : "dot running"} />
                   <div>
                     <b>{deployment.status || "pending"}</b>
-                    <small>{deployment.tag || deployment.commit_sha || "manual"} · {formatTime(deployment.created_at)}</small>
+                    <small>{deployment.image_ref || deployment.tag || deployment.commit_sha || "manual"} · {formatTime(deployment.created_at)}</small>
+                    {deployment.workflow_url && <small><a href={deployment.workflow_url} target="_blank" rel="noreferrer">GitHub Actions run</a></small>}
+                    {deployment.commit_sha && <small>Commit: {deployment.commit_sha}</small>}
+                    {deployment.failure_reason && <small className="warning">{deployment.failure_reason}</small>}
                   </div>
                 </div>
               ))}
@@ -914,8 +1037,19 @@ function ProgressView({projects, activeProjectID, setActiveProjectID, progress, 
             </div>
           </section>
           <section className="panel log-panel">
-            <h2><Code2 size={18} /> Logs</h2>
-            <pre>{progress.logs || "No application logs yet."}</pre>
+            <div className="log-header">
+              <h2><Code2 size={18} /> Container logs</h2>
+              <div className="row-actions">
+                <button onClick={() => refresh()} disabled={logFollow}><RefreshCw size={15} /> Snapshot</button>
+                {logFollow ? (
+                  <button onClick={onStopLogFollow}>Stop follow</button>
+                ) : (
+                  <button className="primary" onClick={() => onStartLogFollow(progress.project.id)}>Follow live</button>
+                )}
+              </div>
+            </div>
+            {logStatus && <p className="log-status">{logStatus}</p>}
+            <pre>{logs || "No application logs yet."}</pre>
           </section>
         </div>
       ) : (
@@ -980,7 +1114,7 @@ function sourceSummary(form) {
   return form.image_reference || "-";
 }
 
-function ProjectsView({projects, onEdit, onDelete, onScale, onRestart, onProgress}) {
+function ProjectsView({projects, onEdit, onDelete, onScale, onRestart, onBuild, onProgress}) {
   return (
     <section className="panel">
       <div className="table">
@@ -998,6 +1132,7 @@ function ProjectsView({projects, onEdit, onDelete, onScale, onRestart, onProgres
             </span>
             <span className="row-actions">
               <button onClick={() => onProgress(project)} title="Progress"><LoaderCircle size={15} /> Progress</button>
+              <button onClick={() => onBuild(project)} title="Build"><Play size={15} /> Build</button>
               <button onClick={() => onRestart(project)} title="Restart"><ListRestart size={15} /></button>
               <button onClick={() => onEdit(project)} title="Edit"><Plus size={15} /></button>
               <button className="danger-button" onClick={() => onDelete(project)} title="Delete"><Trash2 size={15} /> Delete</button>
@@ -1187,7 +1322,7 @@ function RuntimeTable({kind, rows, onCreateNamespace, onPatchNamespace, onDelete
   );
 }
 
-function RuntimeDetailModal({detail, logs, onClose, onSaveService, onPatchNamespace}) {
+function RuntimeDetailModal({detail, logs, logFollow, logStatus, onFollowPodLogs, onStopPodLogs, onClose, onSaveService, onPatchNamespace}) {
   const row = detail.row || {};
   return (
     <div className="modal-backdrop">
@@ -1202,7 +1337,19 @@ function RuntimeDetailModal({detail, logs, onClose, onSaveService, onPatchNamesp
             <button className="primary">Save labels</button>
           </form>
         ) : detail.kind === "pod" ? (
-          <pre className="modal-log">{logs || "No logs loaded."}</pre>
+          <>
+            <div className="log-header">
+              <span className="muted">{logStatus || "Snapshot log output"}</span>
+              <div className="row-actions">
+                {logFollow ? (
+                  <button onClick={onStopPodLogs}>Stop follow</button>
+                ) : (
+                  <button className="primary" onClick={() => onFollowPodLogs(row)}>Follow live</button>
+                )}
+              </div>
+            </div>
+            <pre className="modal-log">{logs || "No logs loaded."}</pre>
+          </>
         ) : (
           <div className="detail-list">{Object.entries(row).map(([key, value]) => <span key={key}>{key.replaceAll("_", " ")} <b>{formatCell(value)}</b></span>)}</div>
         )}
@@ -1280,6 +1427,18 @@ function ProjectModal({project, onClose, onSubmit}) {
         <textarea name="description" defaultValue={project.description || ""} />
         <label>Replicas</label>
         <input name="replicas" type="number" min="0" max="20" defaultValue={project.replicas || 1} />
+        <label>Status</label>
+        <select name="status" defaultValue={project.status || "active"}>
+          <option value="active">Active</option>
+          <option value="suspended">Suspended</option>
+          <option value="deleted">Deleted</option>
+        </select>
+        {project.build_source === "github" && (
+          <label className="checkbox-row">
+            <input name="auto_deploy" type="checkbox" defaultChecked={project.auto_deploy !== false} />
+            Auto build and deploy on GitHub push
+          </label>
+        )}
         <div className="modal-actions">
           <button type="button" onClick={onClose}>Cancel</button>
           <button className="primary" type="submit">Save</button>
@@ -1306,6 +1465,7 @@ function defaultDeployForm() {
     github_repo: "",
     github_branch: "main",
     dockerfile_path: "Dockerfile",
+    auto_deploy: true,
     image_reference: "",
     source_archive_name: "",
     basaltpass_instance_id: "",
@@ -1334,6 +1494,7 @@ function buildProjectPayload(form, githubCredentialID, credentials) {
     github_repo: source === "github" ? form.github_repo : undefined,
     github_branch: form.github_branch || "main",
     dockerfile_path: form.dockerfile_path || "Dockerfile",
+    auto_deploy: source === "github" ? form.auto_deploy !== false : false,
     basaltpass_instance_id: form.basaltpass_instance_id ? Number(form.basaltpass_instance_id) : undefined,
     cloudflare_credential_id: exposure === "public" ? Number(form.cloudflare_credential_id) : undefined,
     exposure_mode: exposure,
@@ -1388,13 +1549,48 @@ function makeAPI(token, onUnauthorized) {
     if (!res.ok) throw new Error(data.error || data.error_description || "Request failed");
     return data;
   }
+  async function stream(path, options = {}) {
+    const res = await fetch(API + path, {
+      ...options,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(options.headers || {}),
+      },
+    });
+    if (res.status === 401) onUnauthorized();
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || data.error_description || "Request failed");
+    }
+    return res;
+  }
   return {
     get: (path) => request(path),
     post: (path, body) => request(path, {method: "POST", body: JSON.stringify(body)}),
     put: (path, body) => request(path, {method: "PUT", body: JSON.stringify(body)}),
     patch: (path, body) => request(path, {method: "PATCH", body: JSON.stringify(body)}),
     delete: (path) => request(path, {method: "DELETE"}),
+    stream,
   };
+}
+
+async function consumeTextStream(res, onChunk) {
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error("Streaming logs are not supported by this browser.");
+  const decoder = new TextDecoder();
+  while (true) {
+    const {value, done} = await reader.read();
+    if (done) break;
+    onChunk(decoder.decode(value, {stream: true}));
+  }
+  const remaining = decoder.decode();
+  if (remaining) onChunk(remaining);
+}
+
+function trimLiveLog(value) {
+  const maxLength = 200000;
+  if (value.length <= maxLength) return value;
+  return value.slice(value.length - maxLength);
 }
 
 async function publicJSON(path, options = {}) {

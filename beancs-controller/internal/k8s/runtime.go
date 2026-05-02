@@ -1,12 +1,14 @@
 package k8s
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -125,6 +127,12 @@ type EventSummary struct {
 	Count     int32     `json:"count"`
 	LastSeen  time.Time `json:"last_seen"`
 	FirstSeen time.Time `json:"first_seen"`
+}
+
+type LogTarget struct {
+	Namespace string
+	Pod       string
+	Container string
 }
 
 func (m *Manager) PodStatus(ctx context.Context, namespace, projectName string) ([]corev1.Pod, error) {
@@ -275,6 +283,55 @@ func (m *Manager) Logs(ctx context.Context, namespace, projectName string, tail 
 	return m.logsForPods(ctx, pods, tail)
 }
 
+func (m *Manager) ProjectLogTargets(ctx context.Context, namespace, projectName, container string) ([]LogTarget, error) {
+	if err := m.ensure(); err != nil {
+		return nil, err
+	}
+	pods, err := m.PodStatus(ctx, namespace, projectName)
+	if err != nil {
+		return nil, err
+	}
+	return logTargetsForPods(pods, container), nil
+}
+
+func (m *Manager) StreamLogs(ctx context.Context, targets []LogTarget, tail int64, follow bool, writer *bufio.Writer) {
+	if len(targets) == 0 {
+		writeFlushed(writer, []byte("No matching containers found.\n"))
+		return
+	}
+	streamWriter := &flushingLogWriter{writer: writer}
+	var wg sync.WaitGroup
+	for _, target := range targets {
+		target := target
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			m.streamLogTarget(ctx, target, tail, follow, streamWriter)
+		}()
+	}
+	wg.Wait()
+}
+
+func (m *Manager) streamLogTarget(ctx context.Context, target LogTarget, tail int64, follow bool, writer io.Writer) {
+	_, _ = fmt.Fprintf(writer, "==> %s/%s <==\n", target.Pod, target.Container)
+	req := m.Clientset.CoreV1().Pods(target.Namespace).GetLogs(target.Pod, &corev1.PodLogOptions{
+		Container:  target.Container,
+		TailLines:  &tail,
+		Follow:     follow,
+		Timestamps: true,
+	})
+	stream, err := req.Stream(ctx)
+	if err != nil {
+		_, _ = fmt.Fprintf(writer, "log stream unavailable: %s\n", err.Error())
+		return
+	}
+	defer stream.Close()
+	if _, err := io.Copy(writer, stream); err != nil {
+		_, _ = fmt.Fprintf(writer, "\nlog read failed: %s\n", err.Error())
+	}
+	_, _ = writer.Write([]byte("\n"))
+}
+
 func (m *Manager) logsForPods(ctx context.Context, pods []corev1.Pod, tail int64) (string, error) {
 	var buf bytes.Buffer
 	for _, pod := range pods {
@@ -303,6 +360,44 @@ func (m *Manager) logsForPods(ctx context.Context, pods []corev1.Pod, tail int64
 		}
 	}
 	return buf.String(), nil
+}
+
+func logTargetsForPods(pods []corev1.Pod, containerFilter string) []LogTarget {
+	containerFilter = strings.TrimSpace(containerFilter)
+	targets := []LogTarget{}
+	for _, pod := range pods {
+		for _, container := range pod.Spec.Containers {
+			if containerFilter != "" && container.Name != containerFilter {
+				continue
+			}
+			targets = append(targets, LogTarget{
+				Namespace: pod.Namespace,
+				Pod:       pod.Name,
+				Container: container.Name,
+			})
+		}
+	}
+	return targets
+}
+
+type flushingLogWriter struct {
+	mu     sync.Mutex
+	writer *bufio.Writer
+}
+
+func (w *flushingLogWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	n, err := w.writer.Write(p)
+	if flushErr := w.writer.Flush(); err == nil {
+		err = flushErr
+	}
+	return n, err
+}
+
+func writeFlushed(writer *bufio.Writer, p []byte) {
+	_, _ = writer.Write(p)
+	_ = writer.Flush()
 }
 
 func (m *Manager) Nodes(ctx context.Context) ([]corev1.Node, error) {

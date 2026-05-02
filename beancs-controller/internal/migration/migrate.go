@@ -37,5 +37,8 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := db.Exec("ALTER TABLE projects ALTER COLUMN git_hub_credential_id DROP NOT NULL").Error; err != nil {
 		return err
 	}
-	return db.Exec("ALTER TABLE projects ALTER COLUMN git_hub_repo DROP NOT NULL").Error
+	if err := db.Exec("ALTER TABLE projects ALTER COLUMN git_hub_repo DROP NOT NULL").Error; err != nil {
+		return err
+	}
+	return db.Exec("UPDATE projects SET auto_deploy = TRUE WHERE auto_deploy IS NULL").Error
 }
