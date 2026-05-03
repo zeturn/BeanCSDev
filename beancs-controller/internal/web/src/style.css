@@ -56,7 +56,7 @@ button:disabled {
 
 .danger-button {
   border-color: #fecaca;
-  color: #991b1b;
+  color: var(--bc-danger);
   background: #fff7f7;
 }
 
@@ -75,8 +75,8 @@ button.ghost,
 
 button.ghost:hover,
 .ghost:hover {
-  border-color: #155e75;
-  color: #155e75;
+  border-color: var(--bc-primary-700);
+  color: var(--bc-primary-700);
 }
 
 .login-screen {
@@ -235,7 +235,7 @@ button.ghost:hover,
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: #155e75;
+  background: #6d28d9;
   color: #ffffff;
   font-weight: 800;
 }
@@ -306,13 +306,13 @@ button.ghost:hover,
 }
 
 .notice {
-  background: #dcfce7;
-  color: #166534;
+  background: rgba(16, 185, 129, 0.14);
+  color: var(--bc-success);
 }
 
 .alert {
-  background: #fee2e2;
-  color: #991b1b;
+  background: rgba(239, 68, 68, 0.14);
+  color: var(--bc-danger);
 }
 
 .deploy-grid {
@@ -344,7 +344,7 @@ button.ghost:hover,
 }
 
 .wizard-progress-head b {
-  color: #155e75;
+  color: var(--bc-primary-700);
 }
 
 .wizard-progress-track {
@@ -357,7 +357,7 @@ button.ghost:hover,
 .wizard-progress-track span {
   display: block;
   height: 100%;
-  background: #155e75;
+  background: var(--bc-primary-700);
   border-radius: inherit;
   transition: width 180ms ease;
 }
@@ -378,7 +378,7 @@ button.ghost:hover,
 }
 
 .wizard-step-labels span.active {
-  color: #155e75;
+  color: var(--bc-primary-700);
 }
 
 .wizard-step-labels span.done {
@@ -410,8 +410,8 @@ button.ghost:hover,
 }
 
 .method-card.active {
-  border-color: #155e75;
-  background: #ecfeff;
+  border-color: var(--bc-primary-700);
+  background: var(--bc-primary-100);
 }
 
 .two-up {
@@ -437,7 +437,7 @@ button.ghost:hover,
 .segmented-control button.active {
   border-color: #c9d4df;
   background: #ffffff;
-  color: #155e75;
+  color: var(--bc-primary-700);
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
 }
 
@@ -446,8 +446,8 @@ button.ghost:hover,
   border: 1px solid #fed7aa;
   border-radius: 7px;
   padding: 10px 12px;
-  background: #fff7ed;
-  color: #9a3412;
+  background: rgba(245, 158, 11, 0.15);
+  color: #b45309;
 }
 
 .image-picker {
@@ -471,8 +471,8 @@ button.ghost:hover,
 }
 
 .image-option.active {
-  border-color: #155e75;
-  background: #ecfeff;
+  border-color: var(--bc-primary-700);
+  background: var(--bc-primary-100);
 }
 
 .inline-primary {
@@ -646,13 +646,13 @@ button.ghost:hover,
 }
 
 .import-repo-row.active {
-  border-left-color: #155e75;
-  background: #ecfeff;
+  border-left-color: var(--bc-primary-700);
+  background: var(--bc-primary-100);
 }
 
 .import-repo-row.active > button {
-  border-color: #155e75;
-  background: #155e75;
+  border-color: var(--bc-primary-700);
+  background: var(--bc-primary-700);
 }
 
 .selected-repo-pill {
@@ -662,8 +662,8 @@ button.ghost:hover,
   margin-left: 2px;
   padding: 4px 8px;
   border-radius: 999px;
-  background: #dff7f4;
-  color: #155e75;
+  background: var(--bc-primary-100);
+  color: var(--bc-primary-900);
   font-size: 12px;
   line-height: 1;
 }
@@ -675,10 +675,10 @@ button.ghost:hover,
   width: fit-content;
   max-width: 100%;
   padding: 10px 12px;
-  border: 1px solid #99f6e4;
+  border: 1px solid rgba(124, 58, 237, 0.35);
   border-radius: 8px;
-  background: #f0fdfa;
-  color: #155e75;
+  background: var(--bc-primary-100);
+  color: var(--bc-primary-900);
   font-size: 14px;
 }
 
@@ -808,8 +808,8 @@ textarea {
 }
 
 .repo.active {
-  border-color: #155e75;
-  background: #ecfeff;
+  border-color: var(--bc-primary-700);
+  background: var(--bc-primary-100);
 }
 
 .status {
@@ -821,13 +821,13 @@ textarea {
 }
 
 .status.good {
-  background: #dcfce7;
-  color: #166534;
+  background: rgba(16, 185, 129, 0.14);
+  color: var(--bc-success);
 }
 
 .status.bad {
-  background: #fee2e2;
-  color: #991b1b;
+  background: rgba(239, 68, 68, 0.14);
+  color: var(--bc-danger);
 }
 
 .signal-list,
@@ -839,8 +839,8 @@ textarea {
 
 .signal-list span,
 .repo-cloud span {
-  background: #eef2ff;
-  color: #3730a3;
+  background: var(--bc-primary-100);
+  color: var(--bc-primary-900);
   border-radius: 999px;
   padding: 6px 9px;
   font-size: 13px;
@@ -870,8 +870,8 @@ button.domain-tile {
 }
 
 .domain-tile.active {
-  border-color: #155e75;
-  background: #ecfeff;
+  border-color: var(--bc-primary-700);
+  background: var(--bc-primary-100);
 }
 
 .domain-tile div {
@@ -895,16 +895,16 @@ button.domain-tile {
 
 .domain-tile em {
   font-style: normal;
-  color: #166534;
-  background: #dcfce7;
+  color: var(--bc-success);
+  background: rgba(16, 185, 129, 0.14);
   border-radius: 999px;
   padding: 4px 8px;
   font-size: 12px;
 }
 
 .signal-list .warning {
-  background: #fff7ed;
-  color: #9a3412;
+  background: rgba(245, 158, 11, 0.15);
+  color: #b45309;
 }
 
 .checkbox-row {
@@ -925,6 +925,10 @@ button.domain-tile {
   overflow-x: auto;
 }
 
+.table .tr span {
+  min-width: 0;
+}
+
 .tr {
   display: grid;
   grid-template-columns: 1.1fr 1.4fr 1fr 0.75fr 0.75fr 1fr;
@@ -934,6 +938,13 @@ button.domain-tile {
   padding: 10px;
   background: #ffffff;
   border-bottom: 1px solid #edf2f7;
+}
+
+.cell-truncate {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .compact .tr {
@@ -1274,7 +1285,7 @@ button.domain-tile {
 
 .process-job-header h2 {
   margin: 0;
-  color: #0969da;
+  color: var(--bc-primary-700);
   font-size: 16px;
 }
 
@@ -1466,20 +1477,20 @@ button.domain-tile {
 }
 
 .progress-list-row > span:last-child {
-  color: #155e75;
+  color: var(--bc-primary-700);
   font-weight: 800;
 }
 
 .process-status.done {
-  color: #1a7f37;
+  color: var(--bc-success);
 }
 
 .process-status.failed {
-  color: #cf222e;
+  color: var(--bc-danger);
 }
 
 .process-status.running {
-  color: #9a6700;
+  color: var(--bc-warning);
 }
 
 .process-status.pending {
@@ -1494,7 +1505,7 @@ button.domain-tile {
 .dashboard-hero {
   border: 1px solid #cbd5e1;
   border-radius: 10px;
-  background: linear-gradient(135deg, #0f172a, #164e63);
+  background: linear-gradient(135deg, #1e293b 0%, #4c1d95 48%, #1e293b 100%);
   color: #f8fafc;
   padding: 16px;
   display: grid;
@@ -1511,7 +1522,7 @@ button.domain-tile {
 
 .dashboard-hero p {
   margin: 0;
-  color: #bae6fd;
+  color: #ddd6fe;
   font-size: 13px;
 }
 
@@ -1522,7 +1533,7 @@ button.domain-tile {
 }
 
 .eyebrow {
-  color: #67e8f9;
+  color: var(--bc-primary-300);
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.12em;
@@ -1550,11 +1561,11 @@ button.domain-tile {
 }
 
 .health-badge.good {
-  background: rgba(22, 101, 52, 0.28);
+  background: rgba(16, 185, 129, 0.22);
 }
 
 .health-badge.bad {
-  background: rgba(153, 27, 27, 0.32);
+  background: rgba(239, 68, 68, 0.22);
 }
 
 .dashboard-kpis {
@@ -1599,13 +1610,13 @@ button.domain-tile {
 }
 
 .metric-card.good {
-  border-color: #bbf7d0;
-  background: #f0fdf4;
+  border-color: rgba(16, 185, 129, 0.4);
+  background: rgba(16, 185, 129, 0.12);
 }
 
 .metric-card.warning {
-  border-color: #fed7aa;
-  background: #fff7ed;
+  border-color: rgba(245, 158, 11, 0.5);
+  background: rgba(245, 158, 11, 0.12);
 }
 
 .dashboard-grid {
@@ -1644,7 +1655,7 @@ button.domain-tile {
 .industrial-meter progress {
   width: 100%;
   height: 12px;
-  accent-color: #155e75;
+  accent-color: var(--bc-primary-700);
 }
 
 .industrial-meter small {
@@ -1652,16 +1663,16 @@ button.domain-tile {
 }
 
 .alert-row {
-  border-left: 4px solid #f97316;
+  border-left: 4px solid var(--bc-warning);
   border-radius: 8px;
-  background: #fff7ed;
+  background: rgba(245, 158, 11, 0.12);
   padding: 10px 12px;
   display: grid;
   gap: 3px;
 }
 
 .alert-row b {
-  color: #9a3412;
+  color: #b45309;
 }
 
 .alert-row span,
@@ -1727,16 +1738,16 @@ button.domain-tile {
 
 .step.done svg,
 .dot.done {
-  color: #166534;
+  color: var(--bc-success);
 }
 
 .step.running svg {
-  color: #155e75;
+  color: var(--bc-primary-700);
 }
 
 .step.failed svg,
 .dot.failed {
-  color: #991b1b;
+  color: var(--bc-danger);
 }
 
 .runtime-summary {
@@ -1744,7 +1755,7 @@ button.domain-tile {
   border-radius: 8px;
   padding: 14px;
   margin-bottom: 12px;
-  background: #ecfeff;
+  background: var(--bc-primary-100);
   display: grid;
   gap: 2px;
 }
@@ -1947,8 +1958,8 @@ button.domain-tile {
 }
 
 .condition.warning {
-  border-color: #fed7aa;
-  background: #fff7ed;
+  border-color: rgba(245, 158, 11, 0.5);
+  background: rgba(245, 158, 11, 0.12);
 }
 
 .label-cloud {
@@ -1972,11 +1983,11 @@ button.domain-tile {
   height: 10px;
   border-radius: 50%;
   background: currentColor;
-  color: #155e75;
+  color: var(--bc-primary-700);
 }
 
 .error-inline {
-  color: #991b1b;
+  color: var(--bc-danger);
 }
 
 .modal-backdrop {
@@ -2044,9 +2055,9 @@ button.domain-tile {
 }
 
 .container-chip.active {
-  border-color: #155e75;
-  background: #ecfeff;
-  color: #155e75;
+  border-color: var(--bc-primary-700);
+  background: var(--bc-primary-100);
+  color: var(--bc-primary-700);
 }
 
 .compact-select {
@@ -2185,11 +2196,15 @@ button:hover {
 .brand-orb {
   width: 26px;
   height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 999px;
   background:
     radial-gradient(circle at 34% 32%, rgba(255, 255, 255, 0.35), transparent 28%),
     repeating-linear-gradient(135deg, #7c3aed 0 2px, #6d28d9 2px 4px);
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+  color: #ffffff;
 }
 
 .sidebar-search {
@@ -2600,15 +2615,15 @@ textarea {
   margin-top: 4px;
   grid-row: span 2;
   border-radius: 999px;
-  background: #55d6bd;
+  background: var(--bc-success);
 }
 
 .deploy-state.error i {
-  background: #ef1313;
+  background: var(--bc-danger);
 }
 
 .deploy-state.building i {
-  background: #f59e0b;
+  background: var(--bc-warning);
 }
 
 .deploy-repo {
@@ -2652,6 +2667,8 @@ textarea {
   .sidebar {
     position: sticky;
     top: 0;
+    height: auto;
+    min-height: 0;
     z-index: 5;
     flex-direction: row;
     overflow-x: auto;
@@ -2760,5 +2777,23 @@ textarea {
 
   .deploy-meta {
     justify-content: flex-start;
+  }
+}
+
+@media (max-width: 720px) {
+  .workspace {
+    padding: 14px;
+  }
+
+  .page-heading h1 {
+    font-size: 18px;
+  }
+
+  .page-heading p {
+    font-size: 12px;
+  }
+
+  .top-actions button:not(.icon-button) {
+    min-height: 32px;
   }
 }

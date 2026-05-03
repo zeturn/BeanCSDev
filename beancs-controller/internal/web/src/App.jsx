@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   ChevronDown,
   Cloud,
+  Coffee,
   Code2,
   Container,
   Cpu,
@@ -1302,7 +1303,7 @@ function App() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="sidebar-product">
-          <span className="brand-orb" />
+          <span className="brand-orb"><Coffee size={16} /></span>
           <b>BeanCS</b>
         </div>
         <button type="button" className="sidebar-search">
@@ -1500,6 +1501,7 @@ function DeployView({credentials, namespaces, selectedCredential, setSelectedCre
       github_branch: form.github_branch || "main",
       port: form.port || 8080,
     });
+    setStepIndex(1);
   };
   const updateSourceForm = (nextForm) => {
     setAnalysis(null);
@@ -1819,14 +1821,16 @@ function DeployView({credentials, namespaces, selectedCredential, setSelectedCre
             {form.deploy_source === "gitops" && form.update_mode === "argocd" && <span>Future GHCR image <b>{ghcrPreview}</b></span>}
           </div>
         )}
-        <div className="wizard-actions">
-          <button type="button" onClick={back} disabled={stepIndex === 0}>Back</button>
-          {step.id === "confirm" ? (
-            <button className="primary" disabled={!analysis?.deployable} type="submit"><Play size={16} /> Build</button>
-          ) : (
-            <button className="primary" type="button" disabled={!canContinue || checkingInstall} onClick={next}>{checkingInstall ? <LoaderCircle className="spin" size={16} /> : null} Next</button>
-          )}
-        </div>
+        {step.id !== "method" && (
+          <div className="wizard-actions">
+            <button type="button" onClick={back} disabled={stepIndex === 0}>Back</button>
+            {step.id === "confirm" ? (
+              <button className="primary" disabled={!analysis?.deployable} type="submit"><Play size={16} /> Build</button>
+            ) : (
+              <button className="primary" type="button" disabled={!canContinue || checkingInstall} onClick={next}>{checkingInstall ? <LoaderCircle className="spin" size={16} /> : null} Next</button>
+            )}
+          </div>
+        )}
       </form>
     </div>
   );
@@ -3068,7 +3072,14 @@ function SimpleTable({rows, columns, actions, compact = false}) {
       <div className="tr head">{columns.map((column) => <span key={column}>{column.replaceAll("_", " ")}</span>)}{actions && <span>Actions</span>}</div>
       {(rows || []).map((row, index) => (
         <div className="tr" key={`${row.namespace || ""}-${row.name || row.service || index}`}>
-          {columns.map((column) => <span key={column}>{formatCell(row[column])}</span>)}
+          {columns.map((column) => {
+            const value = formatCell(row[column]);
+            return (
+              <span key={column} className="cell-truncate" title={value}>
+                {value}
+              </span>
+            );
+          })}
           {actions && <span className="row-actions">{actions(row)}</span>}
         </div>
       ))}
@@ -3103,7 +3114,14 @@ function RuntimeTable({kind, rows, nodeJoinCommand, onLoadNodeJoinCommand, onCre
           <div className="tr head">{keys.map((key) => <span key={key}>{key.replaceAll("_", " ")}</span>)}<span>Actions</span></div>
           {rows.map((row, index) => (
             <div className="tr" key={`${kind}-${row.namespace || ""}-${row.name || index}`}>
-              {keys.map((key) => <span key={key}>{formatCell(row[key])}</span>)}
+              {keys.map((key) => {
+                const value = formatCell(row[key]);
+                return (
+                  <span key={key} className="cell-truncate" title={value}>
+                    {value}
+                  </span>
+                );
+              })}
               <span className="row-actions">
                 <button onClick={() => kind === "nodes" ? onNodeDetail(row) : kind === "namespaces" ? onNamespaceDetail(row.name) : onDetail({kind, row})}>Details</button>
                 {kind === "namespaces" && <button onClick={() => onDeleteNamespace(row.name)} className="danger-button"><Trash2 size={15} /></button>}
