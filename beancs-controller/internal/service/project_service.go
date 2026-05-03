@@ -28,13 +28,14 @@ type ProjectService struct {
 	quota       *QuotaService
 	dns         *DNSService
 	gitops      *GitOpsService
+	build       *GitHubBuildService
 	k8s         *k8s.Manager
 	registry    *basaltpass.ClientRegistry
 	cipher      cryptoutil.Cipher
 }
 
-func NewProjectService(db *gorm.DB, credentials *CredentialService, quota *QuotaService, dns *DNSService, gitops *GitOpsService, k8sManager *k8s.Manager, registry *basaltpass.ClientRegistry, cipher cryptoutil.Cipher) *ProjectService {
-	return &ProjectService{db: db, credentials: credentials, quota: quota, dns: dns, gitops: gitops, k8s: k8sManager, registry: registry, cipher: cipher}
+func NewProjectService(db *gorm.DB, credentials *CredentialService, quota *QuotaService, dns *DNSService, gitops *GitOpsService, build *GitHubBuildService, k8sManager *k8s.Manager, registry *basaltpass.ClientRegistry, cipher cryptoutil.Cipher) *ProjectService {
+	return &ProjectService{db: db, credentials: credentials, quota: quota, dns: dns, gitops: gitops, build: build, k8s: k8sManager, registry: registry, cipher: cipher}
 }
 
 func (s *ProjectService) AnalyzeRepository(ctx context.Context, userID string, req dto.AnalyzeProjectRepositoryRequest) (*dto.AnalyzeProjectRepositoryResponse, error) {
@@ -220,6 +221,7 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 		GitHubRepo:             req.GitHubRepo,
 		GitHubBranch:           req.GitHubBranch,
 		DockerfilePath:         req.DockerfilePath,
+		AutoDeploy:             req.AutoDeploy == nil || *req.AutoDeploy,
 		BasaltPassInstanceID:   req.BasaltPassInstanceID,
 		CloudflareCredentialID: req.CloudflareCredentialID,
 		ExposureMode:           req.ExposureMode,
@@ -366,6 +368,12 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 		return nil, err
 	}
 	_ = s.db.WithContext(ctx).Model(deployment).Updates(map[string]any{"status": "provisioned"}).Error
+	if s.build != nil && project.BuildSource == model.BuildSourceGitHub && project.AutoDeploy {
+		if _, err := s.build.Start(ctx, project, userID); err != nil {
+			rollback()
+			return nil, err
+		}
+	}
 	quotaReserved = false
 	return project, nil
 }
@@ -376,8 +384,10 @@ func (s *ProjectService) ListProjects(ctx context.Context, userID string) ([]mod
 	return out, err
 }
 
-func (s *ProjectService) UpdateProject(ctx context.Context, project *model.Project, req dto.UpdateProjectRequest) (*model.Project, error) {
+func (s *ProjectService) UpdateProject(ctx context.Context, project *model.Project, req dto.UpdateProjectRequest, triggeredBy string) (*model.Project, error) {
 	updates := map[string]any{}
+	activateBuild := false
+	autoDeployChanged := false
 	if req.DisplayName != nil {
 		updates["display_name"] = *req.DisplayName
 	}
@@ -395,6 +405,11 @@ func (s *ProjectService) UpdateProject(ctx context.Context, project *model.Proje
 	}
 	if req.Status != nil {
 		updates["status"] = *req.Status
+		activateBuild = *req.Status == "active" && project.Status != "active"
+	}
+	if req.AutoDeploy != nil {
+		updates["auto_deploy"] = *req.AutoDeploy
+		autoDeployChanged = *req.AutoDeploy != project.AutoDeploy
 	}
 	if len(updates) == 0 {
 		return project, nil
@@ -402,7 +417,20 @@ func (s *ProjectService) UpdateProject(ctx context.Context, project *model.Proje
 	if err := s.db.WithContext(ctx).Model(project).Updates(updates).Error; err != nil {
 		return nil, err
 	}
-	return project, s.db.WithContext(ctx).First(project, project.ID).Error
+	if err := s.db.WithContext(ctx).First(project, project.ID).Error; err != nil {
+		return nil, err
+	}
+	if autoDeployChanged && s.build != nil && project.BuildSource == model.BuildSourceGitHub {
+		if err := s.build.EnsureProjectWorkflow(ctx, project); err != nil {
+			return nil, err
+		}
+	}
+	if activateBuild && project.AutoDeploy && s.build != nil && project.BuildSource == model.BuildSourceGitHub {
+		if _, err := s.build.Start(ctx, project, triggeredBy); err != nil {
+			return nil, err
+		}
+	}
+	return project, nil
 }
 
 func (s *ProjectService) DeleteProject(ctx context.Context, project *model.Project) error {
@@ -471,6 +499,10 @@ func normalizeProjectRequest(req *dto.CreateProjectRequest) {
 	req.BuildSource = strings.ToLower(strings.TrimSpace(req.BuildSource))
 	if req.BuildSource == "" {
 		req.BuildSource = model.BuildSourceGitHub
+	}
+	if req.AutoDeploy == nil {
+		value := true
+		req.AutoDeploy = &value
 	}
 	req.ImageReference = strings.TrimSpace(req.ImageReference)
 	req.SourceArchiveName = strings.TrimSpace(req.SourceArchiveName)

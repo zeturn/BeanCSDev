@@ -68,7 +68,18 @@ func Load() (*Config, error) {
 	if cfg.BPBrowserClientID == "" {
 		cfg.BPBrowserClientID = cfg.BPMgmtClientID
 	}
+	cfg.SelfWebhookHost = strings.TrimRight(strings.TrimSpace(cfg.SelfWebhookHost), "/")
 	return &cfg, nil
+}
+
+func (c *Config) WebhookBaseURL() string {
+	if c.SelfWebhookHost != "" {
+		return strings.TrimRight(c.SelfWebhookHost, "/")
+	}
+	if c.SelfPublicHost != "" {
+		return "https://" + strings.Trim(strings.TrimSpace(c.SelfPublicHost), "/")
+	}
+	return ""
 }
 
 func basaltAPIBaseURL(v string) string {

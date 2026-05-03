@@ -97,11 +97,14 @@ metadata:
   name: beancs-controller
 rules:
   - apiGroups: [""]
-    resources: ["namespaces", "secrets", "services", "pods", "pods/log", "nodes"]
+    resources: ["namespaces", "secrets", "services", "pods", "pods/log", "nodes", "events"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["apps"]
     resources: ["deployments"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["nodes", "pods"]
+    verbs: ["get", "list"]
   - apiGroups: ["networking.k8s.io"]
     resources: ["networkpolicies", "ingresses"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]

@@ -35,6 +35,7 @@ type Project struct {
 	GitHubRepo         string `gorm:"size:256" json:"github_repo"`
 	GitHubBranch       string `gorm:"size:128;default:'main'" json:"github_branch"`
 	DockerfilePath     string `gorm:"size:512;default:'Dockerfile'" json:"dockerfile_path"`
+	AutoDeploy         bool   `gorm:"default:true" json:"auto_deploy"`
 
 	BasaltPassInstanceID *uint  `gorm:"index" json:"basaltpass_instance_id,omitempty"`
 	BasaltAppID          uint   `json:"basalt_app_id"`

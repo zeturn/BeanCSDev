@@ -1,0 +1,502 @@
+package service
+
+import (
+	"bytes"
+	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+
+	"github.com/google/go-github/v62/github"
+	"github.com/zeturn/beancs-controller/internal/config"
+	"github.com/zeturn/beancs-controller/internal/model"
+	"golang.org/x/crypto/nacl/box"
+	"gorm.io/gorm"
+)
+
+const beancsBuildWorkflowPath = ".github/workflows/beancs-build.yml"
+const beancsBuildWorkflowFile = "beancs-build.yml"
+
+type GitHubBuildService struct {
+	db          *gorm.DB
+	cfg         *config.Config
+	credentials *CredentialService
+	gitops      *GitOpsService
+}
+
+func NewGitHubBuildService(db *gorm.DB, cfg *config.Config, credentials *CredentialService, gitops *GitOpsService) *GitHubBuildService {
+	return &GitHubBuildService{db: db, cfg: cfg, credentials: credentials, gitops: gitops}
+}
+
+func (s *GitHubBuildService) Start(ctx context.Context, project *model.Project, triggeredBy string) (*model.Deployment, error) {
+	if project == nil || project.BuildSource != model.BuildSourceGitHub || project.GitHubCredentialID == 0 || strings.TrimSpace(project.GitHubRepo) == "" {
+		return nil, nil
+	}
+	var cred model.GitHubCredential
+	if err := s.db.WithContext(ctx).First(&cred, project.GitHubCredentialID).Error; err != nil {
+		return nil, err
+	}
+	token, err := s.credentials.GitHubToken(ctx, cred)
+	if err != nil {
+		return nil, err
+	}
+	owner, repo, ok := splitRepo(project.GitHubRepo)
+	if !ok {
+		return nil, fmt.Errorf("github_repo must be in owner/repo format")
+	}
+	branch := strings.TrimSpace(project.GitHubBranch)
+	if branch == "" {
+		branch = "main"
+	}
+	image := buildImageReference(project)
+	if err := s.ensureWorkflow(ctx, token, owner, repo, project); err != nil {
+		return nil, err
+	}
+	dispatchedAt := time.Now().UTC()
+	if err := s.dispatchWorkflow(ctx, token, owner, repo, branch, project, image); err != nil {
+		return nil, err
+	}
+	deployment := &model.Deployment{
+		ProjectID:   project.ID,
+		Tag:         image,
+		ImageRef:    image,
+		CommitSHA:   branch,
+		Status:      "building",
+		TriggeredBy: triggeredBy,
+	}
+	if err := s.db.WithContext(ctx).Create(deployment).Error; err != nil {
+		return nil, err
+	}
+	go s.watchBuild(context.Background(), deployment.ID, dispatchedAt)
+	return deployment, nil
+}
+
+func (s *GitHubBuildService) EnsureProjectWorkflow(ctx context.Context, project *model.Project) error {
+	if project == nil || project.BuildSource != model.BuildSourceGitHub || project.GitHubCredentialID == 0 || strings.TrimSpace(project.GitHubRepo) == "" {
+		return nil
+	}
+	var cred model.GitHubCredential
+	if err := s.db.WithContext(ctx).First(&cred, project.GitHubCredentialID).Error; err != nil {
+		return err
+	}
+	token, err := s.credentials.GitHubToken(ctx, cred)
+	if err != nil {
+		return err
+	}
+	owner, repo, ok := splitRepo(project.GitHubRepo)
+	if !ok {
+		return fmt.Errorf("github_repo must be in owner/repo format")
+	}
+	return s.ensureWorkflow(ctx, token, owner, repo, project)
+}
+
+func (s *GitHubBuildService) ensureWorkflow(ctx context.Context, token, owner, repo string, project *model.Project) error {
+	client := github.NewClient(nil).WithAuthToken(token)
+	webhookURL := s.webhookURL()
+	if project.AutoDeploy && webhookURL == "" {
+		return fmt.Errorf("BEANCS_WEBHOOK_HOST or BEANCS_PUBLIC_HOST is required for automatic GitHub push deployment")
+	}
+	callbackEnabled := false
+	if webhookURL != "" {
+		var err error
+		callbackEnabled, err = s.ensureWebhookSecrets(ctx, token, owner, repo, webhookURL)
+		if err != nil {
+			return err
+		}
+	}
+	return putFile(ctx, client, owner, repo, beancsBuildWorkflowPath, beancsBuildWorkflow(project, callbackEnabled), "beancs: add build workflow")
+}
+
+func (s *GitHubBuildService) ensureWebhookSecrets(ctx context.Context, token, owner, repo, webhookURL string) (bool, error) {
+	if err := s.putRepositorySecret(ctx, token, owner, repo, "BEANCS_WEBHOOK_URL", webhookURL); err != nil {
+		return false, githubSecretsPermissionError(owner, repo, err)
+	}
+	if s.cfg != nil && s.cfg.WebhookSecret != "" {
+		if err := s.putRepositorySecret(ctx, token, owner, repo, "BEANCS_WEBHOOK_SECRET", s.cfg.WebhookSecret); err != nil {
+			return false, githubSecretsPermissionError(owner, repo, err)
+		}
+	}
+	return true, nil
+}
+
+func (s *GitHubBuildService) dispatchWorkflow(ctx context.Context, token, owner, repo, branch string, project *model.Project, image string) error {
+	inputs := map[string]any{
+		"image":           image,
+		"dockerfile_path": coalesce(project.DockerfilePath, "Dockerfile"),
+		"context":         ".",
+	}
+	body, _ := json.Marshal(map[string]any{"ref": branch, "inputs": inputs})
+	endpoint := fmt.Sprintf("https://api.github.com/repos/%s/%s/actions/workflows/%s/dispatches", url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(beancsBuildWorkflowFile))
+	if err := githubRequest(ctx, http.MethodPost, endpoint, token, body, nil); err != nil {
+		return githubActionsPermissionError(owner, repo, err)
+	}
+	return nil
+}
+
+func (s *GitHubBuildService) watchBuild(ctx context.Context, deploymentID uint, dispatchedAt time.Time) {
+	if err := s.reconcileDeployment(ctx, deploymentID, dispatchedAt); err != nil {
+		_ = s.db.WithContext(ctx).Model(&model.Deployment{}).Where("id = ?", deploymentID).Updates(map[string]any{"status": "failed", "failure_reason": truncateFailure(err.Error())}).Error
+	}
+}
+
+func (s *GitHubBuildService) ReconcileBuilding(ctx context.Context) error {
+	var deployments []model.Deployment
+	if err := s.db.WithContext(ctx).Where("status = ?", "building").Order("created_at asc").Limit(20).Find(&deployments).Error; err != nil {
+		return err
+	}
+	for _, deployment := range deployments {
+		if err := s.reconcileDeployment(ctx, deployment.ID, deployment.CreatedAt); err != nil {
+			_ = s.db.WithContext(ctx).Model(&deployment).Updates(map[string]any{"status": "failed", "failure_reason": truncateFailure(err.Error())}).Error
+		}
+	}
+	return nil
+}
+
+func (s *GitHubBuildService) StartReconciler(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			_ = s.ReconcileBuilding(ctx)
+		}
+	}
+}
+
+func (s *GitHubBuildService) reconcileDeployment(ctx context.Context, deploymentID uint, dispatchedAt time.Time) error {
+	var deployment model.Deployment
+	if err := s.db.WithContext(ctx).First(&deployment, deploymentID).Error; err != nil {
+		return err
+	}
+	if deployment.Status != "building" {
+		return nil
+	}
+	var project model.Project
+	if err := s.db.WithContext(ctx).First(&project, deployment.ProjectID).Error; err != nil {
+		return err
+	}
+	var cred model.GitHubCredential
+	if err := s.db.WithContext(ctx).First(&cred, project.GitHubCredentialID).Error; err != nil {
+		return err
+	}
+	token, err := s.credentials.GitHubToken(ctx, cred)
+	if err != nil {
+		return err
+	}
+	owner, repo, ok := splitRepo(project.GitHubRepo)
+	if !ok {
+		return fmt.Errorf("github_repo must be in owner/repo format")
+	}
+	branch := coalesce(project.GitHubBranch, "main")
+	runID := deployment.WorkflowRunID
+	if runID == 0 {
+		run, err := s.waitForRun(ctx, token, owner, repo, branch, dispatchedAt)
+		if err != nil {
+			return err
+		}
+		runID = run.ID
+		_ = s.db.WithContext(ctx).Model(&deployment).Updates(map[string]any{"workflow_run_id": run.ID, "workflow_url": run.HTMLURL}).Error
+	}
+	run, err := s.workflowRun(ctx, token, owner, repo, runID)
+	if err != nil {
+		return err
+	}
+	if run.Status != "completed" {
+		return nil
+	}
+	if run.Conclusion != "success" {
+		return fmt.Errorf("github workflow concluded with %s", coalesce(run.Conclusion, "unknown"))
+	}
+	image := strings.TrimSpace(deployment.ImageRef)
+	if image == "" {
+		image = strings.TrimSpace(deployment.Tag)
+	}
+	if image == "" {
+		image = buildImageReference(&project)
+	}
+	project.ImageReference = image
+	if err := s.db.WithContext(ctx).Model(&project).Updates(map[string]any{"image_reference": image}).Error; err != nil {
+		return err
+	}
+	if err := s.gitops.CommitProjectManifests(ctx, token, cred, &project); err != nil {
+		return err
+	}
+	return s.db.WithContext(ctx).Model(&deployment).Updates(map[string]any{
+		"status":         "deploying",
+		"commit_sha":     branch,
+		"image_ref":      image,
+		"failure_reason": "",
+	}).Error
+}
+
+type workflowRun struct {
+	ID         int64  `json:"id"`
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion"`
+	HTMLURL    string `json:"html_url"`
+	CreatedAt  string `json:"created_at"`
+}
+
+func (s *GitHubBuildService) waitForRun(ctx context.Context, token, owner, repo, branch string, dispatchedAt time.Time) (workflowRun, error) {
+	deadline := time.Now().Add(5 * time.Minute)
+	for time.Now().Before(deadline) {
+		runs, err := s.workflowRuns(ctx, token, owner, repo, branch)
+		if err != nil {
+			return workflowRun{}, err
+		}
+		for _, run := range runs {
+			created, _ := time.Parse(time.RFC3339, run.CreatedAt)
+			if run.ID != 0 && !created.Before(dispatchedAt.Add(-15*time.Second)) {
+				return run, nil
+			}
+		}
+		time.Sleep(5 * time.Second)
+	}
+	return workflowRun{}, fmt.Errorf("github workflow run was not created")
+}
+
+func (s *GitHubBuildService) waitForConclusion(ctx context.Context, token, owner, repo string, runID int64) (string, error) {
+	deadline := time.Now().Add(45 * time.Minute)
+	for time.Now().Before(deadline) {
+		run, err := s.workflowRun(ctx, token, owner, repo, runID)
+		if err != nil {
+			return "", err
+		}
+		if run.Status == "completed" {
+			return run.Conclusion, nil
+		}
+		time.Sleep(15 * time.Second)
+	}
+	return "", fmt.Errorf("github workflow run timed out")
+}
+
+func (s *GitHubBuildService) workflowRuns(ctx context.Context, token, owner, repo, branch string) ([]workflowRun, error) {
+	endpoint := fmt.Sprintf("https://api.github.com/repos/%s/%s/actions/workflows/%s/runs?event=workflow_dispatch&branch=%s&per_page=10", url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(beancsBuildWorkflowFile), url.QueryEscape(branch))
+	var out struct {
+		WorkflowRuns []workflowRun `json:"workflow_runs"`
+	}
+	if err := githubJSON(ctx, http.MethodGet, endpoint, token, &out); err != nil {
+		return nil, err
+	}
+	return out.WorkflowRuns, nil
+}
+
+func (s *GitHubBuildService) workflowRun(ctx context.Context, token, owner, repo string, runID int64) (workflowRun, error) {
+	endpoint := fmt.Sprintf("https://api.github.com/repos/%s/%s/actions/runs/%d", url.PathEscape(owner), url.PathEscape(repo), runID)
+	var out workflowRun
+	if err := githubJSON(ctx, http.MethodGet, endpoint, token, &out); err != nil {
+		return workflowRun{}, err
+	}
+	return out, nil
+}
+
+func buildImageReference(project *model.Project) string {
+	base := strings.TrimSpace(project.ImageReference)
+	if base == "" {
+		base = "ghcr.io/" + strings.ToLower(project.GitHubRepo)
+	}
+	if strings.Contains(base, "@") {
+		base = strings.Split(base, "@")[0]
+	}
+	lastSlash := strings.LastIndex(base, "/")
+	lastColon := strings.LastIndex(base, ":")
+	if lastColon > lastSlash {
+		base = base[:lastColon]
+	}
+	return base + ":beancs-" + time.Now().UTC().Format("20060102150405")
+}
+
+func (s *GitHubBuildService) webhookURL() string {
+	if s.cfg == nil || s.cfg.WebhookBaseURL() == "" {
+		return ""
+	}
+	return s.cfg.WebhookBaseURL() + "/api/v1/webhooks/github"
+}
+
+func (s *GitHubBuildService) putRepositorySecret(ctx context.Context, token, owner, repo, name, value string) error {
+	var key struct {
+		KeyID string `json:"key_id"`
+		Key   string `json:"key"`
+	}
+	endpoint := fmt.Sprintf("https://api.github.com/repos/%s/%s/actions/secrets/public-key", url.PathEscape(owner), url.PathEscape(repo))
+	if err := githubJSON(ctx, http.MethodGet, endpoint, token, &key); err != nil {
+		return err
+	}
+	encrypted, err := encryptGitHubSecret(key.Key, value)
+	if err != nil {
+		return err
+	}
+	body, _ := json.Marshal(map[string]string{"encrypted_value": encrypted, "key_id": key.KeyID})
+	secretURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/actions/secrets/%s", url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(name))
+	return githubRequest(ctx, http.MethodPut, secretURL, token, body, nil)
+}
+
+func encryptGitHubSecret(publicKey, value string) (string, error) {
+	decoded, err := base64.StdEncoding.DecodeString(publicKey)
+	if err != nil {
+		return "", err
+	}
+	if len(decoded) != 32 {
+		return "", fmt.Errorf("invalid GitHub repository public key")
+	}
+	var key [32]byte
+	copy(key[:], decoded)
+	encrypted, err := box.SealAnonymous(nil, []byte(value), &key, rand.Reader)
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(encrypted), nil
+}
+
+func githubRequest(ctx context.Context, method, endpoint, token string, body []byte, out any) error {
+	var reader io.Reader
+	if body != nil {
+		reader = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, endpoint, reader)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := (&http.Client{Timeout: 20 * time.Second}).Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return &githubAPIError{StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(raw))}
+	}
+	if out != nil && len(raw) > 0 {
+		if err := json.Unmarshal(raw, out); err != nil {
+			return fmt.Errorf("GitHub returned invalid JSON")
+		}
+	}
+	return nil
+}
+
+type githubAPIError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *githubAPIError) Error() string {
+	return fmt.Sprintf("GitHub API request failed: %s", e.Body)
+}
+
+func githubSecretsPermissionError(owner, repo string, err error) error {
+	var apiErr *githubAPIError
+	if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusForbidden && strings.Contains(apiErr.Body, "Resource not accessible by integration") {
+		return fmt.Errorf("GitHub App installation for %s/%s cannot manage repository Actions secrets. Update the GitHub App permissions to include Repository permissions: Contents read/write, Actions read/write, and Secrets read/write, then reinstall or approve the app installation", owner, repo)
+	}
+	return err
+}
+
+func githubActionsPermissionError(owner, repo string, err error) error {
+	var apiErr *githubAPIError
+	if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusForbidden && strings.Contains(apiErr.Body, "Resource not accessible by integration") {
+		return fmt.Errorf("GitHub App installation for %s/%s cannot dispatch GitHub Actions workflows. Update the GitHub App permissions to include Repository permissions: Actions read/write and Contents read/write, then reinstall or approve the app installation", owner, repo)
+	}
+	return err
+}
+
+func truncateFailure(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) > 1000 {
+		return value[:1000]
+	}
+	return value
+}
+
+func beancsBuildWorkflow(project *model.Project, callbackEnabled bool) string {
+	trigger := `  workflow_dispatch:
+    inputs:
+      image:
+        description: Target GHCR image reference
+        required: true
+      dockerfile_path:
+        description: Dockerfile path
+        required: false
+        default: Dockerfile
+      context:
+        description: Docker build context
+        required: false
+        default: .
+`
+	if project.AutoDeploy {
+		trigger += fmt.Sprintf(`  push:
+    branches:
+      - %s
+`, coalesce(project.GitHubBranch, "main"))
+	}
+	callback := ""
+	if callbackEnabled {
+		callback = fmt.Sprintf(`      - name: Notify BeanCS
+        if: always()
+        env:
+          BEANCS_PROJECT: %s
+          BEANCS_WEBHOOK_URL: ${{ secrets.BEANCS_WEBHOOK_URL }}
+          BEANCS_WEBHOOK_SECRET: ${{ secrets.BEANCS_WEBHOOK_SECRET }}
+          BEANCS_STATUS: ${{ job.status }}
+          BEANCS_IMAGE: ${{ steps.meta.outputs.image }}
+        run: |
+          STATUS="failure"
+          if [ "$BEANCS_STATUS" = "success" ]; then STATUS="success"; fi
+          BODY=$(jq -nc --arg project "$BEANCS_PROJECT" --arg tag "$BEANCS_IMAGE" --arg commit "$GITHUB_SHA" --arg status "$STATUS" '{project:$project, tag:$tag, commit:$commit, status:$status}')
+          SIG="sha256=$(printf '%%s' "$BODY" | openssl dgst -sha256 -hmac "$BEANCS_WEBHOOK_SECRET" -binary | xxd -p -c 256)"
+          curl -fsS -X POST "$BEANCS_WEBHOOK_URL" -H "Content-Type: application/json" -H "X-Hub-Signature-256: $SIG" --data "$BODY"
+`, project.Name)
+	}
+	return fmt.Sprintf(`name: BeanCS Build
+
+on:
+%s
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve image
+        id: meta
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            IMAGE="${{ inputs.image }}"
+          else
+            REPO="${GITHUB_REPOSITORY,,}"
+            IMAGE="ghcr.io/${REPO}:beancs-${GITHUB_SHA::12}"
+          fi
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ github.event_name == 'workflow_dispatch' && inputs.context || '.' }}
+          file: ${{ github.event_name == 'workflow_dispatch' && inputs.dockerfile_path || '%s' }}
+          push: true
+          tags: ${{ steps.meta.outputs.image }}
+%s`, trigger, coalesce(project.DockerfilePath, "Dockerfile"), callback)
+}

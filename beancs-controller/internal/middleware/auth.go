@@ -7,6 +7,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/zeturn/beancs-controller/internal/basaltpass"
+	"github.com/zeturn/beancs-controller/internal/service"
 )
 
 type tokenCacheEntry struct {
@@ -14,14 +15,25 @@ type tokenCacheEntry struct {
 	expiresAt time.Time
 }
 
-func Auth(registry *basaltpass.ClientRegistry) fiber.Handler {
+func Auth(registry *basaltpass.ClientRegistry, apiKeys *service.APIKeyService) fiber.Handler {
 	var mu sync.RWMutex
 	cache := map[string]tokenCacheEntry{}
 
 	return func(c *fiber.Ctx) error {
-		token := bearerToken(c.Get("Authorization"))
+		token := authToken(c)
 		if token == "" {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "missing token"})
+		}
+		if apiKeys != nil && strings.HasPrefix(token, "bcs_") {
+			identity, ok, err := apiKeys.Authenticate(c.UserContext(), token)
+			if err != nil {
+				return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "api key auth unavailable"})
+			}
+			if !ok {
+				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid api key"})
+			}
+			setAPIKeyLocals(c, identity)
+			return c.Next()
 		}
 
 		mu.RLock()
@@ -66,13 +78,30 @@ func bearerToken(header string) string {
 	return ""
 }
 
+func authToken(c *fiber.Ctx) string {
+	if token := bearerToken(c.Get("Authorization")); token != "" {
+		return token
+	}
+	return strings.TrimSpace(c.Get("X-API-Key"))
+}
+
 func setAuthLocals(c *fiber.Ctx, info *basaltpass.IntrospectionResult) {
 	c.Locals("user_id", info.Sub)
 	c.Locals("tenant_id", info.TenantID)
 	c.Locals("scopes", strings.Fields(info.Scope))
+	c.Locals("auth_method", "basaltpass")
 	if info.Act != nil {
 		c.Locals("actor", info.Act)
 	}
+}
+
+func setAPIKeyLocals(c *fiber.Ctx, identity *service.APIKeyIdentity) {
+	c.Locals("user_id", identity.UserID)
+	c.Locals("tenant_id", identity.TenantID)
+	c.Locals("scopes", identity.Scopes)
+	c.Locals("auth_method", "api_key")
+	c.Locals("api_key_id", identity.KeyID)
+	c.Locals("api_key_name", identity.KeyName)
 }
 
 func UserID(c *fiber.Ctx) string {
@@ -87,4 +116,9 @@ func TenantID(c *fiber.Ctx) string {
 		return v
 	}
 	return ""
+}
+
+func Scopes(c *fiber.Ctx) []string {
+	scopes, _ := c.Locals("scopes").([]string)
+	return scopes
 }

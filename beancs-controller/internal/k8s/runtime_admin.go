@@ -60,7 +60,7 @@ func (m *Manager) DeletePod(ctx context.Context, namespace, name string) error {
 	return err
 }
 
-func (m *Manager) PodLogs(ctx context.Context, namespace, name string, tail int64) (string, error) {
+func (m *Manager) PodLogs(ctx context.Context, namespace, name string, tail int64, container string) (string, error) {
 	if err := m.ensure(); err != nil {
 		return "", err
 	}
@@ -68,7 +68,18 @@ func (m *Manager) PodLogs(ctx context.Context, namespace, name string, tail int6
 	if err != nil {
 		return "", err
 	}
-	return m.logsForPods(ctx, []corev1.Pod{*pod}, tail)
+	return m.logsForTargets(ctx, logTargetsForPods([]corev1.Pod{*pod}, container), tail), nil
+}
+
+func (m *Manager) PodLogTargets(ctx context.Context, namespace, name, container string) ([]LogTarget, error) {
+	if err := m.ensure(); err != nil {
+		return nil, err
+	}
+	pod, err := m.Clientset.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return logTargetsForPods([]corev1.Pod{*pod}, container), nil
 }
 
 func (m *Manager) UpsertService(ctx context.Context, req dto.CreateServiceRequest) error {

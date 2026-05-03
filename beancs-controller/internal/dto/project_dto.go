@@ -14,6 +14,7 @@ type CreateProjectRequest struct {
 	GitHubRepo             string             `json:"github_repo" validate:"omitempty,max=256"`
 	GitHubBranch           string             `json:"github_branch" validate:"omitempty,max=128"`
 	DockerfilePath         string             `json:"dockerfile_path" validate:"omitempty,max=512"`
+	AutoDeploy             *bool              `json:"auto_deploy" validate:"omitempty"`
 	Namespace              string             `json:"namespace" validate:"omitempty,hostname_rfc1123,max=63"`
 	BasaltPassInstanceID   *uint              `json:"basaltpass_instance_id"`
 	CloudflareCredentialID *uint              `json:"cloudflare_credential_id"`
@@ -51,6 +52,7 @@ type UpdateProjectRequest struct {
 	Port           *int    `json:"port" validate:"omitempty,min=1,max=65535"`
 	Replicas       *int    `json:"replicas" validate:"omitempty,min=1,max=20"`
 	Status         *string `json:"status" validate:"omitempty,oneof=active suspended deleted"`
+	AutoDeploy     *bool   `json:"auto_deploy" validate:"omitempty"`
 }
 
 type ScaleProjectRequest struct {

@@ -1,4 +1,4 @@
-import React, {useEffect, useMemo, useState} from "react";
+import React, {useEffect, useMemo, useRef, useState} from "react";
 import {createRoot} from "react-dom/client";
 import {
   Boxes,
@@ -43,6 +43,7 @@ const nav = [
   {id: "deploy", label: "Deploy", icon: Rocket},
   {id: "progress", label: "Progress", icon: LoaderCircle},
   {id: "projects", label: "Projects", icon: Boxes},
+  {id: "apiKeys", label: "API Keys", icon: KeyRound},
   {id: "github", label: "GitHub", icon: Github},
   {id: "domains", label: "Domains", icon: Globe2},
   {id: "cloudflare", label: "Cloudflare", icon: Cloud},
@@ -64,6 +65,8 @@ function App() {
   const [runtime, setRuntime] = useState(emptyRuntime);
   const [projects, setProjects] = useState([]);
   const [credentials, setCredentials] = useState({github: [], cloudflare: [], basaltpass: []});
+  const [apiKeys, setAPIKeys] = useState([]);
+  const [createdAPIKey, setCreatedAPIKey] = useState(null);
   const [domains, setDomains] = useState([]);
   const [repos, setRepos] = useState([]);
   const [reposByCredential, setReposByCredential] = useState({});
@@ -82,6 +85,16 @@ function App() {
   const [activeProgressProjectID, setActiveProgressProjectID] = useState("");
   const [projectProgress, setProjectProgress] = useState(null);
   const [installProgress, setInstallProgress] = useState(null);
+  const [projectLogFollow, setProjectLogFollow] = useState(false);
+  const [projectLiveLogs, setProjectLiveLogs] = useState("");
+  const [projectLogStatus, setProjectLogStatus] = useState("");
+  const [runtimeLogFollow, setRuntimeLogFollow] = useState(false);
+  const [runtimeLogStatus, setRuntimeLogStatus] = useState("");
+  const [runtimeLogContainer, setRuntimeLogContainer] = useState("");
+  const [runtimeLogTail, setRuntimeLogTail] = useState(200);
+  const [runtimeLogLoaded, setRuntimeLogLoaded] = useState(false);
+  const projectLogController = useRef(null);
+  const runtimeLogController = useRef(null);
 
   const api = useMemo(() => makeAPI(token, logout), [token]);
   const userProfile = useMemo(() => profileFromToken(token), [token]);
@@ -99,7 +112,22 @@ function App() {
     loadProjectProgress();
     const timer = setInterval(loadProjectProgress, 3000);
     return () => clearInterval(timer);
-  }, [token, view, activeProgressProjectID, projects.length]);
+  }, [token, view, activeProgressProjectID, projects.length, projectLogFollow]);
+
+  useEffect(() => {
+    if (!token || runtimeDetail?.kind !== "node") return;
+    const nodeName = runtimeDetail.row?.summary?.name || runtimeDetail.row?.name;
+    if (!nodeName) return;
+    const timer = setInterval(() => loadNodeDetail({name: nodeName}, false), 5000);
+    return () => clearInterval(timer);
+  }, [token, runtimeDetail?.kind, runtimeDetail?.row?.summary?.name, runtimeDetail?.row?.name]);
+
+  useEffect(() => {
+    return () => {
+      projectLogController.current?.abort();
+      runtimeLogController.current?.abort();
+    };
+  }, []);
 
   async function boot() {
     try {
@@ -124,9 +152,10 @@ function App() {
     setLoading(true);
     setError("");
     try {
-      const [runtimeData, projectData, githubData, cloudflareData, domainsData, basaltpassData] = await Promise.all([
+      const [runtimeData, projectData, apiKeyData, githubData, cloudflareData, domainsData, basaltpassData] = await Promise.all([
         api.get("/runtime/overview"),
         api.get("/projects"),
+        api.get("/api-keys"),
         api.get("/credentials/github/"),
         api.get("/credentials/cloudflare/"),
         api.get("/credentials/cloudflare/domains"),
@@ -134,6 +163,7 @@ function App() {
       ]);
       setRuntime(runtimeData.data || emptyRuntime);
       setProjects(projectData.data || []);
+      setAPIKeys(apiKeyData.data || []);
       setCredentials({
         github: githubData.data || [],
         cloudflare: cloudflareData.data || [],
@@ -201,6 +231,45 @@ function App() {
     try {
       await api.delete(`/credentials/${kind}/${id}`);
       await loadWorkspace();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function createAPIKey(event) {
+    event.preventDefault();
+    setError("");
+    setNotice("");
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const scopes = ["beancs.api"];
+    if (data.get("admin_scope") === "on") scopes.push("beancs.admin");
+    const body = {
+      name: String(data.get("name") || "").trim(),
+      scopes,
+      expires_at: localDateTimeToRFC3339(data.get("expires_at")),
+    };
+    try {
+      const out = await api.post("/api-keys", body);
+      setCreatedAPIKey(out);
+      form.reset();
+      await loadAPIKeys();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function loadAPIKeys() {
+    const data = await api.get("/api-keys");
+    setAPIKeys(data.data || []);
+  }
+
+  async function revokeAPIKey(key) {
+    if (!confirm(`Revoke API key ${key.name}? Existing clients using it will stop working.`)) return;
+    try {
+      await api.delete(`/api-keys/${key.id}`);
+      setNotice(`${key.name} revoked.`);
+      await loadAPIKeys();
     } catch (err) {
       setError(err.message);
     }
@@ -311,14 +380,86 @@ function App() {
     }
   }
 
-  async function loadPodLogs(pod) {
-    setRuntimeDetail({kind: "pod", row: pod});
+  async function loadNodeDetail(node, showModal = true) {
+    if (showModal) setRuntimeDetail({kind: "node", row: node, loading: true});
     try {
-      const data = await api.get(`/runtime/pods/${pod.namespace}/${pod.name}/logs?tail=160`);
-      setRuntimeLogs(data.logs || "");
+      const data = await api.get(`/runtime/nodes/${encodeURIComponent(node.name)}`);
+      setRuntimeDetail({kind: "node", row: data.data || node, loading: false});
     } catch (err) {
-      setRuntimeLogs(err.message);
+      setRuntimeDetail({kind: "node", row: node, loading: false, error: err.message});
     }
+  }
+
+  async function loadPodLogs(pod) {
+    stopRuntimeLogFollow();
+    setRuntimeDetail({kind: "pod", row: pod});
+    setRuntimeLogs("");
+    setRuntimeLogContainer("");
+    setRuntimeLogTail(200);
+    setRuntimeLogLoaded(false);
+    setRuntimeLogStatus("Choose a container to load logs. Logs are loaded lazily to keep the browser responsive.");
+  }
+
+  async function loadRuntimeContainerLogs(pod, container = runtimeLogContainer, tail = runtimeLogTail) {
+    stopRuntimeLogFollow();
+    if (!container) {
+      setRuntimeLogStatus("Choose a container first.");
+      return;
+    }
+    setRuntimeLogContainer(container);
+    setRuntimeLogTail(Number(tail || 200));
+    setRuntimeLogStatus("Loading recent logs...");
+    setRuntimeLogs("");
+    setRuntimeLogLoaded(true);
+    try {
+      const namespace = encodeURIComponent(pod.namespace);
+      const name = encodeURIComponent(pod.name);
+      const selected = encodeURIComponent(container);
+      const data = await api.get(`/runtime/pods/${namespace}/${name}/logs?tail=${Number(tail || 200)}&container=${selected}`);
+      setRuntimeLogs(trimLiveLog(data.logs || ""));
+      setRuntimeLogStatus(`Loaded last ${Number(tail || 200)} lines from ${container}.`);
+    } catch (err) {
+      setRuntimeLogs("");
+      setRuntimeLogStatus(err.message);
+    }
+  }
+
+  async function startRuntimeLogFollow(pod, container = runtimeLogContainer, tail = runtimeLogTail) {
+    if (!container) {
+      setRuntimeLogStatus("Choose a container first.");
+      return;
+    }
+    runtimeLogController.current?.abort();
+    const controller = new AbortController();
+    runtimeLogController.current = controller;
+    setRuntimeLogContainer(container);
+    setRuntimeLogTail(Number(tail || 200));
+    setRuntimeLogFollow(true);
+    setRuntimeLogStatus("Connecting...");
+    setRuntimeLogs("");
+    setRuntimeLogLoaded(true);
+    try {
+      const namespace = encodeURIComponent(pod.namespace);
+      const name = encodeURIComponent(pod.name);
+      const selected = encodeURIComponent(container);
+      const res = await api.stream(`/runtime/pods/${namespace}/${name}/logs?tail=${Number(tail || 200)}&container=${selected}&follow=true`, {signal: controller.signal});
+      setRuntimeLogStatus(`Following live logs for ${container}`);
+      await consumeTextStream(res, (chunk) => setRuntimeLogs((current) => trimLiveLog(current + chunk)));
+      setRuntimeLogStatus("Log stream ended");
+    } catch (err) {
+      if (err.name !== "AbortError") setRuntimeLogStatus(err.message);
+    } finally {
+      if (runtimeLogController.current === controller) {
+        runtimeLogController.current = null;
+        setRuntimeLogFollow(false);
+      }
+    }
+  }
+
+  function stopRuntimeLogFollow() {
+    runtimeLogController.current?.abort();
+    runtimeLogController.current = null;
+    setRuntimeLogFollow(false);
   }
 
   async function saveService(event, existing = null) {
@@ -467,10 +608,11 @@ function App() {
     }
     setActiveProgressProjectID(String(selected.id));
     try {
+      const logRequest = projectLogFollow ? Promise.resolve({logs: projectProgress?.logs || ""}) : api.get(`/projects/${selected.id}/logs?tail=160`);
       const [status, deployments, logData] = await Promise.all([
         api.get(`/projects/${selected.id}/status`),
         api.get(`/projects/${selected.id}/deployments`),
-        api.get(`/projects/${selected.id}/logs?tail=160`),
+        logRequest,
       ]);
       setProjectProgress({
         project: selected,
@@ -488,10 +630,56 @@ function App() {
     }
   }
 
+  async function startProjectLogFollow(projectID = activeProgressProjectID) {
+    let selected = projectID
+      ? projects.find((project) => String(project.id) === String(projectID))
+      : projectProgress?.project || projects[0];
+    if (!selected && projectID) {
+      try {
+        selected = await api.get(`/projects/${projectID}`);
+      } catch (err) {
+        setProjectLogStatus(err.message);
+        return;
+      }
+    }
+    if (!selected) {
+      setProjectLogStatus("Choose a project before following logs.");
+      return;
+    }
+    projectLogController.current?.abort();
+    const controller = new AbortController();
+    projectLogController.current = controller;
+    setActiveProgressProjectID(String(selected.id));
+    setProjectLogFollow(true);
+    setProjectLiveLogs("");
+    setProjectLogStatus("Connecting...");
+    try {
+      const res = await api.stream(`/projects/${selected.id}/logs?tail=160&follow=true`, {signal: controller.signal});
+      setProjectLogStatus("Following live logs");
+      await consumeTextStream(res, (chunk) => setProjectLiveLogs((current) => trimLiveLog(current + chunk)));
+      setProjectLogStatus("Log stream ended");
+    } catch (err) {
+      if (err.name !== "AbortError") setProjectLogStatus(err.message);
+    } finally {
+      if (projectLogController.current === controller) {
+        projectLogController.current = null;
+        setProjectLogFollow(false);
+      }
+    }
+  }
+
+  function stopProjectLogFollow() {
+    projectLogController.current?.abort();
+    projectLogController.current = null;
+    setProjectLogFollow(false);
+    setProjectLogStatus("");
+  }
+
   async function updateProject(event) {
     event.preventDefault();
     const body = Object.fromEntries(new FormData(event.currentTarget).entries());
     body.replicas = Number(body.replicas || 1);
+    body.auto_deploy = body.auto_deploy === "on";
     await api.patch(`/projects/${editingProject.id}`, body);
     setEditingProject(null);
     await loadWorkspace();
@@ -529,6 +717,18 @@ function App() {
   async function restartProject(project) {
     await api.post(`/projects/${project.id}/restart`, {});
     setNotice(`${project.name} restarted.`);
+  }
+
+  async function buildProject(project) {
+    try {
+      await api.post(`/projects/${project.id}/deployments`, {tag: "github-actions", commit_sha: project.github_branch || ""});
+      setNotice(`${project.name} build started.`);
+      setActiveProgressProjectID(String(project.id));
+      setView("progress");
+      await loadProjectProgress(String(project.id));
+    } catch (err) {
+      setError(err.message);
+    }
   }
 
   if (!token) {
@@ -605,22 +805,28 @@ function App() {
             progress={projectProgress}
             installProgress={installProgress}
             refresh={loadProjectProgress}
+            logFollow={projectLogFollow}
+            liveLogs={projectLiveLogs}
+            logStatus={projectLogStatus}
+            onStartLogFollow={startProjectLogFollow}
+            onStopLogFollow={stopProjectLogFollow}
           />
         )}
         {view === "projects" && (
-          <ProjectsView projects={projects} onEdit={setEditingProject} onDelete={deleteProject} onScale={scaleProject} onRestart={restartProject} onProgress={(project) => { setActiveProgressProjectID(String(project.id)); setView("progress"); }} />
+          <ProjectsView projects={projects} onEdit={setEditingProject} onDelete={deleteProject} onScale={scaleProject} onRestart={restartProject} onBuild={buildProject} onProgress={(project) => { setActiveProgressProjectID(String(project.id)); setView("progress"); }} />
         )}
+        {view === "apiKeys" && <APIKeysView keys={apiKeys} createdKey={createdAPIKey} onDismissCreated={() => setCreatedAPIKey(null)} onCreate={createAPIKey} onRevoke={revokeAPIKey} onRefresh={loadAPIKeys} isAdmin={userProfile.scopes.includes("beancs.admin")} />}
         {view === "github" && (
           <GitHubView credentials={credentials.github} onConnect={connectGitHubApp} onRepos={loadRepos} onDelete={(id) => deleteCredential("github", id)} reposByCredential={reposByCredential} repoFilters={repoFilters} setRepoFilters={setRepoFilters} />
         )}
         {view === "domains" && <DomainsView domains={domains} />}
         {view === "cloudflare" && <CloudflareView credentials={credentials.cloudflare} domains={domains} selectedID={selectedCloudflareID} setSelectedID={setSelectedCloudflareID} dnsRecords={dnsRecords} editingRecord={editingDNSRecord} setEditingRecord={setEditingDNSRecord} onCreate={createCredential} onDelete={(id) => deleteCredential("cloudflare", id)} onLoadDNS={loadDNSRecords} onSaveDNS={saveDNSRecord} onDeleteDNS={deleteDNSRecord} />}
         {view === "basaltpass" && <CredentialManager kind="basaltpass" rows={credentials.basaltpass} onCreate={createCredential} onDelete={deleteCredential} />}
-        {["namespaces", "pods", "nodes", "ingresses", "services"].includes(view) && <RuntimeTable kind={view} rows={runtime[view] || []} onCreateNamespace={createNamespace} onPatchNamespace={patchNamespaceLabels} onDeleteNamespace={deleteNamespace} onDeletePod={deletePod} onPodLogs={loadPodLogs} onSaveService={saveService} onDeleteService={deleteService} onDetail={setRuntimeDetail} />}
+        {["namespaces", "pods", "nodes", "ingresses", "services"].includes(view) && <RuntimeTable kind={view} rows={runtime[view] || []} onCreateNamespace={createNamespace} onPatchNamespace={patchNamespaceLabels} onDeleteNamespace={deleteNamespace} onDeletePod={deletePod} onNodeDetail={loadNodeDetail} onPodLogs={loadPodLogs} onSaveService={saveService} onDeleteService={deleteService} onDetail={setRuntimeDetail} />}
       </main>
       {editingProject && <ProjectModal project={editingProject} onClose={() => setEditingProject(null)} onSubmit={updateProject} />}
       {deletingProject && <DeleteProjectModal project={deletingProject} busy={loading} onClose={() => setDeletingProject(null)} onDelete={confirmDeleteProject} />}
-      {runtimeDetail && <RuntimeDetailModal detail={runtimeDetail} logs={runtimeLogs} onClose={() => { setRuntimeDetail(null); setRuntimeLogs(""); }} onSaveService={saveService} onPatchNamespace={patchNamespaceLabels} />}
+      {runtimeDetail && <RuntimeDetailModal detail={runtimeDetail} logs={runtimeLogs} logFollow={runtimeLogFollow} logStatus={runtimeLogStatus} selectedLogContainer={runtimeLogContainer} logTail={runtimeLogTail} logLoaded={runtimeLogLoaded} onSelectLogContainer={setRuntimeLogContainer} onSetLogTail={setRuntimeLogTail} onLoadContainerLogs={loadRuntimeContainerLogs} onFollowPodLogs={startRuntimeLogFollow} onStopPodLogs={stopRuntimeLogFollow} onClose={() => { stopRuntimeLogFollow(); setRuntimeDetail(null); setRuntimeLogs(""); setRuntimeLogContainer(""); setRuntimeLogLoaded(false); setRuntimeLogStatus(""); }} onSaveService={saveService} onPatchNamespace={patchNamespaceLabels} />}
     </div>
   );
 }
@@ -745,6 +951,12 @@ function DeployView({credentials, namespaces, selectedCredential, setSelectedCre
               <option value="medium">Medium</option>
               <option value="large">Large</option>
             </select>
+            {form.build_source === "github" && (
+              <label className="checkbox-row">
+                <input type="checkbox" checked={form.auto_deploy !== false} onChange={(event) => setForm({...form, auto_deploy: event.target.checked})} />
+                Auto build and deploy on GitHub push
+              </label>
+            )}
             <label>BasaltPass optional</label>
             <select value={form.basaltpass_instance_id} onChange={(event) => setForm({...form, basaltpass_instance_id: event.target.value})}>
               <option value="">Do not register OAuth app</option>
@@ -798,6 +1010,7 @@ function DeployView({credentials, namespaces, selectedCredential, setSelectedCre
             <span>Ingress <b>{form.exposure_mode}</b></span>
             <span>Domain <b>{publicHost || form.private_host || "internal only"}</b></span>
             <span>Port <b>{form.port}</b></span>
+            {form.build_source === "github" && <span>Deploy mode <b>{form.auto_deploy !== false ? "Auto GitOps tracking" : "Manual deployments only"}</b></span>}
           </div>
         )}
         <div className="wizard-actions">
@@ -813,13 +1026,14 @@ function DeployView({credentials, namespaces, selectedCredential, setSelectedCre
   );
 }
 
-function ProgressView({projects, activeProjectID, setActiveProjectID, progress, installProgress, refresh}) {
+function ProgressView({projects, activeProjectID, setActiveProjectID, progress, installProgress, refresh, logFollow, liveLogs, logStatus, onStartLogFollow, onStopLogFollow}) {
   const pods = progress?.pods || [];
   const events = progress?.events || [];
   const deployments = progress?.deployments || [];
   const readyPods = pods.filter((pod) => Number(pod.ready_containers || 0) > 0 && Number(pod.ready_containers) === Number(pod.total_containers || 0)).length;
   const desiredReplicas = progress?.deployment?.replicas ?? progress?.project?.replicas ?? 0;
   const readyReplicas = progress?.deployment?.ready_replicas ?? 0;
+  const logs = logFollow ? liveLogs : progress?.logs;
   return (
     <div className="stack">
       <section className="panel action-panel">
@@ -852,6 +1066,8 @@ function ProgressView({projects, activeProjectID, setActiveProjectID, progress, 
               <span>Namespace <b>{progress.project.namespace}</b></span>
               <span>Route <b>{progress.project.domain || progress.project.exposure_mode}</b></span>
               <span>Status <b>{progress.project.status}</b></span>
+            <span>Deploy mode <b>{progress.project.auto_deploy ? "Auto GitOps" : "Manual only"}</b></span>
+            <span>Image <b>{progress.project.image_reference || "-"}</b></span>
               <span>Last checked <b>{formatTime(progress.checked_at)}</b></span>
             </div>
             {progress.error && <p className="error-inline">{progress.error}</p>}
@@ -890,7 +1106,10 @@ function ProgressView({projects, activeProjectID, setActiveProjectID, progress, 
                   <span className={deployment.status === "failed" ? "dot failed" : ["deployed", "provisioned"].includes(deployment.status) ? "dot done" : "dot running"} />
                   <div>
                     <b>{deployment.status || "pending"}</b>
-                    <small>{deployment.tag || deployment.commit_sha || "manual"} · {formatTime(deployment.created_at)}</small>
+                    <small>{deployment.image_ref || deployment.tag || deployment.commit_sha || "manual"} · {formatTime(deployment.created_at)}</small>
+                    {deployment.workflow_url && <small><a href={deployment.workflow_url} target="_blank" rel="noreferrer">GitHub Actions run</a></small>}
+                    {deployment.commit_sha && <small>Commit: {deployment.commit_sha}</small>}
+                    {deployment.failure_reason && <small className="warning">{deployment.failure_reason}</small>}
                   </div>
                 </div>
               ))}
@@ -914,8 +1133,19 @@ function ProgressView({projects, activeProjectID, setActiveProjectID, progress, 
             </div>
           </section>
           <section className="panel log-panel">
-            <h2><Code2 size={18} /> Logs</h2>
-            <pre>{progress.logs || "No application logs yet."}</pre>
+            <div className="log-header">
+              <h2><Code2 size={18} /> Container logs</h2>
+              <div className="row-actions">
+                <button onClick={() => refresh()} disabled={logFollow}><RefreshCw size={15} /> Snapshot</button>
+                {logFollow ? (
+                  <button onClick={onStopLogFollow}>Stop follow</button>
+                ) : (
+                  <button className="primary" onClick={() => onStartLogFollow(progress.project.id)}>Follow live</button>
+                )}
+              </div>
+            </div>
+            {logStatus && <p className="log-status">{logStatus}</p>}
+            <pre>{logs || "No application logs yet."}</pre>
           </section>
         </div>
       ) : (
@@ -980,7 +1210,7 @@ function sourceSummary(form) {
   return form.image_reference || "-";
 }
 
-function ProjectsView({projects, onEdit, onDelete, onScale, onRestart, onProgress}) {
+function ProjectsView({projects, onEdit, onDelete, onScale, onRestart, onBuild, onProgress}) {
   return (
     <section className="panel">
       <div className="table">
@@ -998,6 +1228,7 @@ function ProjectsView({projects, onEdit, onDelete, onScale, onRestart, onProgres
             </span>
             <span className="row-actions">
               <button onClick={() => onProgress(project)} title="Progress"><LoaderCircle size={15} /> Progress</button>
+              <button onClick={() => onBuild(project)} title="Build"><Play size={15} /> Build</button>
               <button onClick={() => onRestart(project)} title="Restart"><ListRestart size={15} /></button>
               <button onClick={() => onEdit(project)} title="Edit"><Plus size={15} /></button>
               <button className="danger-button" onClick={() => onDelete(project)} title="Delete"><Trash2 size={15} /> Delete</button>
@@ -1025,6 +1256,59 @@ function DeleteProjectModal({project, busy, onClose, onDelete}) {
           <button className="danger-button filled" type="button" onClick={onDelete} disabled={busy}><Trash2 size={15} /> Delete</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function APIKeysView({keys, createdKey, onDismissCreated, onCreate, onRevoke, onRefresh, isAdmin}) {
+  return (
+    <div className="stack">
+      <section className="panel action-panel">
+        <div>
+          <h2><KeyRound size={18} /> API keys</h2>
+          <p>Create keys for beanctl, scripts, and external systems that need to manage BeanCS through the API.</p>
+        </div>
+        <button onClick={onRefresh}><RefreshCw size={15} /> Refresh</button>
+      </section>
+      {createdKey && (
+        <section className="panel api-key-created">
+          <h2><Shield size={18} /> Save this API key now</h2>
+          <p className="muted">BeanCS stores only a hash. This full key will not be shown again.</p>
+          <pre>{createdKey.key}</pre>
+          <div className="modal-actions"><button onClick={onDismissCreated}>I saved it</button></div>
+        </section>
+      )}
+      <section className="panel">
+        <h2><Plus size={18} /> Create API key</h2>
+        <form className="form-grid api-key-form" onSubmit={onCreate}>
+          <input name="name" placeholder="Key name, e.g. local beanctl" required />
+          <input name="expires_at" type="datetime-local" />
+          <label className="checkbox-row">
+            <input name="admin_scope" type="checkbox" disabled={!isAdmin} />
+            Include beancs.admin scope {isAdmin ? "" : "(admin session required)"}
+          </label>
+          <button className="primary" type="submit"><KeyRound size={15} /> Create key</button>
+        </form>
+      </section>
+      <section className="panel">
+        <h2><KeyRound size={18} /> Issued keys</h2>
+        <div className="table api-key-table">
+          <div className="tr head"><span>Name</span><span>Prefix</span><span>Scopes</span><span>Last used</span><span>Expires</span><span>Actions</span></div>
+          {keys.map((key) => (
+            <div className="tr" key={key.id}>
+              <span className="strong">{key.name}</span>
+              <span>{key.prefix}</span>
+              <span>{(key.scopes || []).join(", ") || "-"}</span>
+              <span>{formatTime(key.last_used_at)}</span>
+              <span>{key.revoked_at ? `Revoked ${formatTime(key.revoked_at)}` : formatTime(key.expires_at)}</span>
+              <span className="row-actions">
+                <button className="danger-button" disabled={Boolean(key.revoked_at)} onClick={() => onRevoke(key)}><Trash2 size={15} /> Revoke</button>
+              </span>
+            </div>
+          ))}
+          {keys.length === 0 && <div className="empty">No API keys issued yet.</div>}
+        </div>
+      </section>
     </div>
   );
 }
@@ -1146,7 +1430,7 @@ function DomainsView({domains}) {
   );
 }
 
-function RuntimeTable({kind, rows, onCreateNamespace, onPatchNamespace, onDeleteNamespace, onDeletePod, onPodLogs, onSaveService, onDeleteService, onDetail}) {
+function RuntimeTable({kind, rows, onCreateNamespace, onPatchNamespace, onDeleteNamespace, onDeletePod, onNodeDetail, onPodLogs, onSaveService, onDeleteService, onDetail}) {
   const keys = rows[0] ? Object.keys(rows[0]).slice(0, 7) : [];
   return (
     <div className="stack">
@@ -1173,7 +1457,7 @@ function RuntimeTable({kind, rows, onCreateNamespace, onPatchNamespace, onDelete
             <div className="tr" key={`${kind}-${row.namespace || ""}-${row.name || index}`}>
               {keys.map((key) => <span key={key}>{formatCell(row[key])}</span>)}
               <span className="row-actions">
-                <button onClick={() => onDetail({kind, row})}>Details</button>
+                <button onClick={() => kind === "nodes" ? onNodeDetail(row) : onDetail({kind, row})}>Details</button>
                 {kind === "namespaces" && <button onClick={() => onDeleteNamespace(row.name)} className="danger-button"><Trash2 size={15} /></button>}
                 {kind === "pods" && <><button onClick={() => onPodLogs(row)}>Logs</button><button onClick={() => onDeletePod(row)} className="danger-button"><Trash2 size={15} /></button></>}
                 {kind === "services" && <><button onClick={() => onDetail({kind: "service-edit", row})}>Edit</button><button onClick={() => onDeleteService(row)} className="danger-button"><Trash2 size={15} /></button></>}
@@ -1187,7 +1471,7 @@ function RuntimeTable({kind, rows, onCreateNamespace, onPatchNamespace, onDelete
   );
 }
 
-function RuntimeDetailModal({detail, logs, onClose, onSaveService, onPatchNamespace}) {
+function RuntimeDetailModal({detail, logs, logFollow, logStatus, selectedLogContainer, logTail, logLoaded, onSelectLogContainer, onSetLogTail, onLoadContainerLogs, onFollowPodLogs, onStopPodLogs, onClose, onSaveService, onPatchNamespace}) {
   const row = detail.row || {};
   return (
     <div className="modal-backdrop">
@@ -1202,12 +1486,169 @@ function RuntimeDetailModal({detail, logs, onClose, onSaveService, onPatchNamesp
             <button className="primary">Save labels</button>
           </form>
         ) : detail.kind === "pod" ? (
-          <pre className="modal-log">{logs || "No logs loaded."}</pre>
+          <>
+            <ContainerLogViewer
+              pod={row}
+              logs={logs}
+              logFollow={logFollow}
+              logStatus={logStatus}
+              selectedContainer={selectedLogContainer}
+              tail={logTail}
+              loaded={logLoaded}
+              onSelectContainer={onSelectLogContainer}
+              onSetTail={onSetLogTail}
+              onLoad={() => onLoadContainerLogs(row, selectedLogContainer, logTail)}
+              onFollow={() => onFollowPodLogs(row, selectedLogContainer, logTail)}
+              onStop={onStopPodLogs}
+            />
+          </>
+        ) : detail.kind === "node" ? (
+          <NodeDetailView detail={detail} />
         ) : (
           <div className="detail-list">{Object.entries(row).map(([key, value]) => <span key={key}>{key.replaceAll("_", " ")} <b>{formatCell(value)}</b></span>)}</div>
         )}
         <div className="modal-actions"><button type="button" onClick={onClose}>Close</button></div>
       </div>
+    </div>
+  );
+}
+
+function ContainerLogViewer({pod, logs, logFollow, logStatus, selectedContainer, tail, loaded, onSelectContainer, onSetTail, onLoad, onFollow, onStop}) {
+  const containers = podContainers(pod);
+  const canRead = Boolean(selectedContainer);
+  return (
+    <div className="container-log-viewer">
+      <div className="log-header">
+        <span className="muted">{logStatus || "Choose a container to load logs."}</span>
+        <div className="row-actions">
+          <select className="compact-select" value={tail} disabled={logFollow} onChange={(event) => onSetTail(Number(event.target.value))}>
+            <option value={100}>Last 100 lines</option>
+            <option value={200}>Last 200 lines</option>
+            <option value={500}>Last 500 lines</option>
+            <option value={1000}>Last 1000 lines</option>
+          </select>
+          <button disabled={!canRead || logFollow} onClick={onLoad}><RefreshCw size={15} /> Load</button>
+          {logFollow ? (
+            <button onClick={onStop}>Stop follow</button>
+          ) : (
+            <button className="primary" disabled={!canRead} onClick={onFollow}>Follow live</button>
+          )}
+        </div>
+      </div>
+      <div className="container-picker">
+        {containers.map((container) => (
+          <button
+            key={container.name}
+            className={selectedContainer === container.name ? "container-chip active" : "container-chip"}
+            onClick={() => onSelectContainer(container.name)}
+            type="button"
+            disabled={logFollow}
+          >
+            <b>{container.name}</b>
+            {container.image && <small>{container.image}</small>}
+          </button>
+        ))}
+        {containers.length === 0 && <div className="empty">No containers reported for this pod.</div>}
+      </div>
+      <pre className="modal-log">{loaded ? (logs || "No logs returned for this container.") : "Logs are not loaded yet. Select a container, then click Load or Follow live."}</pre>
+    </div>
+  );
+}
+
+function podContainers(pod) {
+  return (pod.containers || []).map((value) => {
+    const text = String(value || "");
+    const [name, ...rest] = text.split(":");
+    return {name: name || text, image: rest.join(":")};
+  }).filter((container) => container.name);
+}
+
+function NodeDetailView({detail}) {
+  const row = detail.row || {};
+  const summary = row.summary || row;
+  const usage = row.usage || {};
+  const pods = row.pods || [];
+  const conditions = row.conditions || [];
+  return (
+    <div className="node-detail">
+      {detail.loading && <p className="muted">Loading live node status...</p>}
+      {detail.error && <p className="error-inline">{detail.error}</p>}
+      <div className="node-status-grid">
+        <div className="runtime-summary">
+          <strong>{summary.status || "-"}</strong>
+          <span>{summary.name} · {summary.version || "-"}</span>
+        </div>
+        <div className="detail-list compact-details">
+          <span>Internal IP <b>{summary.internal_ip || row.addresses?.InternalIP || "-"}</b></span>
+          <span>Roles <b>{(summary.roles || []).join(", ") || "-"}</b></span>
+          <span>Pods <b>{pods.length}/{row.allocatable?.pods || "-"}</b></span>
+          <span>Checked <b>{formatTime(row.checked_at)}</b></span>
+        </div>
+      </div>
+      <section className="node-section">
+        <h3>Live resources</h3>
+        {row.metrics_available ? (
+          <div className="resource-grid">
+            <ResourceMeter label="CPU allocatable" value={usage.cpu_allocatable_percent} detail={`${usage.cpu_millis || 0}m / ${row.allocatable?.cpu_millis || 0}m`} />
+            <ResourceMeter label="Memory allocatable" value={usage.memory_allocatable_percent} detail={`${formatBytes(usage.memory_bytes)} / ${formatBytes(row.allocatable?.memory_bytes)}`} />
+            <ResourceMeter label="CPU capacity" value={usage.cpu_capacity_percent} detail={`${usage.cpu || "-"} / ${row.capacity?.cpu || "-"}`} />
+            <ResourceMeter label="Memory capacity" value={usage.memory_capacity_percent} detail={`${usage.memory || "-"} / ${row.capacity?.memory || "-"}`} />
+          </div>
+        ) : (
+          <p className="muted">Metrics unavailable{row.metrics_error ? `: ${row.metrics_error}` : ". Install metrics-server to show live CPU and memory usage."}</p>
+        )}
+      </section>
+      <section className="node-section">
+        <h3>Conditions</h3>
+        <div className="condition-grid">
+          {conditions.map((condition) => (
+            <div className={condition.status === "True" && condition.type === "Ready" ? "condition good" : condition.status === "True" ? "condition warning" : "condition"} key={condition.type}>
+              <b>{condition.type}: {condition.status}</b>
+              <small>{condition.reason || "-"} · {formatTime(condition.last_transition_time)}</small>
+              {condition.message && <p>{condition.message}</p>}
+            </div>
+          ))}
+        </div>
+      </section>
+      <section className="node-section">
+        <h3>System</h3>
+        <div className="detail-list compact-details">
+          {Object.entries(row.system_info || {}).map(([key, value]) => <span key={key}>{key.replaceAll("_", " ")} <b>{value || "-"}</b></span>)}
+        </div>
+      </section>
+      <section className="node-section">
+        <h3>Pods on this node</h3>
+        <div className="mini-table">
+          {pods.map((pod) => (
+            <div key={`${pod.namespace}/${pod.name}`}>
+              <span>{pod.namespace}/{pod.name}<small>{(pod.containers || []).join(" · ")}</small></span>
+              <b>{pod.ready_containers}/{pod.total_containers} · {pod.status}</b>
+            </div>
+          ))}
+          {pods.length === 0 && <div className="empty">No pods scheduled on this node.</div>}
+        </div>
+      </section>
+      <section className="node-section">
+        <h3>Taints and labels</h3>
+        <div className="signal-list">
+          {(row.taints || []).map((taint) => <span key={taint}>{taint}</span>)}
+          {(row.taints || []).length === 0 && <span>No taints</span>}
+        </div>
+        <div className="label-cloud">
+          {Object.entries(row.labels || {}).map(([key, value]) => <span key={key}>{key}={value}</span>)}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ResourceMeter({label, value, detail}) {
+  const normalized = Math.max(0, Math.min(100, Number(value || 0)));
+  return (
+    <div className="resource-meter">
+      <div><b>{label}</b><span>{normalized.toFixed(1)}%</span></div>
+      <progress value={normalized} max="100" />
+      <small>{detail}</small>
     </div>
   );
 }
@@ -1280,6 +1721,18 @@ function ProjectModal({project, onClose, onSubmit}) {
         <textarea name="description" defaultValue={project.description || ""} />
         <label>Replicas</label>
         <input name="replicas" type="number" min="0" max="20" defaultValue={project.replicas || 1} />
+        <label>Status</label>
+        <select name="status" defaultValue={project.status || "active"}>
+          <option value="active">Active</option>
+          <option value="suspended">Suspended</option>
+          <option value="deleted">Deleted</option>
+        </select>
+        {project.build_source === "github" && (
+          <label className="checkbox-row">
+            <input name="auto_deploy" type="checkbox" defaultChecked={project.auto_deploy !== false} />
+            Auto build and deploy on GitHub push
+          </label>
+        )}
         <div className="modal-actions">
           <button type="button" onClick={onClose}>Cancel</button>
           <button className="primary" type="submit">Save</button>
@@ -1306,6 +1759,7 @@ function defaultDeployForm() {
     github_repo: "",
     github_branch: "main",
     dockerfile_path: "Dockerfile",
+    auto_deploy: true,
     image_reference: "",
     source_archive_name: "",
     basaltpass_instance_id: "",
@@ -1334,6 +1788,7 @@ function buildProjectPayload(form, githubCredentialID, credentials) {
     github_repo: source === "github" ? form.github_repo : undefined,
     github_branch: form.github_branch || "main",
     dockerfile_path: form.dockerfile_path || "Dockerfile",
+    auto_deploy: source === "github" ? form.auto_deploy !== false : false,
     basaltpass_instance_id: form.basaltpass_instance_id ? Number(form.basaltpass_instance_id) : undefined,
     cloudflare_credential_id: exposure === "public" ? Number(form.cloudflare_credential_id) : undefined,
     exposure_mode: exposure,
@@ -1355,13 +1810,13 @@ function imageName(image) {
 }
 
 function profileFromToken(token) {
-  const fallback = {name: "Signed in user", detail: "BeanCS session", initial: "U"};
+  const fallback = {name: "Signed in user", detail: "BeanCS session", initial: "U", scopes: []};
   if (!token || !token.includes(".")) return fallback;
   try {
     const payload = JSON.parse(base64URLDecode(token.split(".")[1]));
     const name = payload.name || payload.preferred_username || payload.email || payload.sub || fallback.name;
     const detail = payload.email && payload.email !== name ? payload.email : payload.preferred_username && payload.preferred_username !== name ? payload.preferred_username : "BeanCS session";
-    return {name, detail, initial: String(name).trim().slice(0, 1).toUpperCase() || "U"};
+    return {name, detail, initial: String(name).trim().slice(0, 1).toUpperCase() || "U", scopes: String(payload.scope || "").split(/\s+/).filter(Boolean)};
   } catch {
     return fallback;
   }
@@ -1388,13 +1843,48 @@ function makeAPI(token, onUnauthorized) {
     if (!res.ok) throw new Error(data.error || data.error_description || "Request failed");
     return data;
   }
+  async function stream(path, options = {}) {
+    const res = await fetch(API + path, {
+      ...options,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(options.headers || {}),
+      },
+    });
+    if (res.status === 401) onUnauthorized();
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || data.error_description || "Request failed");
+    }
+    return res;
+  }
   return {
     get: (path) => request(path),
     post: (path, body) => request(path, {method: "POST", body: JSON.stringify(body)}),
     put: (path, body) => request(path, {method: "PUT", body: JSON.stringify(body)}),
     patch: (path, body) => request(path, {method: "PATCH", body: JSON.stringify(body)}),
     delete: (path) => request(path, {method: "DELETE"}),
+    stream,
   };
+}
+
+async function consumeTextStream(res, onChunk) {
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error("Streaming logs are not supported by this browser.");
+  const decoder = new TextDecoder();
+  while (true) {
+    const {value, done} = await reader.read();
+    if (done) break;
+    onChunk(decoder.decode(value, {stream: true}));
+  }
+  const remaining = decoder.decode();
+  if (remaining) onChunk(remaining);
+}
+
+function trimLiveLog(value) {
+  const maxLength = 200000;
+  if (value.length <= maxLength) return value;
+  return value.slice(value.length - maxLength);
 }
 
 async function publicJSON(path, options = {}) {
@@ -1420,12 +1910,13 @@ async function finishLogin(config) {
 }
 
 function titleFor(view) {
-  return ({deploy: "Deploy project", progress: "Progress", projects: "Projects", github: "GitHub", domains: "Domains", cloudflare: "Cloudflare", basaltpass: "BasaltPass", namespaces: "Namespaces", pods: "Pods", nodes: "Nodes", ingresses: "Ingresses", services: "Services"}[view] || "BeanCS");
+  return ({deploy: "Deploy project", progress: "Progress", projects: "Projects", apiKeys: "API Keys", github: "GitHub", domains: "Domains", cloudflare: "Cloudflare", basaltpass: "BasaltPass", namespaces: "Namespaces", pods: "Pods", nodes: "Nodes", ingresses: "Ingresses", services: "Services"}[view] || "BeanCS");
 }
 
 function subtitleFor(view, runtime, projects) {
   if (view === "projects") return `${projects.length} managed projects`;
   if (view === "progress") return "Watch installs and runtime readiness";
+  if (view === "apiKeys") return "Issue and revoke API keys for automation";
   if (runtime[view]) return `${runtime[view].length} cluster resources`;
   return "Select a repository, verify containerization, and publish traffic.";
 }
@@ -1433,6 +1924,19 @@ function subtitleFor(view, runtime, projects) {
 function formatTime(value) {
   if (!value) return "-";
   return new Date(value).toLocaleString();
+}
+
+function formatBytes(value) {
+  const bytes = Number(value || 0);
+  if (!bytes) return "-";
+  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+  let size = bytes;
+  let index = 0;
+  while (size >= 1024 && index < units.length - 1) {
+    size /= 1024;
+    index += 1;
+  }
+  return `${size.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
 }
 
 function formatCell(value) {
@@ -1475,6 +1979,11 @@ function parseServicePorts(value) {
 function portsToForm(ports) {
   if (!Array.isArray(ports)) return "";
   return ports.map((port) => String(port)).join(",");
+}
+
+function localDateTimeToRFC3339(value) {
+  if (!value) return "";
+  return new Date(value).toISOString();
 }
 
 function slugify(value) {
