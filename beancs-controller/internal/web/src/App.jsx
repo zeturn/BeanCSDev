@@ -233,7 +233,7 @@ function App() {
   }, [token, view]);
 
   useEffect(() => {
-    if (!token || !["registries", "workloadImage"].includes(view)) return;
+    if (!token || !["deploy", "registries", "workloadImage"].includes(view)) return;
     loadRegistriesPage();
     const timer = setInterval(() => {
       if (!document.hidden) loadContainerImages();
@@ -496,6 +496,12 @@ function App() {
     } catch (err) {
       setError(err.message);
     }
+  }
+
+  async function createTrackedImageFromDeploy(body) {
+    const created = await api.post("/container-images", body);
+    await loadRegistriesPage();
+    return created;
   }
 
   async function refreshTrackedImage(id) {
@@ -1032,7 +1038,7 @@ function App() {
   }
 
   function checkInstallSource(nextForm = deployForm) {
-    const source = nextForm.build_source || "github";
+    const source = nextForm.deploy_source === "gitops" ? "github" : "registry";
     setError("");
     setNotice("");
     if (source === "github") {
@@ -1040,26 +1046,17 @@ function App() {
     }
     const image = (nextForm.image_reference || "").trim();
     if (!image) {
-      setError("Image reference is required for this install method.");
+      setError("Image reference is required for registry deployments.");
       return;
     }
-    if (source === "ghcr" && !image.toLowerCase().startsWith("ghcr.io/")) {
-      setError("GHCR image references must start with ghcr.io/.");
-      return;
-    }
-    if (source === "source-upload" && !nextForm.source_archive_name) {
-      setError("Choose a source archive before checking installability.");
-      return;
-    }
-    const label = sourceLabel(source);
     setAnalysis({
       deployable: true,
       containerized: source !== "source-upload",
-      scaffoldable: source === "source-upload",
+      scaffoldable: false,
       default_port: nextForm.port || 8080,
       ports: [Number(nextForm.port || 8080)],
-      signals: source === "source-upload" ? [`Source archive: ${nextForm.source_archive_name}`, `Target image: ${image}`] : [`${label} image: ${image}`],
-      warnings: source === "source-upload" ? ["Source upload is recorded with a target image. Make sure your build runner publishes that image before rollout."] : [],
+      signals: [`Registry image: ${image}`, "Update mode: passive"],
+      warnings: [],
     });
     if (!nextForm.name) {
       setDeployForm((current) => ({...current, name: slugify(imageName(image))}));
@@ -1334,6 +1331,9 @@ function App() {
             analyzeRepo={analyzeRepo}
             checkInstallSource={checkInstallSource}
             deployProject={deployProject}
+            containerRegistries={containerRegistries}
+            containerImages={containerImages}
+            createTrackedImageFromDeploy={createTrackedImageFromDeploy}
           />
         )}
         {view === "progress" && (
@@ -1439,19 +1439,61 @@ function App() {
   );
 }
 
-function DeployView({credentials, namespaces, selectedCredential, setSelectedCredential, repos, selectedRepo, analysis, setAnalysis, form, setForm, loadRepos, analyzeRepo, checkInstallSource, deployProject}) {
+function DeployView({credentials, namespaces, selectedCredential, setSelectedCredential, repos, selectedRepo, analysis, setAnalysis, form, setForm, loadRepos, analyzeRepo, checkInstallSource, deployProject, containerRegistries, containerImages, createTrackedImageFromDeploy}) {
   const [stepIndex, setStepIndex] = useState(0);
+  const [creatingImage, setCreatingImage] = useState(false);
   const selectedCloudflare = credentials.cloudflare.find((cred) => String(cred.id) === String(form.cloudflare_credential_id));
   const publicHost = form.subdomain && selectedCloudflare ? `${form.subdomain}.${selectedCloudflare.domain}` : "";
   const step = deploySteps[stepIndex];
   const canContinue = canContinueDeployStep(step.id, form, selectedCredential, analysis);
-  const setSource = (buildSource) => {
+  const ghcrPreview = form.github_repo ? `ghcr.io/${form.github_repo.toLowerCase()}:beancs-<build>` : "ghcr.io/<owner>/<repo>:beancs-<build>";
+  const setDeploySource = (deploySource) => {
     setAnalysis(null);
-    setForm({...defaultDeployForm(), build_source: buildSource, github_branch: form.github_branch || "main", port: form.port || 8080});
+    setForm({
+      ...defaultDeployForm(),
+      deploy_source: deploySource,
+      build_source: deploySource === "gitops" ? "github" : "ghcr",
+      repo_type: deploySource === "gitops" ? "github" : "",
+      update_mode: deploySource === "gitops" ? "argocd" : "passive",
+      image_choice: deploySource === "registry" ? "existing" : "",
+      github_branch: form.github_branch || "main",
+      port: form.port || 8080,
+    });
   };
   const updateSourceForm = (nextForm) => {
     setAnalysis(null);
     setForm(nextForm);
+  };
+  const setRepoType = (repoType) => {
+    setAnalysis(null);
+    setForm({...form, repo_type: repoType, github_repo: "", git_url: "", update_mode: repoType === "github" ? form.update_mode || "argocd" : "passive"});
+  };
+  const setUpdateMode = (updateMode) => {
+    setForm({...form, update_mode: form.deploy_source === "registry" ? "passive" : updateMode, auto_deploy: updateMode === "argocd"});
+  };
+  const selectTrackedImage = (image, tag = "") => {
+    const ref = imageReferenceFromTrackedImage(image, tag);
+    updateSourceForm({...form, selected_image_id: String(image.id), image_reference: ref, name: form.name || slugify(imageName(ref))});
+  };
+  const createImage = async () => {
+    if (!form.new_image_registry_id || !form.new_image_repository) return;
+    setCreatingImage(true);
+    try {
+      const created = await createTrackedImageFromDeploy({
+        registry_id: Number(form.new_image_registry_id),
+        repository: form.new_image_repository.trim(),
+      });
+      const ref = imageReferenceFromTrackedImage(created, "");
+      updateSourceForm({
+        ...form,
+        image_choice: "existing",
+        selected_image_id: String(created.id),
+        image_reference: ref,
+        name: form.name || slugify(imageName(ref)),
+      });
+    } finally {
+      setCreatingImage(false);
+    }
   };
   const next = () => {
     if (step.id === "check") checkInstallSource(form);
@@ -1460,13 +1502,17 @@ function DeployView({credentials, namespaces, selectedCredential, setSelectedCre
   const back = () => setStepIndex(Math.max(0, stepIndex - 1));
   return (
     <div className="deploy-wizard">
-      <section className="panel">
-        <div className="wizard-steps">
+      <section className="panel wizard-progress-panel">
+        <div className="wizard-progress-head">
+          <span>{step.label}</span>
+          <b>{stepIndex + 1} / {deploySteps.length}</b>
+        </div>
+        <div className="wizard-progress-track">
+          <span style={{width: `${((stepIndex + 1) / deploySteps.length) * 100}%`}} />
+        </div>
+        <div className="wizard-step-labels">
           {deploySteps.map((item, index) => (
-            <button key={item.id} type="button" className={index === stepIndex ? "wizard-step active" : index < stepIndex ? "wizard-step done" : "wizard-step"} onClick={() => setStepIndex(index)}>
-              <b>{index + 1}</b>
-              <span>{item.label}</span>
-            </button>
+            <span key={item.id} className={index === stepIndex ? "active" : index < stepIndex ? "done" : ""}>{item.label}</span>
           ))}
         </div>
       </section>
@@ -1474,10 +1520,10 @@ function DeployView({credentials, namespaces, selectedCredential, setSelectedCre
         <h2><Rocket size={18} /> {step.title}</h2>
         {step.id === "method" && (
           <div className="method-grid">
-            {installMethods.map((method) => {
+            {deploySourceOptions.map((method) => {
               const Icon = method.icon;
               return (
-                <button key={method.id} type="button" className={form.build_source === method.id ? "method-card active" : "method-card"} onClick={() => setSource(method.id)}>
+                <button key={method.id} type="button" className={form.deploy_source === method.id ? "method-card active" : "method-card"} onClick={() => setDeploySource(method.id)}>
                   <Icon size={22} />
                   <b>{method.label}</b>
                   <span>{method.description}</span>
@@ -1488,45 +1534,108 @@ function DeployView({credentials, namespaces, selectedCredential, setSelectedCre
         )}
         {step.id === "source" && (
           <div className="form-grid">
-            {form.build_source === "github" && (
+            {form.deploy_source === "gitops" && (
               <>
-                <label>GitHub credential</label>
-                <select value={selectedCredential} onChange={(event) => { setAnalysis(null); setSelectedCredential(event.target.value); loadRepos(event.target.value); }}>
-                  <option value="">Choose credential</option>
-                  {credentials.github.map((cred) => <option key={cred.id} value={cred.id}>{cred.name} ({cred.account_login || cred.auth_type})</option>)}
-                </select>
-                <Field label="Repository" value={form.github_repo} onChange={(v) => updateSourceForm({...form, github_repo: v.trim()})} required />
-                <Field label="Branch" value={form.github_branch} onChange={(v) => updateSourceForm({...form, github_branch: v})} />
-                <div className="repo-list compact-repos">
-                  {repos.map((repo) => (
-                    <button key={repo.full_name} type="button" className={selectedRepo === repo.full_name ? "repo active" : "repo"} onClick={() => { setForm({...form, github_repo: repo.full_name, github_branch: repo.default_branch || "main", name: slugify(repo.name || repo.full_name.split("/")[1])}); analyzeRepo(repo.full_name, repo.default_branch); }}>
-                      <Code2 size={15} />
-                      <span>{repo.full_name}</span>
-                      <small>{repo.private ? "Private" : "Public"} · {repo.default_branch}</small>
-                    </button>
-                  ))}
+                <label>Repository type</label>
+                <div className="segmented-control">
+                  <button type="button" className={form.repo_type === "github" ? "active" : ""} onClick={() => setRepoType("github")}><Github size={15} /> GitHub</button>
+                  <button type="button" className={form.repo_type === "git-url" ? "active" : ""} onClick={() => setRepoType("git-url")}><GitBranch size={15} /> Git link</button>
                 </div>
+                {form.repo_type === "github" && (
+                  <>
+                    <label>GitHub credential</label>
+                    <select value={selectedCredential} onChange={(event) => { setAnalysis(null); setSelectedCredential(event.target.value); loadRepos(event.target.value); }}>
+                      <option value="">Choose credential</option>
+                      {credentials.github.map((cred) => <option key={cred.id} value={cred.id}>{cred.name} ({cred.account_login || cred.auth_type})</option>)}
+                    </select>
+                    <Field label="Repository" value={form.github_repo} onChange={(v) => updateSourceForm({...form, github_repo: v.trim()})} required />
+                    <Field label="Branch" value={form.github_branch} onChange={(v) => updateSourceForm({...form, github_branch: v})} />
+                    <div className="repo-list compact-repos">
+                      {repos.map((repo) => (
+                        <button key={repo.full_name} type="button" className={selectedRepo === repo.full_name ? "repo active" : "repo"} onClick={() => { setForm({...form, github_repo: repo.full_name, github_branch: repo.default_branch || "main", name: slugify(repo.name || repo.full_name.split("/")[1])}); analyzeRepo(repo.full_name, repo.default_branch); }}>
+                          <Code2 size={15} />
+                          <span>{repo.full_name}</span>
+                          <small>{repo.private ? "Private" : "Public"} · {repo.default_branch}</small>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+                {form.repo_type === "git-url" && (
+                  <>
+                    <Field label="Git URL" value={form.git_url} onChange={(v) => updateSourceForm({...form, git_url: v.trim()})} required />
+                    <p className="warning-note">当前部署模式展示不支持直接的 git 链接。请改用已连接的 GitHub 仓库继续部署。</p>
+                  </>
+                )}
               </>
             )}
-            {form.build_source === "dockerhub" && (
+            {form.deploy_source === "registry" && (
               <>
-                <Field label="Docker Hub image" value={form.image_reference} onChange={(v) => updateSourceForm({...form, image_reference: v.trim(), name: form.name || slugify(imageName(v))})} required />
-                <p className="muted">Example: nginx:1.27 or your-org/your-app:latest.</p>
+                <label>Image object</label>
+                <div className="segmented-control">
+                  <button type="button" className={form.image_choice === "existing" ? "active" : ""} onClick={() => updateSourceForm({...form, image_choice: "existing", image_reference: ""})}><Package size={15} /> Existing</button>
+                  <button type="button" className={form.image_choice === "new" ? "active" : ""} onClick={() => updateSourceForm({...form, image_choice: "new", selected_image_id: "", image_reference: ""})}><Plus size={15} /> New object</button>
+                </div>
+                {form.image_choice === "existing" && (
+                  <>
+                    <div className="image-picker">
+                      {containerImages.map((image) => (
+                        <button key={image.id} type="button" className={String(form.selected_image_id) === String(image.id) ? "image-option active" : "image-option"} onClick={() => selectTrackedImage(image, (image.tags || [])[0] || "")}>
+                          <b>{image.repository}</b>
+                          <span>{image.registry?.name || `registry #${image.registry_id}`}</span>
+                          <small>{(image.tags || []).length ? `${(image.tags || []).length} tags cached` : "No cached tags"}</small>
+                        </button>
+                      ))}
+                      {containerImages.length === 0 && <div className="empty">No image objects yet. Create one below or open Image Registry.</div>}
+                    </div>
+                    {form.selected_image_id && (
+                      <>
+                        <label>Tag</label>
+                        <select value={imageTagFromReference(form.image_reference)} onChange={(event) => {
+                          const image = containerImages.find((item) => String(item.id) === String(form.selected_image_id));
+                          if (image) selectTrackedImage(image, event.target.value);
+                        }}>
+                          {(containerImages.find((item) => String(item.id) === String(form.selected_image_id))?.tags || ["latest"]).map((tag) => <option key={tag} value={tag}>{tag}</option>)}
+                        </select>
+                      </>
+                    )}
+                    <Field label="Image reference" value={form.image_reference} onChange={(v) => updateSourceForm({...form, image_reference: v.trim(), name: form.name || slugify(imageName(v))})} required />
+                  </>
+                )}
+                {form.image_choice === "new" && (
+                  <>
+                    <label>Registry</label>
+                    <select value={form.new_image_registry_id} onChange={(event) => updateSourceForm({...form, new_image_registry_id: event.target.value})} required>
+                      <option value="">Choose registry</option>
+                      {containerRegistries.map((registry) => <option key={registry.id} value={registry.id}>{registry.name} ({registry.kind})</option>)}
+                    </select>
+                    <Field label="Repository path" value={form.new_image_repository} onChange={(v) => updateSourceForm({...form, new_image_repository: v.trim()})} required />
+                    <button type="button" className="primary inline-primary" disabled={creatingImage || !form.new_image_registry_id || !form.new_image_repository} onClick={createImage}><Plus size={15} /> Create image object</button>
+                    <p className="muted">保存对象后会回到对象选择，并使用该镜像进行被动更新部署。</p>
+                  </>
+                )}
               </>
             )}
-            {form.build_source === "ghcr" && (
-              <>
-                <Field label="GHCR image" value={form.image_reference} onChange={(v) => updateSourceForm({...form, image_reference: v.trim(), name: form.name || slugify(imageName(v))})} required />
-                <p className="muted">Example: ghcr.io/owner/repo:latest.</p>
-              </>
-            )}
-            {form.build_source === "source-upload" && (
-              <>
-                <label>Source archive</label>
-                <input type="file" accept=".zip,.tar,.tgz,.tar.gz" onChange={(event) => updateSourceForm({...form, source_archive_name: event.target.files?.[0]?.name || ""})} required />
-                <Field label="Target image after build" value={form.image_reference} onChange={(v) => updateSourceForm({...form, image_reference: v.trim(), name: form.name || slugify(imageName(v))})} required />
-                <Field label="Dockerfile path" value={form.dockerfile_path} onChange={(v) => updateSourceForm({...form, dockerfile_path: v})} />
-              </>
+          </div>
+        )}
+        {step.id === "update" && (
+          <div className="method-grid two-up">
+            {form.deploy_source === "gitops" && updateModeOptions.map((mode) => {
+              const Icon = mode.icon;
+              return (
+                <button key={mode.id} type="button" className={form.update_mode === mode.id ? "method-card active" : "method-card"} onClick={() => setUpdateMode(mode.id)}>
+                  <Icon size={22} />
+                  <b>{mode.label}</b>
+                  <span>{mode.description}</span>
+                </button>
+              );
+            })}
+            {form.deploy_source === "registry" && (
+              <button type="button" className="method-card active" onClick={() => setUpdateMode("passive")}>
+                <RefreshCw size={22} />
+                <b>Passive update</b>
+                <span>Registry deployments only support passive updates in the current flow.</span>
+              </button>
             )}
           </div>
         )}
@@ -1559,12 +1668,6 @@ function DeployView({credentials, namespaces, selectedCredential, setSelectedCre
               <option value="medium">Medium</option>
               <option value="large">Large</option>
             </select>
-            {form.build_source === "github" && (
-              <label className="checkbox-row">
-                <input type="checkbox" checked={form.auto_deploy !== false} onChange={(event) => setForm({...form, auto_deploy: event.target.checked})} />
-                Auto build and deploy on GitHub push
-              </label>
-            )}
             <label>BasaltPass optional</label>
             <select value={form.basaltpass_instance_id} onChange={(event) => setForm({...form, basaltpass_instance_id: event.target.value})}>
               <option value="">Do not register OAuth app</option>
@@ -1618,7 +1721,8 @@ function DeployView({credentials, namespaces, selectedCredential, setSelectedCre
             <span>Ingress <b>{form.exposure_mode}</b></span>
             <span>Domain <b>{publicHost || form.private_host || "internal only"}</b></span>
             <span>Port <b>{form.port}</b></span>
-            {form.build_source === "github" && <span>Deploy mode <b>{form.auto_deploy !== false ? "Auto GitOps tracking" : "Manual deployments only"}</b></span>}
+            <span>Update mode <b>{form.deploy_source === "registry" ? "Passive" : form.update_mode === "argocd" ? "Argo CD" : "Passive"}</b></span>
+            {form.deploy_source === "gitops" && form.update_mode === "argocd" && <span>Future GHCR image <b>{ghcrPreview}</b></span>}
           </div>
         )}
         <div className="wizard-actions">
@@ -1893,8 +1997,9 @@ function ProgressStep({step}) {
 }
 
 const deploySteps = [
-  {id: "method", label: "Method", title: "Choose install method"},
-  {id: "source", label: "Source", title: "Choose or enter source"},
+  {id: "method", label: "Source type", title: "Choose deployment source"},
+  {id: "source", label: "Source", title: "Choose deployment source details"},
+  {id: "update", label: "Update", title: "Choose update mode"},
   {id: "check", label: "Check", title: "Check installability"},
   {id: "params", label: "Params", title: "Configure parameters"},
   {id: "namespace", label: "Namespace", title: "Choose namespace"},
@@ -1903,20 +2008,27 @@ const deploySteps = [
   {id: "confirm", label: "Confirm", title: "Confirm and build"},
 ];
 
-const installMethods = [
-  {id: "github", label: "GitHub", icon: Github, description: "Analyze a GitHub repository and deploy the matching GHCR image."},
-  {id: "dockerhub", label: "Docker Hub", icon: Package, description: "Deploy an existing Docker Hub image."},
-  {id: "ghcr", label: "GHCR", icon: Github, description: "Deploy an existing GitHub Container Registry image."},
-  {id: "source-upload", label: "Upload source", icon: Upload, description: "Upload a source archive and record the target image to build."},
+const deploySourceOptions = [
+  {id: "gitops", label: "GitOps repository", icon: GitBranch, description: "Use a GitHub repository as source and publish runtime images to GHCR."},
+  {id: "registry", label: "Container registry", icon: Package, description: "Deploy an existing or newly tracked container image object."},
+];
+
+const updateModeOptions = [
+  {id: "argocd", label: "Argo CD", icon: GitBranch, description: "Create GitOps manifests, register an Argo CD app, and let GitHub Actions build the first GHCR image."},
+  {id: "passive", label: "Passive update", icon: RefreshCw, description: "Create the project without automatic GitHub push deployment."},
 ];
 
 function canContinueDeployStep(stepID, form, selectedCredential, analysis) {
-  if (stepID === "method") return Boolean(form.build_source);
+  if (stepID === "method") return Boolean(form.deploy_source);
   if (stepID === "source") {
-    if (form.build_source === "github") return Boolean(selectedCredential && form.github_repo);
-    if (form.build_source === "source-upload") return Boolean(form.source_archive_name && form.image_reference);
+    if (form.deploy_source === "gitops") {
+      if (form.repo_type === "git-url") return false;
+      return Boolean(selectedCredential && form.github_repo);
+    }
+    if (form.image_choice === "new") return Boolean(form.selected_image_id && form.image_reference);
     return Boolean(form.image_reference);
   }
+  if (stepID === "update") return form.deploy_source === "registry" || Boolean(form.update_mode);
   if (stepID === "check") return Boolean(analysis?.deployable);
   if (stepID === "params") return Boolean(form.name && Number(form.port || 0) > 0 && Number(form.replicas || 0) > 0);
   if (stepID === "domain") {
@@ -1927,12 +2039,11 @@ function canContinueDeployStep(stepID, form, selectedCredential, analysis) {
 }
 
 function sourceLabel(source) {
-  return ({github: "GitHub", dockerhub: "Docker Hub", ghcr: "GHCR", "source-upload": "Source upload"}[source || "github"] || source);
+  return ({github: "GitHub", dockerhub: "Docker Hub", ghcr: "Container registry", registry: "Container registry", "source-upload": "Source upload"}[source || "github"] || source);
 }
 
 function sourceSummary(form) {
-  if (form.build_source === "github") return `${form.github_repo || "-"} @ ${form.github_branch || "main"}`;
-  if (form.build_source === "source-upload") return `${form.source_archive_name || "-"} -> ${form.image_reference || "-"}`;
+  if (form.deploy_source === "gitops") return form.repo_type === "git-url" ? form.git_url || "-" : `${form.github_repo || "-"} @ ${form.github_branch || "main"}`;
   return form.image_reference || "-";
 }
 
@@ -2938,7 +3049,15 @@ function Field({label, value, onChange, type = "text", required = false}) {
 
 function defaultDeployForm() {
   return {
+    deploy_source: "gitops",
     build_source: "github",
+    repo_type: "github",
+    git_url: "",
+    update_mode: "argocd",
+    image_choice: "",
+    selected_image_id: "",
+    new_image_registry_id: "",
+    new_image_repository: "",
     name: "",
     namespace: "",
     github_repo: "",
@@ -2962,7 +3081,7 @@ function buildProjectPayload(form, githubCredentialID, credentials) {
   const exposure = form.exposure_mode;
   const selectedCF = credentials.cloudflare.find((cred) => String(cred.id) === String(form.cloudflare_credential_id));
   const domain = exposure === "public" && selectedCF ? `${form.subdomain}.${selectedCF.domain}` : exposure === "private" ? form.private_host : "";
-  const source = form.build_source || "github";
+  const source = form.deploy_source === "registry" ? "registry" : "github";
   return {
     build_source: source,
     name: form.name,
@@ -2973,7 +3092,7 @@ function buildProjectPayload(form, githubCredentialID, credentials) {
     github_repo: source === "github" ? form.github_repo : undefined,
     github_branch: form.github_branch || "main",
     dockerfile_path: form.dockerfile_path || "Dockerfile",
-    auto_deploy: source === "github" ? form.auto_deploy !== false : false,
+    auto_deploy: source === "github" ? form.update_mode === "argocd" : false,
     basaltpass_instance_id: form.basaltpass_instance_id ? Number(form.basaltpass_instance_id) : undefined,
     cloudflare_credential_id: exposure === "public" ? Number(form.cloudflare_credential_id) : undefined,
     exposure_mode: exposure,
@@ -2992,6 +3111,33 @@ function imageName(image) {
   const colon = withoutDigest.lastIndexOf(":");
   const value = colon > slash ? withoutDigest.slice(0, colon) : withoutDigest;
   return value.split("/").filter(Boolean).pop() || "app";
+}
+
+function imageReferenceFromTrackedImage(image, tag = "") {
+  if (!image) return "";
+  const registry = registryHostFromAPIBase(image.registry?.api_base || "");
+  const repository = String(image.repository || "").replace(/^\/+/, "");
+  const normalizedTag = tag || (image.tags || [])[0] || "latest";
+  return `${registry ? `${registry}/` : ""}${repository}:${normalizedTag}`;
+}
+
+function registryHostFromAPIBase(apiBase) {
+  const value = String(apiBase || "").trim();
+  if (!value) return "";
+  try {
+    const url = new URL(value);
+    return url.host;
+  } catch {
+    return value.replace(/^https?:\/\//, "").replace(/\/v2\/?$/, "").replace(/\/+$/, "");
+  }
+}
+
+function imageTagFromReference(image) {
+  const value = String(image || "");
+  const withoutDigest = value.split("@")[0];
+  const slash = withoutDigest.lastIndexOf("/");
+  const colon = withoutDigest.lastIndexOf(":");
+  return colon > slash ? withoutDigest.slice(colon + 1) : "latest";
 }
 
 function profileFromToken(token) {
