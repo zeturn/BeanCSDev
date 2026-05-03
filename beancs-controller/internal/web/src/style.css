@@ -1023,6 +1023,14 @@ button.domain-tile {
   gap: 12px;
 }
 
+.observability-page .dashboard-kpis {
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+
+.observability-log-panel pre {
+  max-height: 560px;
+}
+
 .metric-card {
   border: 1px solid #dbe4ed;
   border-radius: 9px;

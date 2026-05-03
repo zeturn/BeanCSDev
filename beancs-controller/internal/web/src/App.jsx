@@ -184,7 +184,7 @@ function App() {
   }, [token]);
 
   useEffect(() => {
-    if (!token || view !== "dashboard") return;
+    if (!token || !["dashboard", "alerts", "events", "metrics"].includes(view)) return;
     loadDashboard();
     const timer = setInterval(() => {
       if (!document.hidden) loadDashboard();
@@ -207,7 +207,7 @@ function App() {
   }, [token, view]);
 
   useEffect(() => {
-    if (!token || view !== "progress") return;
+    if (!token || !["progress", "logs"].includes(view)) return;
     loadProjectProgress();
     const timer = setInterval(() => {
       if (!document.hidden) loadProjectProgress();
@@ -1390,38 +1390,24 @@ function App() {
             description="Kubernetes Secret inspection and rotation workflows are not wired in this console yet. Use kubectl or your GitOps pipeline for now."
           />
         )}
-        {view === "alerts" && (
-          <ComingSoonView
-            title="Alerts"
-            description="Summary alerts appear on the Overview dashboard today. Dedicated alert routing is planned."
-            actionLabel="Open Overview"
-            onAction={() => setView("dashboard")}
-          />
-        )}
-        {view === "events" && (
-          <ComingSoonView
-            title="Events"
-            description="Recent cluster events are included on the Overview dashboard. A dedicated event stream view will follow."
-            actionLabel="Open Overview"
-            onAction={() => setView("dashboard")}
-          />
-        )}
+        {view === "alerts" && <AlertsView dashboard={dashboard} refresh={loadDashboard} />}
+        {view === "events" && <EventsView dashboard={dashboard} refresh={loadDashboard} />}
         {view === "logs" && (
-          <ComingSoonView
-            title="Logs"
-            description="Open Workloads → Pods, pick a pod, then use Logs in the detail drawer. Live streaming uses lazy loading to protect the browser."
-            actionLabel="Go to Pods"
-            onAction={() => setView("pods")}
+          <LogsView
+            projects={projects}
+            activeProjectID={activeProgressProjectID}
+            setActiveProjectID={setActiveProgressProjectID}
+            progress={projectProgress}
+            refresh={loadProjectProgress}
+            logFollow={projectLogFollow}
+            liveLogs={projectLiveLogs}
+            logStatus={projectLogStatus}
+            onStartLogFollow={startProjectLogFollow}
+            onStopLogFollow={stopProjectLogFollow}
+            onOpenPods={() => setView("pods")}
           />
         )}
-        {view === "metrics" && (
-          <ComingSoonView
-            title="Metrics"
-            description="CPU and memory utilization are shown on Overview, node detail, and workload tables when metrics-server is installed."
-            actionLabel="Open Overview"
-            onAction={() => setView("dashboard")}
-          />
-        )}
+        {view === "metrics" && <MetricsView dashboard={dashboard} runtime={runtime} refresh={loadDashboard} />}
         {view === "settings" && <SettingsView version={appVersion} />}
         {view === "github" && (
           <GitHubView credentials={credentials.github} onConnect={connectGitHubApp} onRepos={loadRepos} onDelete={(id) => deleteCredential("github", id)} reposByCredential={reposByCredential} repoFilters={repoFilters} setRepoFilters={setRepoFilters} />
@@ -1944,6 +1930,181 @@ function DashboardView({dashboard, refresh}) {
           </div>
         </div>
       </section>
+    </div>
+  );
+}
+
+function AlertsView({dashboard, refresh}) {
+  if (!dashboard) {
+    return <section className="panel"><div className="empty">Loading alerts...</div></section>;
+  }
+  const alerts = dashboard.alerts || [];
+  const critical = alerts.filter((row) => ["critical", "error", "failed"].includes(String(row.severity || "").toLowerCase())).length;
+  const warnings = alerts.length - critical;
+  return (
+    <div className="stack observability-page">
+      <section className="panel action-panel">
+        <div>
+          <h2><AlertTriangle size={18} /> Alerts</h2>
+          <p>Active cluster health signals generated from abnormal pods, warning events, and node readiness.</p>
+        </div>
+        <button onClick={refresh}><RefreshCw size={15} /> Refresh</button>
+      </section>
+      <section className="dashboard-kpis">
+        <MetricCard icon={AlertTriangle} label="Active" value={alerts.length} detail={`${critical} critical · ${warnings} warning`} tone={alerts.length > 0 ? "warning" : "good"} />
+        <MetricCard icon={Server} label="Nodes" value={`${dashboard.nodes?.ready || 0}/${dashboard.nodes?.total || 0}`} detail={`${dashboard.nodes?.not_ready || 0} not ready`} tone={dashboard.nodes?.not_ready ? "warning" : "good"} />
+        <MetricCard icon={Boxes} label="Pods" value={dashboard.pods?.abnormal || 0} detail={`${dashboard.pods?.pending || 0} pending · ${dashboard.pods?.failed || 0} failed`} tone={dashboard.pods?.abnormal ? "warning" : "good"} />
+        <MetricCard icon={Activity} label="Status" value={dashboard.status || "-"} detail={`Last check ${formatTime(dashboard.checked_at)}`} tone={dashboard.healthy ? "good" : "warning"} />
+      </section>
+      <section className="panel">
+        <h2><Shield size={18} /> Alert feed</h2>
+        <AlertList rows={alerts} empty="No active alerts reported." />
+      </section>
+    </div>
+  );
+}
+
+function EventsView({dashboard, refresh}) {
+  if (!dashboard) {
+    return <section className="panel"><div className="empty">Loading events...</div></section>;
+  }
+  const events = dashboard.events || [];
+  const byReason = events.reduce((acc, event) => {
+    const key = event.reason || event.type || "Unknown";
+    acc[key] = (acc[key] || 0) + Number(event.count || 1);
+    return acc;
+  }, {});
+  return (
+    <div className="stack observability-page">
+      <section className="panel action-panel">
+        <div>
+          <h2><ListRestart size={18} /> Events</h2>
+          <p>Recent warning events from the Kubernetes event stream, grouped by object, reason, and last seen time.</p>
+        </div>
+        <button onClick={refresh}><RefreshCw size={15} /> Refresh</button>
+      </section>
+      <section className="dashboard-kpis">
+        <MetricCard icon={ListRestart} label="Warning events" value={events.length} detail={`${Object.keys(byReason).length} reasons`} tone={events.length > 0 ? "warning" : "good"} />
+        <MetricCard icon={AlertTriangle} label="Event count" value={events.reduce((sum, event) => sum + Number(event.count || 1), 0)} detail="Summed Kubernetes count values" />
+        <MetricCard icon={Activity} label="Cluster" value={dashboard.status || "-"} detail={`Checked ${formatTime(dashboard.checked_at)}`} tone={dashboard.healthy ? "good" : "warning"} />
+      </section>
+      <section className="dashboard-grid">
+        <div className="panel">
+          <h2><Database size={18} /> Reasons</h2>
+          <div className="mini-table">
+            {Object.entries(byReason).map(([reason, count]) => (
+              <div key={reason}><span>{reason}</span><b>{count}</b></div>
+            ))}
+            {Object.keys(byReason).length === 0 && <div className="empty">No warning reasons in the latest feed.</div>}
+          </div>
+        </div>
+        <div className="panel">
+          <h2><ScrollText size={18} /> Event stream</h2>
+          <EventTimeline events={events} />
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function MetricsView({dashboard, runtime, refresh}) {
+  if (!dashboard) {
+    return <section className="panel"><div className="empty">Loading metrics...</div></section>;
+  }
+  const resources = dashboard.resources || {};
+  const nodes = runtime.nodes || [];
+  return (
+    <div className="stack observability-page">
+      <section className="panel action-panel">
+        <div>
+          <h2><LineChart size={18} /> Metrics</h2>
+          <p>Cluster capacity, utilization, and node-level resource readings from metrics-server and node stats.</p>
+        </div>
+        <button onClick={refresh}><RefreshCw size={15} /> Refresh</button>
+      </section>
+      <section className="dashboard-kpis">
+        <MetricCard icon={Cpu} label="CPU" value={`${formatPercent(resources.cpu_percent)}%`} detail={`${resources.cpu_used_millis || 0}m / ${resources.cpu_total_millis || 0}m`} />
+        <MetricCard icon={MemoryStick} label="Memory" value={`${formatPercent(resources.memory_percent)}%`} detail={`${formatBytes(resources.memory_used_bytes)} / ${formatBytes(resources.memory_total_bytes)}`} />
+        <MetricCard icon={HardDrive} label="Disk" value={`${formatPercent(resources.disk_percent)}%`} detail={`${formatBytes(resources.disk_used_bytes)} / ${formatBytes(resources.disk_total_bytes)}`} />
+        <MetricCard icon={Activity} label="Metrics source" value={dashboard.metrics_available ? "Live" : "Partial"} detail={dashboard.metrics_error || `Checked ${formatTime(dashboard.checked_at)}`} tone={dashboard.metrics_available ? "good" : "warning"} />
+      </section>
+      <section className="dashboard-grid">
+        <div className="panel dashboard-panel">
+          <h2><Activity size={18} /> Utilization</h2>
+          <div className="industrial-meters">
+            <IndustrialMeter label="CPU" value={resources.cpu_percent} detail={`${resources.cpu_used_millis || 0}m / ${resources.cpu_total_millis || 0}m`} />
+            <IndustrialMeter label="Memory" value={resources.memory_percent} detail={`${formatBytes(resources.memory_used_bytes)} / ${formatBytes(resources.memory_total_bytes)}`} />
+            <IndustrialMeter label="Disk" value={resources.disk_percent} detail={`${formatBytes(resources.disk_used_bytes)} / ${formatBytes(resources.disk_total_bytes)}`} />
+          </div>
+        </div>
+        <div className="panel">
+          <h2><Server size={18} /> Node readings</h2>
+          <div className="mini-table">
+            {nodes.map((node) => (
+              <div key={node.name}>
+                <span>{node.name}<small>{node.status || "-"} · {node.version || "-"}</small></span>
+                <b>{node.cpu || node.cpu_percent || "-"} / {node.memory || node.memory_percent || "-"}</b>
+              </div>
+            ))}
+            {nodes.length === 0 && <div className="empty">Node runtime data is not loaded yet.</div>}
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function LogsView({projects, activeProjectID, setActiveProjectID, progress, refresh, logFollow, liveLogs, logStatus, onStartLogFollow, onStopLogFollow, onOpenPods}) {
+  const logs = logFollow ? liveLogs : progress?.logs;
+  return (
+    <div className="stack observability-page">
+      <section className="panel action-panel">
+        <div>
+          <h2><ScrollText size={18} /> Logs</h2>
+          <p>Project container log snapshots and live follow without leaving the observability section.</p>
+        </div>
+        <div className="progress-controls">
+          <select value={activeProjectID} onChange={(event) => setActiveProjectID(event.target.value)}>
+            <option value="">Choose project</option>
+            {projects.map((project) => <option key={project.id} value={project.id}>{project.display_name || project.name}</option>)}
+          </select>
+          <button onClick={() => refresh()} disabled={logFollow}><RefreshCw size={15} /> Snapshot</button>
+          {logFollow ? <button onClick={onStopLogFollow}>Stop follow</button> : <button className="primary" onClick={() => onStartLogFollow(activeProjectID)} disabled={!activeProjectID}>Follow live</button>}
+        </div>
+      </section>
+      <section className="dashboard-kpis">
+        <MetricCard icon={Boxes} label="Project" value={progress?.project?.display_name || progress?.project?.name || "-"} detail={progress?.project?.namespace || "No project selected"} />
+        <MetricCard icon={Layers3} label="Pods" value={(progress?.pods || []).length} detail={`${(progress?.pods || []).filter((pod) => pod.status === "Running").length} running`} />
+        <MetricCard icon={GitBranch} label="Deployments" value={(progress?.deployments || []).length} detail={(progress?.deployments || [])[0]?.status || "No deployment events"} />
+      </section>
+      <section className="panel log-panel observability-log-panel">
+        <div className="log-header">
+          <h2><Code2 size={18} /> Container logs</h2>
+          <div className="row-actions">
+            <button type="button" onClick={onOpenPods}><Layers3 size={15} /> Pod detail</button>
+          </div>
+        </div>
+        {logStatus && <p className="log-status">{logStatus}</p>}
+        <pre>{logs || "Choose a project to load recent logs."}</pre>
+      </section>
+    </div>
+  );
+}
+
+function EventTimeline({events}) {
+  return (
+    <div className="timeline">
+      {events.map((event, index) => (
+        <div className="timeline-item" key={`${event.object}-${event.reason}-${index}`}>
+          <span className={event.type === "Warning" ? "dot failed" : "dot done"} />
+          <div>
+            <b>{event.reason || event.type}</b>
+            <small>{event.object} · {event.count || 1}x · {formatTime(event.last_seen)}</small>
+            <p>{event.message}</p>
+          </div>
+        </div>
+      ))}
+      {events.length === 0 && <div className="empty">No warning events in the latest cluster feed.</div>}
     </div>
   );
 }
@@ -3287,8 +3448,10 @@ function subtitleFor(view, runtime, projects) {
   if (view === "accessControl") return "BasaltPass and access integrations";
   if (view === "settings") return "Workspace and version information";
   if (view === "storage" || view === "secrets") return "Planned console capabilities";
-  if (view === "alerts" || view === "events" || view === "metrics") return "See Overview for a live summary; dedicated views are planned";
-  if (view === "logs") return "Use Pod detail for container logs with lazy loading";
+  if (view === "alerts") return "Active warning signals and degraded runtime objects";
+  if (view === "events") return "Recent Kubernetes warning events and reason groups";
+  if (view === "metrics") return "Cluster resource utilization and node readings";
+  if (view === "logs") return "Project log snapshots and live streaming";
   if (runtime[view]) return `${(runtime[view] || []).length} cluster resources`;
   return "Operate k3s, GitHub, DNS, and traffic from one console.";
 }
