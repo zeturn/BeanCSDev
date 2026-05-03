@@ -6,7 +6,9 @@ import {
   Bell,
   Boxes,
   Box,
+  CalendarDays,
   CheckCircle2,
+  ChevronDown,
   Cloud,
   Code2,
   Container,
@@ -26,6 +28,7 @@ import {
   LoaderCircle,
   Lock,
   MemoryStick,
+  MoreHorizontal,
   Network,
   Package,
   Play,
@@ -116,6 +119,40 @@ const navSections = [
     label: "Settings",
     items: [{id: "settings", label: "Settings", icon: Settings}],
   },
+];
+
+const sidebarPrimaryItems = [
+  {id: "projects", label: "Projects", icon: Boxes},
+  {id: "deploy", label: "Deploy", icon: Rocket},
+  {id: "progress", label: "Progress", icon: LoaderCircle},
+  {id: "deployments", label: "Deployments", icon: Box},
+  {id: "logs", label: "Logs", icon: FileText},
+  {id: "metrics", label: "Analytics", icon: LineChart},
+  {id: "dashboard", label: "Speed Insights", icon: Activity},
+  {id: "alerts", label: "Observability", icon: Bell},
+  {id: "networking", label: "Firewall", icon: Shield},
+  {id: "cloudflare", label: "CDN", icon: Globe2},
+];
+
+const sidebarSecondaryItems = [
+  {id: "secrets", label: "Environment Variables", icon: Code2, badge: "1"},
+  {id: "domains", label: "Domains", icon: Globe2},
+  {id: "github", label: "Integrations", icon: Package},
+  {id: "storage", label: "Storage", icon: Database},
+  {id: "settings", label: "Flags", icon: Settings},
+];
+
+const sidebarResourceItems = [
+  {id: "pods", label: "Pods", icon: Layers3},
+  {id: "services", label: "Services", icon: Database},
+  {id: "ingresses", label: "Ingresses", icon: Network},
+  {id: "nodes", label: "Nodes", icon: Server},
+  {id: "namespaces", label: "Namespaces", icon: Layers3},
+  {id: "workloadImage", label: "Image Registry", icon: ImageIcon},
+  {id: "apiKeys", label: "API Keys", icon: KeyRound},
+  {id: "accessControl", label: "Access Control", icon: ShieldCheck},
+  {id: "registries", label: "Registries", icon: Package},
+  {id: "events", label: "Events", icon: ScrollText},
 ];
 
 function App() {
@@ -1271,6 +1308,15 @@ function App() {
     }
   }
 
+  function selectNav(item) {
+    if (item.id === "progress") {
+      setActiveProgressProjectID("");
+      setProjectProgress(null);
+      stopProjectLogFollow();
+    }
+    setView(item.id);
+  }
+
   if (!token) {
     return (
       <main className="login-screen">
@@ -1289,36 +1335,25 @@ function App() {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div className="brand">BeanCS</div>
+        <div className="sidebar-product">
+          <span className="brand-orb" />
+          <b>{userProfile.name || "zeturn"}'s projects</b>
+          <em>Hobby</em>
+          <ChevronDown size={16} />
+        </div>
+        <button type="button" className="sidebar-search">
+          <Search size={19} />
+          <span>Find...</span>
+          <kbd>F</kbd>
+        </button>
         <div className="sidebar-nav">
-          {(() => {
-            const OverviewIcon = navOverview.icon;
-            return (
-              <button type="button" className={view === navOverview.id ? "nav nav-featured active" : "nav nav-featured"} onClick={() => setView(navOverview.id)}>
-                <OverviewIcon size={18} /> {navOverview.label}
-              </button>
-            );
-          })()}
-          {navSections.map((section) => (
-            <div className="nav-section" key={section.id}>
-              <div className="nav-section-label">{section.label}</div>
-              {section.items.map((item) => {
-                const Icon = item.icon;
-                return (
-                  <button key={item.id} type="button" className={view === item.id ? "nav active" : "nav"} onClick={() => {
-                    if (item.id === "progress") {
-                      setActiveProgressProjectID("");
-                      setProjectProgress(null);
-                      stopProjectLogFollow();
-                    }
-                    setView(item.id);
-                  }}>
-                    <Icon size={16} /> {item.label}
-                  </button>
-                );
-              })}
-            </div>
-          ))}
+          <SidebarNavGroup items={sidebarPrimaryItems} view={view} onSelect={selectNav} />
+          <div className="nav-divider" />
+          <SidebarNavGroup items={sidebarSecondaryItems} view={view} onSelect={selectNav} />
+          <details className="nav-more">
+            <summary>Infrastructure</summary>
+            <SidebarNavGroup items={sidebarResourceItems} view={view} onSelect={selectNav} />
+          </details>
         </div>
         <div className="sidebar-user">
           <div className="user-avatar">{userProfile.initial}</div>
@@ -1326,16 +1361,22 @@ function App() {
             <b>{userProfile.name}</b>
             <span>{userProfile.detail}</span>
           </div>
+          <button className="icon-button" type="button" aria-label="More account actions"><MoreHorizontal size={16} /></button>
+          <button className="icon-button" type="button" aria-label="Notifications"><Bell size={16} /></button>
           <button className="signout-button" onClick={logout}>Sign out</button>
         </div>
       </aside>
       <main className="workspace">
         <header className="topbar">
-          <div>
+          <button type="button" className="workspace-picker">
+            All Projects <ChevronDown size={15} />
+          </button>
+          <div className="topbar-title">
             <h1>{titleFor(view)}</h1>
             <p>{subtitleFor(view, runtime, projects)}</p>
           </div>
           <div className="top-actions">
+            <button className="icon-button" type="button" aria-label="Page actions"><MoreHorizontal size={18} /></button>
             <button onClick={loadWorkspace} disabled={loading}><RefreshCw size={16} /> Refresh</button>
           </div>
         </header>
@@ -1383,6 +1424,7 @@ function App() {
         {view === "projects" && (
           <ProjectsView projects={projects} onEdit={setEditingProject} onDelete={deleteProject} onScale={scaleProject} onRestart={restartProject} onBuild={buildProject} onProgress={(project) => { setActiveProgressProjectID(String(project.id)); setView("progress"); }} />
         )}
+        {view === "deployments" && <DeploymentsView projects={projects} runtimeDeployments={runtime.deployments || []} refresh={loadWorkspace} />}
         {view === "apiKeys" && <APIKeysView keys={apiKeys} createdKey={createdAPIKey} onDismissCreated={() => setCreatedAPIKey(null)} onCreate={createAPIKey} onRevoke={revokeAPIKey} onRefresh={loadAPIKeys} isAdmin={userProfile.scopes.includes("beancs.admin")} />}
         {view === "registries" && (
           <ContainerRegistriesView
@@ -1445,11 +1487,28 @@ function App() {
         {view === "networking" && <NetworkingView network={network} refresh={loadNetwork} onSaveService={saveService} onDeleteService={deleteService} onSaveIngress={saveIngress} onDeleteIngress={deleteIngress} onSaveNetworkPolicy={saveNetworkPolicy} onDeleteNetworkPolicy={deleteNetworkPolicy} />}
         {view === "cloudflare" && <CloudflareView credentials={credentials.cloudflare} domains={domains} selectedID={selectedCloudflareID} setSelectedID={setSelectedCloudflareID} dnsRecords={dnsRecords} editingRecord={editingDNSRecord} setEditingRecord={setEditingDNSRecord} onCreate={createCredential} onDelete={(id) => deleteCredential("cloudflare", id)} onLoadDNS={loadDNSRecords} onSaveDNS={saveDNSRecord} onDeleteDNS={deleteDNSRecord} />}
         {view === "accessControl" && <CredentialManager kind="basaltpass" rows={credentials.basaltpass} onCreate={createCredential} onDelete={deleteCredential} />}
-        {["namespaces", "pods", "nodes", "ingresses", "services", "deployments"].includes(view) && <RuntimeTable kind={view} rows={runtime[view] || []} nodeJoinCommand={nodeJoinCommand} onLoadNodeJoinCommand={loadNodeJoinCommand} onCreateNamespace={createNamespace} onPatchNamespace={patchNamespaceLabels} onNamespaceDetail={loadNamespaceDetail} onDeleteNamespace={deleteNamespace} onDeletePod={deletePod} onNodeDetail={loadNodeDetail} onPodLogs={loadPodLogs} onSaveService={saveService} onDeleteService={deleteService} onDetail={setRuntimeDetail} />}
+        {["namespaces", "pods", "nodes", "ingresses", "services"].includes(view) && <RuntimeTable kind={view} rows={runtime[view] || []} nodeJoinCommand={nodeJoinCommand} onLoadNodeJoinCommand={loadNodeJoinCommand} onCreateNamespace={createNamespace} onPatchNamespace={patchNamespaceLabels} onNamespaceDetail={loadNamespaceDetail} onDeleteNamespace={deleteNamespace} onDeletePod={deletePod} onNodeDetail={loadNodeDetail} onPodLogs={loadPodLogs} onSaveService={saveService} onDeleteService={deleteService} onDetail={setRuntimeDetail} />}
       </main>
       {editingProject && <ProjectModal project={editingProject} onClose={() => setEditingProject(null)} onSubmit={updateProject} />}
       {deletingProject && <DeleteProjectModal project={deletingProject} busy={loading} onClose={() => setDeletingProject(null)} onDelete={confirmDeleteProject} />}
       {runtimeDetail && <RuntimeDetailModal detail={runtimeDetail} logs={runtimeLogs} logFollow={runtimeLogFollow} logStatus={runtimeLogStatus} selectedLogContainer={runtimeLogContainer} logTail={runtimeLogTail} logLoaded={runtimeLogLoaded} nodeHealth={nodeHealth} onLoadNodeHealth={loadNodeHealth} onSaveNodeLabels={saveNodeLabels} onSaveNodeTaints={saveNodeTaints} onCordonNode={cordonNode} onDrainNode={drainNode} onDeleteNode={deleteNode} onSaveResourceQuota={saveResourceQuota} onDeleteResourceQuota={deleteResourceQuota} onSaveLimitRange={saveLimitRange} onDeleteLimitRange={deleteLimitRange} onSaveNamespacePermission={saveNamespacePermission} onDeleteNamespacePermission={deleteNamespacePermission} onSaveNamespaceIsolation={saveNamespaceIsolation} onSelectLogContainer={setRuntimeLogContainer} onSetLogTail={setRuntimeLogTail} onLoadContainerLogs={loadRuntimeContainerLogs} onFollowPodLogs={startRuntimeLogFollow} onStopPodLogs={stopRuntimeLogFollow} onClose={() => { stopRuntimeLogFollow(); setRuntimeDetail(null); setRuntimeLogs(""); setRuntimeLogContainer(""); setRuntimeLogLoaded(false); setRuntimeLogStatus(""); setNodeHealth(null); }} onSaveService={saveService} onPatchNamespace={patchNamespaceLabels} />}
+    </div>
+  );
+}
+
+function SidebarNavGroup({items, view, onSelect}) {
+  return (
+    <div className="nav-group">
+      {items.map((item) => {
+        const Icon = item.icon;
+        return (
+          <button key={item.id} type="button" className={view === item.id ? "nav active" : "nav"} onClick={() => onSelect(item)}>
+            <Icon size={18} />
+            <span>{item.label}</span>
+            {item.badge && <em>{item.badge}</em>}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -2446,6 +2505,77 @@ function sourceLabel(source) {
 function sourceSummary(form) {
   if (form.deploy_source === "gitops") return form.repo_type === "git-url" ? form.git_url || "-" : `${form.github_repo || "-"} @ ${form.github_branch || "main"}`;
   return form.image_reference || "-";
+}
+
+function DeploymentsView({projects, runtimeDeployments, refresh}) {
+  const projectRows = (projects || []).map((project) => {
+    const status = normalizeDeploymentStatus(project.status);
+    return {
+      id: project.id,
+      name: project.display_name || project.name,
+      environment: project.namespace || "default",
+      current: project.auto_deploy !== false,
+      status,
+      duration: project.updated_at ? shortRelativeDuration(project.updated_at) : "20s",
+      repo: project.github_repo || imageRepoName(project.image_reference) || project.build_source || "registry",
+      branch: project.github_branch || "main",
+      commit: project.image_reference || project.source_archive_name || project.domain || project.exposure_mode || "-",
+      created: project.updated_at || project.created_at,
+      author: "zeturn",
+    };
+  });
+  const fallbackRows = projectRows.length ? [] : (runtimeDeployments || []).map((deployment, index) => ({
+    id: deployment.uid || deployment.name || index,
+    name: deployment.name || `deployment-${index + 1}`,
+    environment: deployment.namespace || "default",
+    current: false,
+    status: normalizeDeploymentStatus(deployment.ready_replicas === deployment.replicas ? "ready" : deployment.status),
+    duration: deployment.age || "-",
+    repo: deployment.image || deployment.name || "-",
+    branch: deployment.namespace || "default",
+    commit: deployment.strategy || deployment.status || "-",
+    created: deployment.created_at || deployment.updated_at,
+    author: "cluster",
+  }));
+  const rows = projectRows.length ? projectRows : fallbackRows;
+  return (
+    <section className="deployments-page">
+      <div className="deployment-filters">
+        <button type="button" className="filter-control wide"><CalendarDays size={18} /> Select Date Range</button>
+        <button type="button" className="filter-control"><Search size={18} /> All Autho... <ChevronDown size={17} /></button>
+        <button type="button" className="filter-control">All Environments <ChevronDown size={17} /></button>
+        <button type="button" className="filter-control"><Search size={18} /> All Repo... <ChevronDown size={17} /></button>
+        <button type="button" className="filter-control"><Search size={18} /> All Branc... <ChevronDown size={17} /></button>
+        <button type="button" className="filter-control status-filter"><span className="status-dots"><i /><i /><i /><i /><i /></span> Status <b>5/6</b> <ChevronDown size={17} /></button>
+        <button type="button" className="filter-control compact-refresh" onClick={refresh}><RefreshCw size={17} /></button>
+      </div>
+      <div className="deployment-list">
+        {rows.map((row) => (
+          <button type="button" className="deployment-row" key={row.id}>
+            <span className="deploy-id">
+              <b>{deploymentShortID(row.name, row.id)}</b>
+              <small>{row.environment}{row.current && <em>Current</em>}</small>
+            </span>
+            <span className={`deploy-state ${row.status}`}>
+              <i />
+              <b>{row.status === "error" ? "Error" : row.status === "building" ? "Building" : "Ready"}</b>
+              <small>{row.duration}</small>
+            </span>
+            <span className="deploy-repo">
+              <span className="repo-mark">B</span>
+              <b>{row.repo}</b>
+            </span>
+            <span className="deploy-branch">
+              <span><GitBranch size={18} /> <b>{row.branch}</b></span>
+              <small>{truncateMiddle(row.commit, 34)}</small>
+            </span>
+            <span className="deploy-meta">{formatDeploymentDate(row.created)} by {row.author}<span className="mini-avatar" /></span>
+          </button>
+        ))}
+        {rows.length === 0 && <div className="empty">No deployments found.</div>}
+      </div>
+    </section>
+  );
 }
 
 function ProjectsView({projects, onEdit, onDelete, onScale, onRestart, onBuild, onProgress}) {
@@ -3715,6 +3845,47 @@ function subtitleFor(view, runtime, projects) {
 function formatTime(value) {
   if (!value) return "-";
   return new Date(value).toLocaleString();
+}
+
+function formatDeploymentDate(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleDateString(undefined, {month: "short", day: "numeric"});
+}
+
+function shortRelativeDuration(value) {
+  if (!value) return "-";
+  const elapsed = Math.max(1, Math.floor((Date.now() - new Date(value).getTime()) / 1000));
+  if (elapsed < 60) return `${elapsed}s`;
+  if (elapsed < 3600) return `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`;
+  if (elapsed < 86400) return `${Math.floor(elapsed / 3600)}h ${Math.floor((elapsed % 3600) / 60)}m`;
+  return `${Math.floor(elapsed / 86400)}d`;
+}
+
+function normalizeDeploymentStatus(status) {
+  const value = String(status || "").toLowerCase();
+  if (["failed", "error", "degraded"].some((item) => value.includes(item))) return "error";
+  if (["building", "deploying", "pending", "progress"].some((item) => value.includes(item))) return "building";
+  return "ready";
+}
+
+function imageRepoName(value) {
+  if (!value) return "";
+  const withoutTag = String(value).split("@")[0].split(":")[0];
+  const parts = withoutTag.split("/").filter(Boolean);
+  return parts.slice(-2).join("/") || withoutTag;
+}
+
+function deploymentShortID(name, fallback) {
+  const base = String(name || fallback || "deployment").replace(/[^a-zA-Z0-9]/g, "");
+  return (base.slice(0, 9) || String(fallback || "deploy")).padEnd(7, "x");
+}
+
+function truncateMiddle(value, max = 28) {
+  const text = String(value || "-");
+  if (text.length <= max) return text;
+  return `${text.slice(0, Math.max(8, max - 12))}...`;
 }
 
 function formatBytes(value) {
