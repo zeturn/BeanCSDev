@@ -476,6 +476,179 @@ button.ghost:hover,
   width: max-content;
 }
 
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.import-repo-panel {
+  display: grid;
+  gap: 18px;
+  max-width: 760px;
+}
+
+.import-repo-panel h3 {
+  margin: 0;
+  font-size: 30px;
+  color: #020617;
+}
+
+.import-repo-toolbar {
+  display: grid;
+  grid-template-columns: minmax(260px, 380px) minmax(260px, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.account-picker {
+  position: relative;
+}
+
+.account-picker-button,
+.repo-search-box {
+  width: 100%;
+  min-height: 58px;
+  border-radius: 10px;
+  border-color: #d1d5db;
+  background: #ffffff;
+}
+
+.account-picker-button {
+  justify-content: flex-start;
+  padding: 0 16px;
+  font-size: 20px;
+}
+
+.account-picker-button span:not(.chevron) {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 700;
+  text-overflow: ellipsis;
+}
+
+.chevron {
+  margin-left: auto;
+  color: #64748b;
+  transition: transform 120ms ease;
+}
+
+.chevron.open {
+  transform: rotate(180deg);
+}
+
+.account-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 8px);
+  left: 0;
+  width: 100%;
+  border: 1px solid #dbe4ed;
+  border-radius: 14px;
+  padding: 10px;
+  background: #ffffff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
+}
+
+.account-menu button {
+  width: 100%;
+  min-height: 50px;
+  justify-content: flex-start;
+  border-color: transparent;
+  background: transparent;
+  font-size: 18px;
+}
+
+.account-menu button.active {
+  background: #e5e7eb;
+}
+
+.account-menu button svg:last-child {
+  margin-left: auto;
+}
+
+.repo-search-box {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  color: #64748b;
+}
+
+.repo-search-box input {
+  min-height: 54px;
+  border: 0;
+  padding: 0;
+  font-size: 18px;
+}
+
+.import-repo-list {
+  overflow: hidden;
+  border: 1px solid #e5e7eb;
+  border-radius: 9px;
+  background: #ffffff;
+}
+
+.import-repo-row {
+  width: 100%;
+  min-height: 88px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  border: 0;
+  border-bottom: 1px solid #e5e7eb;
+  border-radius: 0;
+  padding: 16px 22px;
+  text-align: left;
+}
+
+.import-repo-row:last-child {
+  border-bottom: 0;
+}
+
+.import-repo-row > div {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.import-repo-row span {
+  overflow: hidden;
+  font-size: 18px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+}
+
+.import-repo-row small {
+  color: #64748b;
+  font-size: 18px;
+  font-weight: 400;
+}
+
+.import-repo-row > button {
+  min-height: 44px;
+  border-color: #0f172a;
+  background: #0f172a;
+  color: #ffffff;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.import-repo-row.active {
+  background: #f1f5f9;
+}
+
+.import-repo-row.active > button {
+  border-color: #155e75;
+  background: #155e75;
+}
+
 .wizard-actions {
   display: flex;
   justify-content: space-between;
@@ -1149,6 +1322,59 @@ button.domain-tile {
   padding: 24px;
 }
 
+.progress-list-panel {
+  overflow: hidden;
+  padding: 0;
+}
+
+.progress-list-head,
+.progress-list-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.2fr) minmax(180px, 1.2fr) minmax(140px, 1fr) minmax(100px, 0.6fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 18px;
+}
+
+.progress-list-head {
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.progress-list-row {
+  width: 100%;
+  min-height: 62px;
+  justify-content: stretch;
+  border: 0;
+  border-top: 1px solid #e2e8f0;
+  border-radius: 0;
+  background: #ffffff;
+  text-align: left;
+}
+
+.progress-list-row:hover {
+  background: #f8fafc;
+}
+
+.progress-list-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.progress-list-row small {
+  display: block;
+  color: #64748b;
+}
+
+.progress-list-row > span:last-child {
+  color: #155e75;
+  font-weight: 800;
+}
+
 .process-status.done {
   color: #1a7f37;
 }
@@ -1777,6 +2003,20 @@ button.domain-tile {
   .process-shell,
   .process-job-header {
     grid-template-columns: 1fr;
+  }
+
+  .import-repo-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .progress-list-head {
+    display: none;
+  }
+
+  .progress-list-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    align-items: flex-start;
   }
 
   .process-sidebar {

@@ -209,6 +209,10 @@ function App() {
 
   useEffect(() => {
     if (!token || !["progress", "logs"].includes(view)) return;
+    if (view === "progress" && !activeProgressProjectID) {
+      setProjectProgress(null);
+      return;
+    }
     loadProjectProgress();
     const timer = setInterval(() => {
       if (!document.hidden) loadProjectProgress();
@@ -353,7 +357,7 @@ function App() {
   }
 
   async function connectGitHubApp(event) {
-    event.preventDefault();
+    event?.preventDefault();
     setError("");
     const data = await api.post("/credentials/github/app/start", {});
     location.href = data.install_url;
@@ -1037,9 +1041,11 @@ function App() {
 	    dockerfile_path: data.dockerfile_path || "",
 	    port: data.default_port || 8080,
 	  }));
+      return data;
 	} catch (err) {
 	  setAnalysis(null);
 	  setError(`Repository analysis failed: ${err.message}`);
+	  return null;
 	}
   }
 
@@ -1053,7 +1059,7 @@ function App() {
     const image = (nextForm.image_reference || "").trim();
     if (!image) {
       setError("Image reference is required for registry deployments.");
-      return;
+      return false;
     }
     setAnalysis({
       deployable: true,
@@ -1067,6 +1073,7 @@ function App() {
     if (!nextForm.name) {
       setDeployForm((current) => ({...current, name: slugify(imageName(image))}));
     }
+    return true;
   }
 
   async function deployProject(event) {
@@ -1291,7 +1298,14 @@ function App() {
               {section.items.map((item) => {
                 const Icon = item.icon;
                 return (
-                  <button key={item.id} type="button" className={view === item.id ? "nav active" : "nav"} onClick={() => setView(item.id)}>
+                  <button key={item.id} type="button" className={view === item.id ? "nav active" : "nav"} onClick={() => {
+                    if (item.id === "progress") {
+                      setActiveProgressProjectID("");
+                      setProjectProgress(null);
+                      stopProjectLogFollow();
+                    }
+                    setView(item.id);
+                  }}>
                     <Icon size={16} /> {item.label}
                   </button>
                 );
@@ -1340,6 +1354,7 @@ function App() {
             containerRegistries={containerRegistries}
             containerImages={containerImages}
             createTrackedImageFromDeploy={createTrackedImageFromDeploy}
+            onConnectGitHub={connectGitHubApp}
           />
         )}
         {view === "progress" && (
@@ -1350,6 +1365,7 @@ function App() {
             progress={projectProgress}
             installProgress={installProgress}
             refresh={loadProjectProgress}
+            refreshList={loadWorkspace}
             logFollow={projectLogFollow}
             liveLogs={projectLiveLogs}
             logStatus={projectLogStatus}
@@ -1431,10 +1447,15 @@ function App() {
   );
 }
 
-function DeployView({credentials, namespaces, selectedCredential, setSelectedCredential, repos, selectedRepo, analysis, setAnalysis, form, setForm, loadRepos, analyzeRepo, checkInstallSource, deployProject, containerRegistries, containerImages, createTrackedImageFromDeploy}) {
+function DeployView({credentials, namespaces, selectedCredential, setSelectedCredential, repos, selectedRepo, analysis, setAnalysis, form, setForm, loadRepos, analyzeRepo, checkInstallSource, deployProject, containerRegistries, containerImages, createTrackedImageFromDeploy, onConnectGitHub}) {
   const [stepIndex, setStepIndex] = useState(0);
   const [creatingImage, setCreatingImage] = useState(false);
+  const [checkingInstall, setCheckingInstall] = useState(false);
+  const [repoSearch, setRepoSearch] = useState("");
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const selectedCloudflare = credentials.cloudflare.find((cred) => String(cred.id) === String(form.cloudflare_credential_id));
+  const selectedGitHubCredential = credentials.github.find((cred) => String(cred.id) === String(selectedCredential));
+  const visibleRepos = repos.filter((repo) => `${repo.full_name || ""} ${repo.name || ""}`.toLowerCase().includes(repoSearch.toLowerCase()));
   const publicHost = form.subdomain && selectedCloudflare ? `${form.subdomain}.${selectedCloudflare.domain}` : "";
   const step = deploySteps[stepIndex];
   const canContinue = canContinueDeployStep(step.id, form, selectedCredential, analysis);
@@ -1487,8 +1508,20 @@ function DeployView({credentials, namespaces, selectedCredential, setSelectedCre
       setCreatingImage(false);
     }
   };
-  const next = () => {
-    if (step.id === "check") checkInstallSource(form);
+  const runInstallCheck = async () => {
+    setCheckingInstall(true);
+    try {
+      return await checkInstallSource(form);
+    } finally {
+      setCheckingInstall(false);
+    }
+  };
+  const next = async () => {
+    if (step.id === "check") {
+      const result = await runInstallCheck();
+      if (result && stepIndex < deploySteps.length - 1) setStepIndex(stepIndex + 1);
+      return;
+    }
     if (stepIndex < deploySteps.length - 1) setStepIndex(stepIndex + 1);
   };
   const back = () => setStepIndex(Math.max(0, stepIndex - 1));
@@ -1535,21 +1568,44 @@ function DeployView({credentials, namespaces, selectedCredential, setSelectedCre
                 </div>
                 {form.repo_type === "github" && (
                   <>
-                    <label>GitHub credential</label>
-                    <select value={selectedCredential} onChange={(event) => { setAnalysis(null); setSelectedCredential(event.target.value); loadRepos(event.target.value); }}>
-                      <option value="">Choose credential</option>
-                      {credentials.github.map((cred) => <option key={cred.id} value={cred.id}>{cred.name} ({cred.account_login || cred.auth_type})</option>)}
-                    </select>
-                    <Field label="Repository" value={form.github_repo} onChange={(v) => updateSourceForm({...form, github_repo: v.trim()})} required />
-                    <Field label="Branch" value={form.github_branch} onChange={(v) => updateSourceForm({...form, github_branch: v})} />
-                    <div className="repo-list compact-repos">
-                      {repos.map((repo) => (
-                        <button key={repo.full_name} type="button" className={selectedRepo === repo.full_name ? "repo active" : "repo"} onClick={() => { setForm({...form, github_repo: repo.full_name, github_branch: repo.default_branch || "main", name: slugify(repo.name || repo.full_name.split("/")[1])}); analyzeRepo(repo.full_name, repo.default_branch); }}>
-                          <Code2 size={15} />
-                          <span>{repo.full_name}</span>
-                          <small>{repo.private ? "Private" : "Public"} · {repo.default_branch}</small>
-                        </button>
-                      ))}
+                    <div className="import-repo-panel">
+                      <h3>Import Git Repository</h3>
+                      <div className="import-repo-toolbar">
+                        <div className="account-picker">
+                          <button type="button" className="account-picker-button" onClick={() => setAccountMenuOpen(!accountMenuOpen)}>
+                            <Github size={18} />
+                            <span>{selectedGitHubCredential?.account_login || selectedGitHubCredential?.name || "Choose account"}</span>
+                            <ChevronIcon open={accountMenuOpen} />
+                          </button>
+                          {accountMenuOpen && (
+                            <div className="account-menu">
+                              {credentials.github.map((cred) => (
+                                <button key={cred.id} type="button" className={String(cred.id) === String(selectedCredential) ? "active" : ""} onClick={() => { updateSourceForm({...form, github_repo: "", github_branch: "main"}); setSelectedCredential(String(cred.id)); setAccountMenuOpen(false); loadRepos(cred.id); }}>
+                                  <Github size={16} />
+                                  <span>{cred.account_login || cred.name}</span>
+                                  {String(cred.id) === String(selectedCredential) && <CheckCircle2 size={16} />}
+                                </button>
+                              ))}
+                              <button type="button" onClick={() => { setAccountMenuOpen(false); onConnectGitHub?.(); }}><Plus size={16} /><span>Add GitHub Account</span></button>
+                              <button type="button" onClick={() => { setAccountMenuOpen(false); setRepoType("git-url"); }}><ListRestart size={16} /><span>Switch Git Provider</span></button>
+                            </div>
+                          )}
+                        </div>
+                        <div className="repo-search-box"><Search size={18} /><input value={repoSearch} onChange={(event) => setRepoSearch(event.target.value)} placeholder="Search..." /></div>
+                      </div>
+                      <div className="import-repo-list">
+                        {visibleRepos.map((repo) => (
+                          <div key={repo.full_name} className={selectedRepo === repo.full_name ? "import-repo-row active" : "import-repo-row"}>
+                            <div>
+                              <Github size={18} />
+                              <span>{repo.name || repo.full_name.split("/")[1]}</span>
+                              <small>· {formatRepoDate(repo)}</small>
+                            </div>
+                            <button type="button" onClick={() => { setForm({...form, github_repo: repo.full_name, github_branch: repo.default_branch || "main", name: slugify(repo.name || repo.full_name.split("/")[1])}); analyzeRepo(repo.full_name, repo.default_branch); }}>Import</button>
+                          </div>
+                        ))}
+                        {visibleRepos.length === 0 && <div className="empty">{selectedCredential ? "No repositories match this search." : "Choose a GitHub account to load repositories."}</div>}
+                      </div>
                     </div>
                   </>
                 )}
@@ -1633,7 +1689,10 @@ function DeployView({credentials, namespaces, selectedCredential, setSelectedCre
         )}
         {step.id === "check" && (
           <div className="readiness-card">
-            <button type="button" className="primary" onClick={() => checkInstallSource(form)}><Shield size={16} /> Check installability</button>
+            <button type="button" className="primary" onClick={runInstallCheck} disabled={checkingInstall}>
+              {checkingInstall ? <LoaderCircle className="spin" size={16} /> : <Shield size={16} />}
+              {checkingInstall ? "Checking..." : "Check installability"}
+            </button>
             {!analysis && <p className="muted">BeanCS will verify repository signals or image/source inputs before continuing.</p>}
             {analysis && (
               <>
@@ -1722,7 +1781,7 @@ function DeployView({credentials, namespaces, selectedCredential, setSelectedCre
           {step.id === "confirm" ? (
             <button className="primary" disabled={!analysis?.deployable} type="submit"><Play size={16} /> Build</button>
           ) : (
-            <button className="primary" type="button" disabled={!canContinue} onClick={next}>Next</button>
+            <button className="primary" type="button" disabled={!canContinue || checkingInstall} onClick={next}>{checkingInstall ? <LoaderCircle className="spin" size={16} /> : null} Next</button>
           )}
         </div>
       </form>
@@ -1730,7 +1789,7 @@ function DeployView({credentials, namespaces, selectedCredential, setSelectedCre
   );
 }
 
-function ProgressView({projects, activeProjectID, setActiveProjectID, progress, installProgress, refresh, logFollow, liveLogs, logStatus, onStartLogFollow, onStopLogFollow}) {
+function ProgressView({projects, activeProjectID, setActiveProjectID, progress, installProgress, refresh, refreshList, logFollow, liveLogs, logStatus, onStartLogFollow, onStopLogFollow}) {
   const [activeJob, setActiveJob] = useState("runtime");
   const [logQuery, setLogQuery] = useState("");
   const pods = progress?.pods || [];
@@ -1743,11 +1802,13 @@ function ProgressView({projects, activeProjectID, setActiveProjectID, progress, 
   const jobs = progressJobs(progress, installProgress, readyPods, pods, deployments, events);
   const selectedJob = jobs.find((job) => job.id === activeJob) || jobs[0];
   const visibleLogs = filterLogLines(logs || "", logQuery);
+  if (!activeProjectID) {
+    return <ProgressListView projects={projects} onSelect={(project) => setActiveProjectID(String(project.id))} refresh={refreshList} />;
+  }
   return (
     <div className="process-page">
       <section className="process-topbar">
         <div>
-          <button type="button" className="ghost process-back"><GitBranch size={15} /> Progress</button>
           <h2><ProgressStatusIcon status={selectedJob?.status || "pending"} /> {progress?.project?.display_name || progress?.project?.name || "Deployment process"}</h2>
           <p>{progress?.project?.namespace || "Choose a project"}{progress?.checked_at ? ` · checked ${formatTime(progress.checked_at)}` : ""}</p>
         </div>
@@ -1831,6 +1892,33 @@ function ProgressView({projects, activeProjectID, setActiveProjectID, progress, 
           )}
         </section>
       </div>
+    </div>
+  );
+}
+
+function ProgressListView({projects, onSelect, refresh}) {
+  return (
+    <div className="stack progress-list-page">
+      <section className="panel action-panel">
+        <div>
+          <h2><LoaderCircle size={18} /> Progress list</h2>
+          <p>Select a project to inspect its install jobs, runtime readiness, deployment records, events, and logs.</p>
+        </div>
+        <button type="button" onClick={() => refresh()}><RefreshCw size={15} /> Refresh</button>
+      </section>
+      <section className="panel progress-list-panel">
+        <div className="progress-list-head"><span>Project</span><span>Source</span><span>Route</span><span>Status</span><span /></div>
+        {projects.map((project) => (
+          <button type="button" className="progress-list-row" key={project.id} onClick={() => onSelect(project)}>
+            <span><b>{project.display_name || project.name}</b><small>{project.namespace}</small></span>
+            <span>{project.github_repo || project.image_reference || project.build_source || "-"}</span>
+            <span>{project.domain || project.exposure_mode || "-"}</span>
+            <span>{project.status || "-"}</span>
+            <span>Open</span>
+          </button>
+        ))}
+        {projects.length === 0 && <div className="empty">No projects yet.</div>}
+      </section>
     </div>
   );
 }
@@ -3386,6 +3474,22 @@ function imageTagFromReference(image) {
   const slash = withoutDigest.lastIndexOf("/");
   const colon = withoutDigest.lastIndexOf(":");
   return colon > slash ? withoutDigest.slice(colon + 1) : "latest";
+}
+
+function formatRepoDate(repo) {
+  const value = repo.pushed_at || repo.updated_at || repo.created_at;
+  if (!value) return repo.default_branch || "main";
+  const diff = Date.now() - new Date(value).getTime();
+  const day = 24 * 60 * 60 * 1000;
+  if (Number.isFinite(diff) && diff >= 0 && diff < 7 * day) {
+    const days = Math.max(1, Math.round(diff / day));
+    return `${days}d ago`;
+  }
+  return new Date(value).toLocaleDateString(undefined, {month: "short", day: "numeric"});
+}
+
+function ChevronIcon({open}) {
+  return <span className={open ? "chevron open" : "chevron"}>⌄</span>;
 }
 
 function profileFromToken(token) {
