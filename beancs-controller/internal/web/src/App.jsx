@@ -6,7 +6,9 @@ import {
   Bell,
   Boxes,
   Box,
+  CalendarDays,
   CheckCircle2,
+  ChevronDown,
   Cloud,
   Code2,
   Container,
@@ -26,6 +28,7 @@ import {
   LoaderCircle,
   Lock,
   MemoryStick,
+  MoreHorizontal,
   Network,
   Package,
   Play,
@@ -33,6 +36,7 @@ import {
   RefreshCw,
   Rocket,
   ScrollText,
+  Search,
   Server,
   Settings,
   Shield,
@@ -184,7 +188,7 @@ function App() {
   }, [token]);
 
   useEffect(() => {
-    if (!token || view !== "dashboard") return;
+    if (!token || !["dashboard", "alerts", "events", "metrics"].includes(view)) return;
     loadDashboard();
     const timer = setInterval(() => {
       if (!document.hidden) loadDashboard();
@@ -207,7 +211,11 @@ function App() {
   }, [token, view]);
 
   useEffect(() => {
-    if (!token || view !== "progress") return;
+    if (!token || !["progress", "logs"].includes(view)) return;
+    if (view === "progress" && !activeProgressProjectID) {
+      setProjectProgress(null);
+      return;
+    }
     loadProjectProgress();
     const timer = setInterval(() => {
       if (!document.hidden) loadProjectProgress();
@@ -352,7 +360,7 @@ function App() {
   }
 
   async function connectGitHubApp(event) {
-    event.preventDefault();
+    event?.preventDefault();
     setError("");
     const data = await api.post("/credentials/github/app/start", {});
     location.href = data.install_url;
@@ -1020,21 +1028,28 @@ function App() {
 	setError("");
 	setNotice("");
 	const branch = branchOverride || deployForm.github_branch || "main";
-	const data = await api.post("/projects/analyze", {
-	  github_credential_id: Number(selectedCredential),
-	  github_repo: repoFullName,
-	  github_branch: branch,
-	});
-    setAnalysis(data);
-    setSelectedRepo(repoFullName);
-    setDeployForm((current) => ({
-	  ...current,
-	  name: slugify(repoFullName.split("/")[1] || repoFullName),
-	  github_repo: repoFullName,
-	  github_branch: branch,
-	  dockerfile_path: data.dockerfile_path || "",
-	  port: data.default_port || 8080,
-	}));
+	try {
+	  const data = await api.post("/projects/analyze", {
+	    github_credential_id: Number(selectedCredential),
+	    github_repo: repoFullName,
+	    github_branch: branch,
+	  });
+      setAnalysis(data);
+      setSelectedRepo(repoFullName);
+      setDeployForm((current) => ({
+	    ...current,
+	    name: current.name || slugify(repoFullName.split("/")[1] || repoFullName),
+	    github_repo: repoFullName,
+	    github_branch: branch,
+	    dockerfile_path: data.dockerfile_path || "",
+	    port: data.default_port || 8080,
+	  }));
+      return data;
+	} catch (err) {
+	  setAnalysis(null);
+	  setError(`Repository analysis failed: ${err.message}`);
+	  return null;
+	}
   }
 
   function checkInstallSource(nextForm = deployForm) {
@@ -1047,7 +1062,7 @@ function App() {
     const image = (nextForm.image_reference || "").trim();
     if (!image) {
       setError("Image reference is required for registry deployments.");
-      return;
+      return false;
     }
     setAnalysis({
       deployable: true,
@@ -1061,6 +1076,7 @@ function App() {
     if (!nextForm.name) {
       setDeployForm((current) => ({...current, name: slugify(imageName(image))}));
     }
+    return true;
   }
 
   async function deployProject(event) {
@@ -1072,9 +1088,14 @@ function App() {
     setInstallProgress({
       project: payload.name,
       started_at: new Date().toISOString(),
+      logs: [
+        `Starting deploy for ${payload.name}`,
+        `Source: ${payload.github_repo || payload.image_reference || payload.build_source}`,
+        `Namespace: ${payload.namespace || `proj-${payload.name}`}`,
+      ],
       steps: [
         {label: "Validate install source", state: "done"},
-        {label: "Create namespace and secrets", state: "running"},
+        {label: "Create project resources", state: "running"},
         {label: "Apply service and ingress", state: "pending"},
         {label: "Apply deployment or GitOps manifests", state: "pending"},
       ],
@@ -1086,6 +1107,7 @@ function App() {
       setActiveProgressProjectID(String(created.id));
       setInstallProgress((current) => current ? {
         ...current,
+        logs: [...(current.logs || []), `Project created with id ${created.id}`, "Initial provisioning completed."],
         steps: current.steps.map((step) => ({...step, state: "done"})),
       } : null);
       setDeployForm(defaultDeployForm());
@@ -1097,7 +1119,8 @@ function App() {
       setError(err.message);
       setInstallProgress((current) => current ? {
         ...current,
-        steps: current.steps.map((step) => step.state === "running" ? {...step, state: "failed"} : step),
+        logs: [...(current.logs || []), `ERROR: ${err.message}`],
+        steps: current.steps.map((step) => step.state === "running" ? {...step, state: "failed", log: err.message} : step),
       } : null);
     } finally {
       setLoading(false);
@@ -1251,6 +1274,15 @@ function App() {
     }
   }
 
+  function selectNav(item) {
+    if (item.id === "progress") {
+      setActiveProgressProjectID("");
+      setProjectProgress(null);
+      stopProjectLogFollow();
+    }
+    setView(item.id);
+  }
+
   if (!token) {
     return (
       <main className="login-screen">
@@ -1269,28 +1301,19 @@ function App() {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div className="brand">BeanCS</div>
+        <div className="sidebar-product">
+          <span className="brand-orb" />
+          <b>BeanCS</b>
+        </div>
+        <button type="button" className="sidebar-search">
+          <Search size={19} />
+          <span>Find...</span>
+          <kbd>F</kbd>
+        </button>
         <div className="sidebar-nav">
-          {(() => {
-            const OverviewIcon = navOverview.icon;
-            return (
-              <button type="button" className={view === navOverview.id ? "nav nav-featured active" : "nav nav-featured"} onClick={() => setView(navOverview.id)}>
-                <OverviewIcon size={18} /> {navOverview.label}
-              </button>
-            );
-          })()}
+          <SidebarNavGroup items={[navOverview]} view={view} onSelect={selectNav} />
           {navSections.map((section) => (
-            <div className="nav-section" key={section.id}>
-              <div className="nav-section-label">{section.label}</div>
-              {section.items.map((item) => {
-                const Icon = item.icon;
-                return (
-                  <button key={item.id} type="button" className={view === item.id ? "nav active" : "nav"} onClick={() => setView(item.id)}>
-                    <Icon size={16} /> {item.label}
-                  </button>
-                );
-              })}
-            </div>
+            <SidebarNavGroup key={section.id} label={section.label} items={section.items} view={view} onSelect={selectNav} />
           ))}
         </div>
         <div className="sidebar-user">
@@ -1299,19 +1322,13 @@ function App() {
             <b>{userProfile.name}</b>
             <span>{userProfile.detail}</span>
           </div>
+          <button className="icon-button" type="button" aria-label="More account actions"><MoreHorizontal size={16} /></button>
+          <button className="icon-button" type="button" aria-label="Notifications"><Bell size={16} /></button>
           <button className="signout-button" onClick={logout}>Sign out</button>
         </div>
       </aside>
       <main className="workspace">
-        <header className="topbar">
-          <div>
-            <h1>{titleFor(view)}</h1>
-            <p>{subtitleFor(view, runtime, projects)}</p>
-          </div>
-          <div className="top-actions">
-            <button onClick={loadWorkspace} disabled={loading}><RefreshCw size={16} /> Refresh</button>
-          </div>
-        </header>
+        <PageHeading title={titleFor(view)} subtitle={subtitleFor(view, runtime, projects)} actions={<button onClick={loadWorkspace} disabled={loading}><RefreshCw size={15} /> Refresh</button>} />
         {notice && <div className="notice">{notice}</div>}
         {error && <div className="alert">{error}</div>}
         {view === "dashboard" && <DashboardView dashboard={dashboard} refresh={loadDashboard} />}
@@ -1334,6 +1351,7 @@ function App() {
             containerRegistries={containerRegistries}
             containerImages={containerImages}
             createTrackedImageFromDeploy={createTrackedImageFromDeploy}
+            onConnectGitHub={connectGitHubApp}
           />
         )}
         {view === "progress" && (
@@ -1344,6 +1362,7 @@ function App() {
             progress={projectProgress}
             installProgress={installProgress}
             refresh={loadProjectProgress}
+            refreshList={loadWorkspace}
             logFollow={projectLogFollow}
             liveLogs={projectLiveLogs}
             logStatus={projectLogStatus}
@@ -1354,6 +1373,7 @@ function App() {
         {view === "projects" && (
           <ProjectsView projects={projects} onEdit={setEditingProject} onDelete={deleteProject} onScale={scaleProject} onRestart={restartProject} onBuild={buildProject} onProgress={(project) => { setActiveProgressProjectID(String(project.id)); setView("progress"); }} />
         )}
+        {view === "deployments" && <DeploymentsView projects={projects} runtimeDeployments={runtime.deployments || []} refresh={loadWorkspace} />}
         {view === "apiKeys" && <APIKeysView keys={apiKeys} createdKey={createdAPIKey} onDismissCreated={() => setCreatedAPIKey(null)} onCreate={createAPIKey} onRevoke={revokeAPIKey} onRefresh={loadAPIKeys} isAdmin={userProfile.scopes.includes("beancs.admin")} />}
         {view === "registries" && (
           <ContainerRegistriesView
@@ -1390,38 +1410,24 @@ function App() {
             description="Kubernetes Secret inspection and rotation workflows are not wired in this console yet. Use kubectl or your GitOps pipeline for now."
           />
         )}
-        {view === "alerts" && (
-          <ComingSoonView
-            title="Alerts"
-            description="Summary alerts appear on the Overview dashboard today. Dedicated alert routing is planned."
-            actionLabel="Open Overview"
-            onAction={() => setView("dashboard")}
-          />
-        )}
-        {view === "events" && (
-          <ComingSoonView
-            title="Events"
-            description="Recent cluster events are included on the Overview dashboard. A dedicated event stream view will follow."
-            actionLabel="Open Overview"
-            onAction={() => setView("dashboard")}
-          />
-        )}
+        {view === "alerts" && <AlertsView dashboard={dashboard} refresh={loadDashboard} />}
+        {view === "events" && <EventsView dashboard={dashboard} refresh={loadDashboard} />}
         {view === "logs" && (
-          <ComingSoonView
-            title="Logs"
-            description="Open Workloads → Pods, pick a pod, then use Logs in the detail drawer. Live streaming uses lazy loading to protect the browser."
-            actionLabel="Go to Pods"
-            onAction={() => setView("pods")}
+          <LogsView
+            projects={projects}
+            activeProjectID={activeProgressProjectID}
+            setActiveProjectID={setActiveProgressProjectID}
+            progress={projectProgress}
+            refresh={loadProjectProgress}
+            logFollow={projectLogFollow}
+            liveLogs={projectLiveLogs}
+            logStatus={projectLogStatus}
+            onStartLogFollow={startProjectLogFollow}
+            onStopLogFollow={stopProjectLogFollow}
+            onOpenPods={() => setView("pods")}
           />
         )}
-        {view === "metrics" && (
-          <ComingSoonView
-            title="Metrics"
-            description="CPU and memory utilization are shown on Overview, node detail, and workload tables when metrics-server is installed."
-            actionLabel="Open Overview"
-            onAction={() => setView("dashboard")}
-          />
-        )}
+        {view === "metrics" && <MetricsView dashboard={dashboard} runtime={runtime} refresh={loadDashboard} />}
         {view === "settings" && <SettingsView version={appVersion} />}
         {view === "github" && (
           <GitHubView credentials={credentials.github} onConnect={connectGitHubApp} onRepos={loadRepos} onDelete={(id) => deleteCredential("github", id)} reposByCredential={reposByCredential} repoFilters={repoFilters} setRepoFilters={setRepoFilters} />
@@ -1430,7 +1436,7 @@ function App() {
         {view === "networking" && <NetworkingView network={network} refresh={loadNetwork} onSaveService={saveService} onDeleteService={deleteService} onSaveIngress={saveIngress} onDeleteIngress={deleteIngress} onSaveNetworkPolicy={saveNetworkPolicy} onDeleteNetworkPolicy={deleteNetworkPolicy} />}
         {view === "cloudflare" && <CloudflareView credentials={credentials.cloudflare} domains={domains} selectedID={selectedCloudflareID} setSelectedID={setSelectedCloudflareID} dnsRecords={dnsRecords} editingRecord={editingDNSRecord} setEditingRecord={setEditingDNSRecord} onCreate={createCredential} onDelete={(id) => deleteCredential("cloudflare", id)} onLoadDNS={loadDNSRecords} onSaveDNS={saveDNSRecord} onDeleteDNS={deleteDNSRecord} />}
         {view === "accessControl" && <CredentialManager kind="basaltpass" rows={credentials.basaltpass} onCreate={createCredential} onDelete={deleteCredential} />}
-        {["namespaces", "pods", "nodes", "ingresses", "services", "deployments"].includes(view) && <RuntimeTable kind={view} rows={runtime[view] || []} nodeJoinCommand={nodeJoinCommand} onLoadNodeJoinCommand={loadNodeJoinCommand} onCreateNamespace={createNamespace} onPatchNamespace={patchNamespaceLabels} onNamespaceDetail={loadNamespaceDetail} onDeleteNamespace={deleteNamespace} onDeletePod={deletePod} onNodeDetail={loadNodeDetail} onPodLogs={loadPodLogs} onSaveService={saveService} onDeleteService={deleteService} onDetail={setRuntimeDetail} />}
+        {["namespaces", "pods", "nodes", "ingresses", "services"].includes(view) && <RuntimeTable kind={view} rows={runtime[view] || []} nodeJoinCommand={nodeJoinCommand} onLoadNodeJoinCommand={loadNodeJoinCommand} onCreateNamespace={createNamespace} onPatchNamespace={patchNamespaceLabels} onNamespaceDetail={loadNamespaceDetail} onDeleteNamespace={deleteNamespace} onDeletePod={deletePod} onNodeDetail={loadNodeDetail} onPodLogs={loadPodLogs} onSaveService={saveService} onDeleteService={deleteService} onDetail={setRuntimeDetail} />}
       </main>
       {editingProject && <ProjectModal project={editingProject} onClose={() => setEditingProject(null)} onSubmit={updateProject} />}
       {deletingProject && <DeleteProjectModal project={deletingProject} busy={loading} onClose={() => setDeletingProject(null)} onDelete={confirmDeleteProject} />}
@@ -1439,10 +1445,45 @@ function App() {
   );
 }
 
-function DeployView({credentials, namespaces, selectedCredential, setSelectedCredential, repos, selectedRepo, analysis, setAnalysis, form, setForm, loadRepos, analyzeRepo, checkInstallSource, deployProject, containerRegistries, containerImages, createTrackedImageFromDeploy}) {
+function SidebarNavGroup({label, items, view, onSelect}) {
+  return (
+    <div className="nav-group">
+      {label && <div className="nav-group-label">{label}</div>}
+      {items.map((item) => {
+        const Icon = item.icon;
+        return (
+          <button key={item.id} type="button" className={view === item.id ? "nav active" : "nav"} onClick={() => onSelect(item)}>
+            <Icon size={18} />
+            <span>{item.label}</span>
+            {item.badge && <em>{item.badge}</em>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function PageHeading({title, subtitle, actions}) {
+  return (
+    <section className="page-heading">
+      <div>
+        <h1>{title}</h1>
+        {subtitle && <p>{subtitle}</p>}
+      </div>
+      {actions && <div className="top-actions">{actions}</div>}
+    </section>
+  );
+}
+
+function DeployView({credentials, namespaces, selectedCredential, setSelectedCredential, repos, selectedRepo, analysis, setAnalysis, form, setForm, loadRepos, analyzeRepo, checkInstallSource, deployProject, containerRegistries, containerImages, createTrackedImageFromDeploy, onConnectGitHub}) {
   const [stepIndex, setStepIndex] = useState(0);
   const [creatingImage, setCreatingImage] = useState(false);
+  const [checkingInstall, setCheckingInstall] = useState(false);
+  const [repoSearch, setRepoSearch] = useState("");
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const selectedCloudflare = credentials.cloudflare.find((cred) => String(cred.id) === String(form.cloudflare_credential_id));
+  const selectedGitHubCredential = credentials.github.find((cred) => String(cred.id) === String(selectedCredential));
+  const visibleRepos = repos.filter((repo) => `${repo.full_name || ""} ${repo.name || ""}`.toLowerCase().includes(repoSearch.toLowerCase()));
   const publicHost = form.subdomain && selectedCloudflare ? `${form.subdomain}.${selectedCloudflare.domain}` : "";
   const step = deploySteps[stepIndex];
   const canContinue = canContinueDeployStep(step.id, form, selectedCredential, analysis);
@@ -1495,8 +1536,20 @@ function DeployView({credentials, namespaces, selectedCredential, setSelectedCre
       setCreatingImage(false);
     }
   };
-  const next = () => {
-    if (step.id === "check") checkInstallSource(form);
+  const runInstallCheck = async () => {
+    setCheckingInstall(true);
+    try {
+      return await checkInstallSource(form);
+    } finally {
+      setCheckingInstall(false);
+    }
+  };
+  const next = async () => {
+    if (step.id === "check") {
+      const result = await runInstallCheck();
+      if (result && stepIndex < deploySteps.length - 1) setStepIndex(stepIndex + 1);
+      return;
+    }
     if (stepIndex < deploySteps.length - 1) setStepIndex(stepIndex + 1);
   };
   const back = () => setStepIndex(Math.max(0, stepIndex - 1));
@@ -1543,21 +1596,59 @@ function DeployView({credentials, namespaces, selectedCredential, setSelectedCre
                 </div>
                 {form.repo_type === "github" && (
                   <>
-                    <label>GitHub credential</label>
-                    <select value={selectedCredential} onChange={(event) => { setAnalysis(null); setSelectedCredential(event.target.value); loadRepos(event.target.value); }}>
-                      <option value="">Choose credential</option>
-                      {credentials.github.map((cred) => <option key={cred.id} value={cred.id}>{cred.name} ({cred.account_login || cred.auth_type})</option>)}
-                    </select>
-                    <Field label="Repository" value={form.github_repo} onChange={(v) => updateSourceForm({...form, github_repo: v.trim()})} required />
-                    <Field label="Branch" value={form.github_branch} onChange={(v) => updateSourceForm({...form, github_branch: v})} />
-                    <div className="repo-list compact-repos">
-                      {repos.map((repo) => (
-                        <button key={repo.full_name} type="button" className={selectedRepo === repo.full_name ? "repo active" : "repo"} onClick={() => { setForm({...form, github_repo: repo.full_name, github_branch: repo.default_branch || "main", name: slugify(repo.name || repo.full_name.split("/")[1])}); analyzeRepo(repo.full_name, repo.default_branch); }}>
-                          <Code2 size={15} />
-                          <span>{repo.full_name}</span>
-                          <small>{repo.private ? "Private" : "Public"} · {repo.default_branch}</small>
-                        </button>
-                      ))}
+                    <div className="import-repo-panel">
+                      <h3>Import Git Repository</h3>
+                      <div className="import-repo-toolbar">
+                        <div className="account-picker">
+                          <button type="button" className="account-picker-button" onClick={() => setAccountMenuOpen(!accountMenuOpen)}>
+                            <Github size={18} />
+                            <span>{selectedGitHubCredential?.account_login || selectedGitHubCredential?.name || "Choose account"}</span>
+                            <ChevronIcon open={accountMenuOpen} />
+                          </button>
+                          {accountMenuOpen && (
+                            <div className="account-menu">
+                              {credentials.github.map((cred) => (
+                                <button key={cred.id} type="button" className={String(cred.id) === String(selectedCredential) ? "active" : ""} onClick={() => { updateSourceForm({...form, github_repo: "", github_branch: "main"}); setSelectedCredential(String(cred.id)); setAccountMenuOpen(false); loadRepos(cred.id); }}>
+                                  <Github size={16} />
+                                  <span>{cred.account_login || cred.name}</span>
+                                  {String(cred.id) === String(selectedCredential) && <CheckCircle2 size={16} />}
+                                </button>
+                              ))}
+                              <button type="button" onClick={() => { setAccountMenuOpen(false); onConnectGitHub?.(); }}><Plus size={16} /><span>Add GitHub Account</span></button>
+                              <button type="button" onClick={() => { setAccountMenuOpen(false); setRepoType("git-url"); }}><ListRestart size={16} /><span>Switch Git Provider</span></button>
+                            </div>
+                          )}
+                        </div>
+                        <div className="repo-search-box"><Search size={18} /><input value={repoSearch} onChange={(event) => setRepoSearch(event.target.value)} placeholder="Search..." /></div>
+                      </div>
+                      <div className="import-repo-list">
+                        {visibleRepos.map((repo) => {
+                          const isSelected = form.github_repo === repo.full_name || selectedRepo === repo.full_name;
+                          const repoName = repo.name || repo.full_name.split("/")[1];
+                          const branch = repo.default_branch || "main";
+                          return (
+                            <div key={repo.full_name} className={isSelected ? "import-repo-row active" : "import-repo-row"}>
+                              <div>
+                                <Github size={17} />
+                                <span>{repoName}</span>
+                                <small>· {branch}</small>
+                                {isSelected && <b className="selected-repo-pill"><CheckCircle2 size={14} /> Selected</b>}
+                              </div>
+                              <button type="button" onClick={() => { setForm({...form, github_repo: repo.full_name, github_branch: branch, name: form.name || slugify(repoName)}); analyzeRepo(repo.full_name, branch); }}>
+                                {isSelected ? "Selected" : "Import"}
+                              </button>
+                            </div>
+                          );
+                        })}
+                        {visibleRepos.length === 0 && <div className="empty">{selectedCredential ? "No repositories match this search." : "Choose a GitHub account to load repositories."}</div>}
+                      </div>
+                      {form.github_repo && (
+                        <div className="selected-repo-summary">
+                          <CheckCircle2 size={16} />
+                          <span>Selected repository</span>
+                          <b>{form.github_repo} @ {form.github_branch || "main"}</b>
+                        </div>
+                      )}
                     </div>
                   </>
                 )}
@@ -1641,7 +1732,10 @@ function DeployView({credentials, namespaces, selectedCredential, setSelectedCre
         )}
         {step.id === "check" && (
           <div className="readiness-card">
-            <button type="button" className="primary" onClick={() => checkInstallSource(form)}><Shield size={16} /> Check installability</button>
+            <button type="button" className="primary" onClick={runInstallCheck} disabled={checkingInstall}>
+              {checkingInstall ? <LoaderCircle className="spin" size={16} /> : <Shield size={16} />}
+              {checkingInstall ? "Checking..." : "Check installability"}
+            </button>
             {!analysis && <p className="muted">BeanCS will verify repository signals or image/source inputs before continuing.</p>}
             {analysis && (
               <>
@@ -1730,7 +1824,7 @@ function DeployView({credentials, namespaces, selectedCredential, setSelectedCre
           {step.id === "confirm" ? (
             <button className="primary" disabled={!analysis?.deployable} type="submit"><Play size={16} /> Build</button>
           ) : (
-            <button className="primary" type="button" disabled={!canContinue} onClick={next}>Next</button>
+            <button className="primary" type="button" disabled={!canContinue || checkingInstall} onClick={next}>{checkingInstall ? <LoaderCircle className="spin" size={16} /> : null} Next</button>
           )}
         </div>
       </form>
@@ -1738,133 +1832,286 @@ function DeployView({credentials, namespaces, selectedCredential, setSelectedCre
   );
 }
 
-function ProgressView({projects, activeProjectID, setActiveProjectID, progress, installProgress, refresh, logFollow, liveLogs, logStatus, onStartLogFollow, onStopLogFollow}) {
+function ProgressView({projects, activeProjectID, setActiveProjectID, progress, installProgress, refresh, refreshList, logFollow, liveLogs, logStatus, onStartLogFollow, onStopLogFollow}) {
+  const [activeJob, setActiveJob] = useState("runtime");
+  const [logQuery, setLogQuery] = useState("");
   const pods = progress?.pods || [];
   const events = progress?.events || [];
   const deployments = progress?.deployments || [];
+  const currentProjectName = progress?.project?.name || installProgress?.project || "";
+  const scopedInstallProgress = installProgress && (!progress?.project?.name || installProgress.project === progress.project.name) ? installProgress : null;
   const readyPods = pods.filter((pod) => Number(pod.ready_containers || 0) > 0 && Number(pod.ready_containers) === Number(pod.total_containers || 0)).length;
   const desiredReplicas = progress?.deployment?.replicas ?? progress?.project?.replicas ?? 0;
   const readyReplicas = progress?.deployment?.ready_replicas ?? 0;
   const logs = logFollow ? liveLogs : progress?.logs;
+  const jobs = progressJobs(progress, scopedInstallProgress, readyPods, pods, deployments, events);
+  const selectedJob = jobs.find((job) => job.id === activeJob) || jobs[0];
+  const visibleLogs = filterLogLines(logs || "", logQuery);
+  if (!activeProjectID && !scopedInstallProgress) {
+    return <ProgressListView projects={projects} onSelect={(project) => setActiveProjectID(String(project.id))} refresh={refreshList} />;
+  }
   return (
-    <div className="stack">
-      <section className="panel action-panel">
+    <div className="process-page">
+      <section className="process-topbar">
         <div>
-          <h2><LoaderCircle size={18} /> Installation progress</h2>
-          <p>Track project creation, GitOps activity, and live pod readiness.</p>
+          <h2><ProgressStatusIcon status={selectedJob?.status || "pending"} /> {progress?.project?.display_name || progress?.project?.name || "Deployment process"}</h2>
+          <p>{progress?.project?.namespace || currentProjectName || "Choose a project"}{progress?.checked_at ? ` · checked ${formatTime(progress.checked_at)}` : ""}</p>
         </div>
         <div className="progress-controls">
           <select value={activeProjectID} onChange={(event) => setActiveProjectID(event.target.value)}>
             <option value="">Choose project</option>
             {projects.map((project) => <option key={project.id} value={project.id}>{project.display_name || project.name}</option>)}
           </select>
-          <button onClick={() => refresh()}><RefreshCw size={15} /> Refresh</button>
+          <button onClick={() => activeProjectID ? refresh() : refreshList()}><RefreshCw size={15} /> Refresh</button>
         </div>
       </section>
-      {installProgress && (
-        <section className="panel">
-          <h2><Rocket size={18} /> Current install</h2>
-          <div className="step-list">
-            {installProgress.steps.map((step) => <ProgressStep key={step.label} step={step} />)}
-          </div>
+
+      <div className="process-shell">
+        <aside className="process-sidebar">
+          <button type="button" className={activeJob === "summary" ? "process-nav active" : "process-nav"} onClick={() => setActiveJob("summary")}>
+            <LayoutDashboard size={15} /> Summary
+          </button>
+          <div className="process-nav-heading">All jobs</div>
+          {jobs.map((job) => (
+            <button key={job.id} type="button" className={selectedJob?.id === job.id ? "process-job active" : "process-job"} onClick={() => setActiveJob(job.id)}>
+              <ProgressStatusIcon status={job.status} />
+              <span>{job.label}</span>
+              <small>{job.detail}</small>
+            </button>
+          ))}
+          <div className="process-nav-heading">Run details</div>
+          <div className="process-run-detail"><span>Replicas</span><b>{readyReplicas}/{desiredReplicas}</b></div>
+          <div className="process-run-detail"><span>Pods</span><b>{readyPods}/{pods.length}</b></div>
+          <div className="process-run-detail"><span>Events</span><b>{events.length}</b></div>
+        </aside>
+
+        <section className="process-main">
+          {activeJob === "summary" ? (
+            <div className="process-summary">
+              <div className="dashboard-kpis">
+                <MetricCard icon={Boxes} label="Project" value={progress?.project?.name || "-"} detail={progress?.project?.domain || progress?.project?.exposure_mode || "No route"} />
+                <MetricCard icon={Server} label="Runtime" value={`${readyReplicas}/${desiredReplicas}`} detail={`${readyPods}/${pods.length} pods ready`} />
+                <MetricCard icon={GitBranch} label="Deployments" value={deployments.length} detail={(deployments[0]?.status || "No events")} />
+                <MetricCard icon={AlertTriangle} label="Warnings" value={events.filter((event) => event.type === "Warning").length} detail={`${events.length} Kubernetes events`} tone={events.some((event) => event.type === "Warning") ? "warning" : "good"} />
+              </div>
+              {progress?.error && <p className="error-inline">{progress.error}</p>}
+            </div>
+          ) : (
+            <>
+              <div className="process-job-header">
+                <div>
+                  <h2>{selectedJob?.label || "Job"}</h2>
+                  <p>{selectedJob?.description || "Deployment job details"}</p>
+                </div>
+                <div className="process-log-tools">
+                  <div className="process-search"><Search size={15} /> <input value={logQuery} onChange={(event) => setLogQuery(event.target.value)} placeholder="Search logs" /></div>
+                  <button type="button" title="Settings"><Settings size={15} /></button>
+                </div>
+              </div>
+
+              <div className="process-step-list">
+                {(selectedJob?.steps || []).map((step) => (
+                  <div className={step.expanded ? "process-step expanded" : "process-step"} key={step.label}>
+                    <div className="process-step-row">
+                      <span className="process-chevron">{step.expanded ? "⌄" : "›"}</span>
+                      <ProgressStatusIcon status={step.status} />
+                      <span>{step.label}</span>
+                      <small>{step.duration || ""}</small>
+                    </div>
+                    {step.expanded && (
+                      <div className="process-log-block">
+                        {step.kind === "logs" && (
+                          <div className="row-actions process-log-actions">
+                            <button onClick={() => refresh()} disabled={logFollow}><RefreshCw size={15} /> Snapshot</button>
+                            {logFollow ? <button onClick={onStopLogFollow}>Stop follow</button> : <button className="primary" onClick={() => progress?.project?.id && onStartLogFollow(progress.project.id)} disabled={!progress?.project?.id}>Follow live</button>}
+                          </div>
+                        )}
+                        {logStatus && step.kind === "logs" && <p className="log-status">{logStatus}</p>}
+                        <pre>{step.kind === "logs" ? visibleLogs || "No application logs yet." : step.log || "No log output for this step."}</pre>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <ProgressEvidence
+                progress={progress}
+                installProgress={scopedInstallProgress}
+                deployments={deployments}
+                events={events}
+                logs={visibleLogs}
+                logFollow={logFollow}
+                logStatus={logStatus}
+                onRefresh={() => activeProjectID ? refresh() : refreshList()}
+                onStartLogFollow={() => progress?.project?.id && onStartLogFollow(progress.project.id)}
+                onStopLogFollow={onStopLogFollow}
+              />
+            </>
+          )}
         </section>
-      )}
-      {progress ? (
-        <div className="progress-grid">
-          <section className="panel">
-            <h2><Boxes size={18} /> Project</h2>
-            <div className="detail-list">
-              <span>Name <b>{progress.project.display_name || progress.project.name}</b></span>
-              <span>Namespace <b>{progress.project.namespace}</b></span>
-              <span>Route <b>{progress.project.domain || progress.project.exposure_mode}</b></span>
-              <span>Status <b>{progress.project.status}</b></span>
-            <span>Deploy mode <b>{progress.project.auto_deploy ? "Auto GitOps" : "Manual only"}</b></span>
-            <span>Image <b>{progress.project.image_reference || "-"}</b></span>
-              <span>Last checked <b>{formatTime(progress.checked_at)}</b></span>
-            </div>
-            {progress.error && <p className="error-inline">{progress.error}</p>}
-          </section>
-          <section className="panel">
-            <h2><Server size={18} /> Runtime</h2>
-            <div className="runtime-summary">
-              <strong>{readyReplicas}/{desiredReplicas}</strong>
-              <span>replicas ready · {readyPods}/{pods.length} pods</span>
-            </div>
-            {progress.deployment && (
-              <div className="detail-list compact-details">
-                <span>Updated <b>{progress.deployment.updated_replicas}</b></span>
-                <span>Available <b>{progress.deployment.available_replicas}</b></span>
-              </div>
-            )}
-            <div className="mini-table">
-              {pods.map((pod) => (
-                <div key={pod.name || pod.pod || JSON.stringify(pod)}>
-                  <span>
-                    {pod.name || "pod"}
-                    {pod.reason && <small>{pod.reason}</small>}
-                    {pod.containers?.length > 0 && <small>{pod.containers.join(" · ")}</small>}
-                  </span>
-                  <b>{pod.ready_containers}/{pod.total_containers} · {pod.status || "-"}</b>
-                </div>
-              ))}
-              {pods.length === 0 && <div className="empty">No pods reported yet.</div>}
-            </div>
-          </section>
-          <section className="panel">
-            <h2><GitBranch size={18} /> Deployments</h2>
-            <div className="timeline">
-              {deployments.map((deployment) => (
-                <div className="timeline-item" key={deployment.id}>
-                  <span className={deployment.status === "failed" ? "dot failed" : ["deployed", "provisioned"].includes(deployment.status) ? "dot done" : "dot running"} />
-                  <div>
-                    <b>{deployment.status || "pending"}</b>
-                    <small>{deployment.image_ref || deployment.tag || deployment.commit_sha || "manual"} · {formatTime(deployment.created_at)}</small>
-                    {deployment.workflow_url && <small><a href={deployment.workflow_url} target="_blank" rel="noreferrer">GitHub Actions run</a></small>}
-                    {deployment.commit_sha && <small>Commit: {deployment.commit_sha}</small>}
-                    {deployment.failure_reason && <small className="warning">{deployment.failure_reason}</small>}
-                  </div>
-                </div>
-              ))}
-              {deployments.length === 0 && <div className="empty">No deployment events yet.</div>}
-            </div>
-          </section>
-          <section className="panel">
-            <h2><ListRestart size={18} /> Kubernetes events</h2>
-            <div className="timeline">
-              {events.map((event, index) => (
-                <div className="timeline-item" key={`${event.object}-${event.reason}-${index}`}>
-                  <span className={event.type === "Warning" ? "dot failed" : "dot done"} />
-                  <div>
-                    <b>{event.reason || event.type}</b>
-                    <small>{event.object} · {event.count || 1}x · {formatTime(event.last_seen)}</small>
-                    <p>{event.message}</p>
-                  </div>
-                </div>
-              ))}
-              {events.length === 0 && <div className="empty">No Kubernetes events yet.</div>}
-            </div>
-          </section>
-          <section className="panel log-panel">
-            <div className="log-header">
-              <h2><Code2 size={18} /> Container logs</h2>
-              <div className="row-actions">
-                <button onClick={() => refresh()} disabled={logFollow}><RefreshCw size={15} /> Snapshot</button>
-                {logFollow ? (
-                  <button onClick={onStopLogFollow}>Stop follow</button>
-                ) : (
-                  <button className="primary" onClick={() => onStartLogFollow(progress.project.id)}>Follow live</button>
-                )}
-              </div>
-            </div>
-            {logStatus && <p className="log-status">{logStatus}</p>}
-            <pre>{logs || "No application logs yet."}</pre>
-          </section>
-        </div>
-      ) : (
-        <section className="panel"><div className="empty">Choose a project to view progress.</div></section>
-      )}
+      </div>
     </div>
   );
+}
+
+function ProgressListView({projects, onSelect, refresh}) {
+  return (
+    <div className="stack progress-list-page">
+      <section className="panel action-panel">
+        <div>
+          <h2><LoaderCircle size={18} /> Progress list</h2>
+          <p>Select a project to inspect its install jobs, runtime readiness, deployment records, events, and logs.</p>
+        </div>
+        <button type="button" onClick={() => refresh()}><RefreshCw size={15} /> Refresh</button>
+      </section>
+      <section className="panel progress-list-panel">
+        <div className="progress-list-head"><span>Project</span><span>Source</span><span>Route</span><span>Status</span><span /></div>
+        {projects.map((project) => (
+          <button type="button" className="progress-list-row" key={project.id} onClick={() => onSelect(project)}>
+            <span><b>{project.display_name || project.name}</b><small>{project.namespace}</small></span>
+            <span>{project.github_repo || project.image_reference || project.build_source || "-"}</span>
+            <span>{project.domain || project.exposure_mode || "-"}</span>
+            <span>{project.status || "-"}</span>
+            <span>Open</span>
+          </button>
+        ))}
+        {projects.length === 0 && <div className="empty">No projects yet.</div>}
+      </section>
+    </div>
+  );
+}
+
+function ProgressEvidence({progress, installProgress, deployments, events, logs, logFollow, logStatus, onRefresh, onStartLogFollow, onStopLogFollow}) {
+  const installLogs = (installProgress?.logs || []).join("\n");
+  const deploymentText = deployments.length
+    ? deployments.slice(0, 12).map((deployment) => [
+        `#${deployment.id || "-"} ${deployment.status || "pending"}`,
+        `image=${deployment.image_ref || deployment.tag || "-"}`,
+        `commit=${deployment.commit_sha || "-"}`,
+        deployment.workflow_url ? `workflow=${deployment.workflow_url}` : "",
+        deployment.failure_reason ? `error=${deployment.failure_reason}` : "",
+      ].filter(Boolean).join("\n")).join("\n\n")
+    : "No deployment records yet.";
+  const eventText = events.length
+    ? events.slice(0, 20).map((event) => [
+        `${event.type || "Event"} ${event.reason || ""}`.trim(),
+        `object=${event.object || "-"}`,
+        `count=${event.count || 1}`,
+        `last_seen=${formatTime(event.last_seen)}`,
+        event.message || "",
+      ].filter(Boolean).join("\n")).join("\n\n")
+    : "No Kubernetes events reported for this project.";
+  return (
+    <div className="process-evidence-grid">
+      <section className="process-evidence-card">
+        <h3>Install log</h3>
+        <pre>{installLogs || progress?.error || "No active install log for this project."}</pre>
+      </section>
+      <section className="process-evidence-card">
+        <h3>Deployment records</h3>
+        <pre>{deploymentText}</pre>
+      </section>
+      <section className="process-evidence-card">
+        <h3>Kubernetes events</h3>
+        <pre>{eventText}</pre>
+      </section>
+      <section className="process-evidence-card span-2">
+        <div className="process-evidence-head">
+          <h3>Runtime logs</h3>
+          <div className="row-actions process-log-actions">
+            <button type="button" onClick={onRefresh} disabled={logFollow}><RefreshCw size={15} /> Snapshot</button>
+            {logFollow ? <button type="button" onClick={onStopLogFollow}>Stop follow</button> : <button type="button" className="primary" onClick={onStartLogFollow} disabled={!progress?.project?.id}>Follow live</button>}
+          </div>
+        </div>
+        {logStatus && <p className="log-status">{logStatus}</p>}
+        <pre>{logs || "No container logs yet. If the workload has not created pods, Kubernetes events above are the source of truth."}</pre>
+      </section>
+    </div>
+  );
+}
+
+function progressJobs(progress, installProgress, readyPods, pods, deployments, events) {
+  if (!progress && !installProgress) {
+    return [{
+      id: "waiting",
+      label: "waiting",
+      status: "pending",
+      detail: "no project",
+      description: "Choose a project to inspect its deployment process.",
+      steps: [{label: "Choose project", status: "pending", expanded: true, log: "Select a project from the toolbar to load process details."}],
+    }];
+  }
+  const installSteps = (installProgress?.steps || []).map((step) => ({
+    label: step.label,
+    status: step.state,
+    duration: step.state === "running" ? "now" : "",
+    log: step.log || `${step.label}: ${step.state}`,
+  }));
+  const buildSteps = deployments.length > 0
+    ? deployments.slice(0, 8).map((deployment, index) => ({
+        label: deployment.image_ref || deployment.tag || deployment.commit_sha || `Deployment ${deployment.id}`,
+        status: deployment.status === "failed" ? "failed" : ["deployed", "provisioned"].includes(deployment.status) ? "done" : "running",
+        duration: index === 0 ? "latest" : "",
+        log: [
+          `status=${deployment.status || "pending"}`,
+          `image=${deployment.image_ref || deployment.tag || "-"}`,
+          `commit=${deployment.commit_sha || "-"}`,
+          deployment.workflow_url ? `workflow=${deployment.workflow_url}` : "",
+          deployment.failure_reason ? `error=${deployment.failure_reason}` : "",
+        ].filter(Boolean).join("\n"),
+      }))
+    : [{label: "No build record yet", status: "pending", log: "BeanCS has not recorded a build/deployment record yet."}];
+  const hasWarningEvents = events.some((event) => event.type === "Warning");
+  const runtimeStatus = progress?.error || hasWarningEvents || pods.some((pod) => pod.status === "Failed") ? "failed" : readyPods >= pods.length && pods.length > 0 ? "done" : "running";
+  const installStatus = installSteps.some((step) => step.status === "failed") ? "failed" : installSteps.some((step) => step.status === "running") ? "running" : "done";
+  const buildStatus = buildSteps.some((step) => step.status === "failed") ? "failed" : buildSteps.some((step) => step.status === "running") ? "running" : buildSteps.some((step) => step.status === "pending") ? "pending" : "done";
+  return [
+    {
+      id: "install",
+      label: "install",
+      status: installStatus,
+      detail: installSteps.length ? `${installSteps.length} steps` : "created",
+      description: "Project creation, namespace preparation, and traffic route setup.",
+      steps: installSteps.length ? installSteps : [{label: "Project already created", status: "done", log: "No active install step is running."}],
+    },
+    {
+      id: "runtime",
+      label: "runtime",
+      status: runtimeStatus,
+      detail: `${readyPods}/${pods.length} pods`,
+      description: "Live Kubernetes workload readiness for this project.",
+      steps: [
+        {label: "Load project status", status: progress ? "done" : "pending", duration: "0s", log: `checked_at=${formatTime(progress?.checked_at)}`},
+        {label: "Replica readiness", status: runtimeStatus, expanded: true, log: `ready_pods=${readyPods}\ntotal_pods=${pods.length}\nerror=${progress?.error || "-"}`},
+        ...(hasWarningEvents ? [{label: "Kubernetes warnings", status: "failed", log: `${events.filter((event) => event.type === "Warning").length} warning event(s). See Kubernetes events below for full messages.`}] : []),
+        ...pods.slice(0, 8).map((pod) => ({
+          label: pod.name || "pod",
+          status: pod.status === "Running" && Number(pod.ready_containers) === Number(pod.total_containers) ? "done" : pod.status === "Failed" ? "failed" : "running",
+          log: `status=${pod.status || "-"}\nreason=${pod.reason || "-"}\nmessage=${pod.message || "-"}\nready=${pod.ready_containers}/${pod.total_containers}\nrestarts=${pod.restarts || 0}\ncontainers=${(pod.containers || []).join(", ") || "-"}`,
+        })),
+      ],
+    },
+    {
+      id: "build",
+      label: "build",
+      status: buildStatus,
+      detail: `${deployments.length} records`,
+      description: "Build, GitOps, and rollout deployment records.",
+      steps: buildSteps,
+    },
+  ];
+}
+
+function filterLogLines(logs, query) {
+  const text = String(logs || "");
+  const needle = String(query || "").trim().toLowerCase();
+  if (!needle) return text;
+  return text.split("\n").filter((line) => line.toLowerCase().includes(needle)).join("\n");
+}
+
+function ProgressStatusIcon({status}) {
+  const normalized = status === "done" || status === "deployed" || status === "provisioned" ? "done" : status === "failed" ? "failed" : status === "running" ? "running" : "pending";
+  const Icon = normalized === "done" ? CheckCircle2 : normalized === "failed" ? AlertTriangle : normalized === "running" ? LoaderCircle : Play;
+  return <Icon className={`process-status ${normalized}`} size={16} />;
 }
 
 function DashboardView({dashboard, refresh}) {
@@ -1944,6 +2191,181 @@ function DashboardView({dashboard, refresh}) {
           </div>
         </div>
       </section>
+    </div>
+  );
+}
+
+function AlertsView({dashboard, refresh}) {
+  if (!dashboard) {
+    return <section className="panel"><div className="empty">Loading alerts...</div></section>;
+  }
+  const alerts = dashboard.alerts || [];
+  const critical = alerts.filter((row) => ["critical", "error", "failed"].includes(String(row.severity || "").toLowerCase())).length;
+  const warnings = alerts.length - critical;
+  return (
+    <div className="stack observability-page">
+      <section className="panel action-panel">
+        <div>
+          <h2><AlertTriangle size={18} /> Alerts</h2>
+          <p>Active cluster health signals generated from abnormal pods, warning events, and node readiness.</p>
+        </div>
+        <button onClick={refresh}><RefreshCw size={15} /> Refresh</button>
+      </section>
+      <section className="dashboard-kpis">
+        <MetricCard icon={AlertTriangle} label="Active" value={alerts.length} detail={`${critical} critical · ${warnings} warning`} tone={alerts.length > 0 ? "warning" : "good"} />
+        <MetricCard icon={Server} label="Nodes" value={`${dashboard.nodes?.ready || 0}/${dashboard.nodes?.total || 0}`} detail={`${dashboard.nodes?.not_ready || 0} not ready`} tone={dashboard.nodes?.not_ready ? "warning" : "good"} />
+        <MetricCard icon={Boxes} label="Pods" value={dashboard.pods?.abnormal || 0} detail={`${dashboard.pods?.pending || 0} pending · ${dashboard.pods?.failed || 0} failed`} tone={dashboard.pods?.abnormal ? "warning" : "good"} />
+        <MetricCard icon={Activity} label="Status" value={dashboard.status || "-"} detail={`Last check ${formatTime(dashboard.checked_at)}`} tone={dashboard.healthy ? "good" : "warning"} />
+      </section>
+      <section className="panel">
+        <h2><Shield size={18} /> Alert feed</h2>
+        <AlertList rows={alerts} empty="No active alerts reported." />
+      </section>
+    </div>
+  );
+}
+
+function EventsView({dashboard, refresh}) {
+  if (!dashboard) {
+    return <section className="panel"><div className="empty">Loading events...</div></section>;
+  }
+  const events = dashboard.events || [];
+  const byReason = events.reduce((acc, event) => {
+    const key = event.reason || event.type || "Unknown";
+    acc[key] = (acc[key] || 0) + Number(event.count || 1);
+    return acc;
+  }, {});
+  return (
+    <div className="stack observability-page">
+      <section className="panel action-panel">
+        <div>
+          <h2><ListRestart size={18} /> Events</h2>
+          <p>Recent warning events from the Kubernetes event stream, grouped by object, reason, and last seen time.</p>
+        </div>
+        <button onClick={refresh}><RefreshCw size={15} /> Refresh</button>
+      </section>
+      <section className="dashboard-kpis">
+        <MetricCard icon={ListRestart} label="Warning events" value={events.length} detail={`${Object.keys(byReason).length} reasons`} tone={events.length > 0 ? "warning" : "good"} />
+        <MetricCard icon={AlertTriangle} label="Event count" value={events.reduce((sum, event) => sum + Number(event.count || 1), 0)} detail="Summed Kubernetes count values" />
+        <MetricCard icon={Activity} label="Cluster" value={dashboard.status || "-"} detail={`Checked ${formatTime(dashboard.checked_at)}`} tone={dashboard.healthy ? "good" : "warning"} />
+      </section>
+      <section className="dashboard-grid">
+        <div className="panel">
+          <h2><Database size={18} /> Reasons</h2>
+          <div className="mini-table">
+            {Object.entries(byReason).map(([reason, count]) => (
+              <div key={reason}><span>{reason}</span><b>{count}</b></div>
+            ))}
+            {Object.keys(byReason).length === 0 && <div className="empty">No warning reasons in the latest feed.</div>}
+          </div>
+        </div>
+        <div className="panel">
+          <h2><ScrollText size={18} /> Event stream</h2>
+          <EventTimeline events={events} />
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function MetricsView({dashboard, runtime, refresh}) {
+  if (!dashboard) {
+    return <section className="panel"><div className="empty">Loading metrics...</div></section>;
+  }
+  const resources = dashboard.resources || {};
+  const nodes = runtime.nodes || [];
+  return (
+    <div className="stack observability-page">
+      <section className="panel action-panel">
+        <div>
+          <h2><LineChart size={18} /> Metrics</h2>
+          <p>Cluster capacity, utilization, and node-level resource readings from metrics-server and node stats.</p>
+        </div>
+        <button onClick={refresh}><RefreshCw size={15} /> Refresh</button>
+      </section>
+      <section className="dashboard-kpis">
+        <MetricCard icon={Cpu} label="CPU" value={`${formatPercent(resources.cpu_percent)}%`} detail={`${resources.cpu_used_millis || 0}m / ${resources.cpu_total_millis || 0}m`} />
+        <MetricCard icon={MemoryStick} label="Memory" value={`${formatPercent(resources.memory_percent)}%`} detail={`${formatBytes(resources.memory_used_bytes)} / ${formatBytes(resources.memory_total_bytes)}`} />
+        <MetricCard icon={HardDrive} label="Disk" value={`${formatPercent(resources.disk_percent)}%`} detail={`${formatBytes(resources.disk_used_bytes)} / ${formatBytes(resources.disk_total_bytes)}`} />
+        <MetricCard icon={Activity} label="Metrics source" value={dashboard.metrics_available ? "Live" : "Partial"} detail={dashboard.metrics_error || `Checked ${formatTime(dashboard.checked_at)}`} tone={dashboard.metrics_available ? "good" : "warning"} />
+      </section>
+      <section className="dashboard-grid">
+        <div className="panel dashboard-panel">
+          <h2><Activity size={18} /> Utilization</h2>
+          <div className="industrial-meters">
+            <IndustrialMeter label="CPU" value={resources.cpu_percent} detail={`${resources.cpu_used_millis || 0}m / ${resources.cpu_total_millis || 0}m`} />
+            <IndustrialMeter label="Memory" value={resources.memory_percent} detail={`${formatBytes(resources.memory_used_bytes)} / ${formatBytes(resources.memory_total_bytes)}`} />
+            <IndustrialMeter label="Disk" value={resources.disk_percent} detail={`${formatBytes(resources.disk_used_bytes)} / ${formatBytes(resources.disk_total_bytes)}`} />
+          </div>
+        </div>
+        <div className="panel">
+          <h2><Server size={18} /> Node readings</h2>
+          <div className="mini-table">
+            {nodes.map((node) => (
+              <div key={node.name}>
+                <span>{node.name}<small>{node.status || "-"} · {node.version || "-"}</small></span>
+                <b>{node.cpu || node.cpu_percent || "-"} / {node.memory || node.memory_percent || "-"}</b>
+              </div>
+            ))}
+            {nodes.length === 0 && <div className="empty">Node runtime data is not loaded yet.</div>}
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function LogsView({projects, activeProjectID, setActiveProjectID, progress, refresh, logFollow, liveLogs, logStatus, onStartLogFollow, onStopLogFollow, onOpenPods}) {
+  const logs = logFollow ? liveLogs : progress?.logs;
+  return (
+    <div className="stack observability-page">
+      <section className="panel action-panel">
+        <div>
+          <h2><ScrollText size={18} /> Logs</h2>
+          <p>Project container log snapshots and live follow without leaving the observability section.</p>
+        </div>
+        <div className="progress-controls">
+          <select value={activeProjectID} onChange={(event) => setActiveProjectID(event.target.value)}>
+            <option value="">Choose project</option>
+            {projects.map((project) => <option key={project.id} value={project.id}>{project.display_name || project.name}</option>)}
+          </select>
+          <button onClick={() => refresh()} disabled={logFollow}><RefreshCw size={15} /> Snapshot</button>
+          {logFollow ? <button onClick={onStopLogFollow}>Stop follow</button> : <button className="primary" onClick={() => onStartLogFollow(activeProjectID)} disabled={!activeProjectID}>Follow live</button>}
+        </div>
+      </section>
+      <section className="dashboard-kpis">
+        <MetricCard icon={Boxes} label="Project" value={progress?.project?.display_name || progress?.project?.name || "-"} detail={progress?.project?.namespace || "No project selected"} />
+        <MetricCard icon={Layers3} label="Pods" value={(progress?.pods || []).length} detail={`${(progress?.pods || []).filter((pod) => pod.status === "Running").length} running`} />
+        <MetricCard icon={GitBranch} label="Deployments" value={(progress?.deployments || []).length} detail={(progress?.deployments || [])[0]?.status || "No deployment events"} />
+      </section>
+      <section className="panel log-panel observability-log-panel">
+        <div className="log-header">
+          <h2><Code2 size={18} /> Container logs</h2>
+          <div className="row-actions">
+            <button type="button" onClick={onOpenPods}><Layers3 size={15} /> Pod detail</button>
+          </div>
+        </div>
+        {logStatus && <p className="log-status">{logStatus}</p>}
+        <pre>{logs || "Choose a project to load recent logs."}</pre>
+      </section>
+    </div>
+  );
+}
+
+function EventTimeline({events}) {
+  return (
+    <div className="timeline">
+      {events.map((event, index) => (
+        <div className="timeline-item" key={`${event.object}-${event.reason}-${index}`}>
+          <span className={event.type === "Warning" ? "dot failed" : "dot done"} />
+          <div>
+            <b>{event.reason || event.type}</b>
+            <small>{event.object} · {event.count || 1}x · {formatTime(event.last_seen)}</small>
+            <p>{event.message}</p>
+          </div>
+        </div>
+      ))}
+      {events.length === 0 && <div className="empty">No warning events in the latest cluster feed.</div>}
     </div>
   );
 }
@@ -2045,6 +2467,77 @@ function sourceLabel(source) {
 function sourceSummary(form) {
   if (form.deploy_source === "gitops") return form.repo_type === "git-url" ? form.git_url || "-" : `${form.github_repo || "-"} @ ${form.github_branch || "main"}`;
   return form.image_reference || "-";
+}
+
+function DeploymentsView({projects, runtimeDeployments, refresh}) {
+  const projectRows = (projects || []).map((project) => {
+    const status = normalizeDeploymentStatus(project.status);
+    return {
+      id: project.id,
+      name: project.display_name || project.name,
+      environment: project.namespace || "default",
+      current: project.auto_deploy !== false,
+      status,
+      duration: project.updated_at ? shortRelativeDuration(project.updated_at) : "20s",
+      repo: project.github_repo || imageRepoName(project.image_reference) || project.build_source || "registry",
+      branch: project.github_branch || "main",
+      commit: project.image_reference || project.source_archive_name || project.domain || project.exposure_mode || "-",
+      created: project.updated_at || project.created_at,
+      author: "zeturn",
+    };
+  });
+  const fallbackRows = projectRows.length ? [] : (runtimeDeployments || []).map((deployment, index) => ({
+    id: deployment.uid || deployment.name || index,
+    name: deployment.name || `deployment-${index + 1}`,
+    environment: deployment.namespace || "default",
+    current: false,
+    status: normalizeDeploymentStatus(deployment.ready_replicas === deployment.replicas ? "ready" : deployment.status),
+    duration: deployment.age || "-",
+    repo: deployment.image || deployment.name || "-",
+    branch: deployment.namespace || "default",
+    commit: deployment.strategy || deployment.status || "-",
+    created: deployment.created_at || deployment.updated_at,
+    author: "cluster",
+  }));
+  const rows = projectRows.length ? projectRows : fallbackRows;
+  return (
+    <section className="deployments-page">
+      <div className="deployment-filters">
+        <button type="button" className="filter-control wide"><CalendarDays size={18} /> Select Date Range</button>
+        <button type="button" className="filter-control"><Search size={18} /> All Autho... <ChevronDown size={17} /></button>
+        <button type="button" className="filter-control">All Environments <ChevronDown size={17} /></button>
+        <button type="button" className="filter-control"><Search size={18} /> All Repo... <ChevronDown size={17} /></button>
+        <button type="button" className="filter-control"><Search size={18} /> All Branc... <ChevronDown size={17} /></button>
+        <button type="button" className="filter-control status-filter"><span className="status-dots"><i /><i /><i /><i /><i /></span> Status <b>5/6</b> <ChevronDown size={17} /></button>
+        <button type="button" className="filter-control compact-refresh" onClick={refresh}><RefreshCw size={17} /></button>
+      </div>
+      <div className="deployment-list">
+        {rows.map((row) => (
+          <button type="button" className="deployment-row" key={row.id}>
+            <span className="deploy-id">
+              <b>{deploymentShortID(row.name, row.id)}</b>
+              <small>{row.environment}{row.current && <em>Current</em>}</small>
+            </span>
+            <span className={`deploy-state ${row.status}`}>
+              <i />
+              <b>{row.status === "error" ? "Error" : row.status === "building" ? "Building" : "Ready"}</b>
+              <small>{row.duration}</small>
+            </span>
+            <span className="deploy-repo">
+              <span className="repo-mark">B</span>
+              <b>{row.repo}</b>
+            </span>
+            <span className="deploy-branch">
+              <span><GitBranch size={18} /> <b>{row.branch}</b></span>
+              <small>{truncateMiddle(row.commit, 34)}</small>
+            </span>
+            <span className="deploy-meta">{formatDeploymentDate(row.created)} by {row.author}<span className="mini-avatar" /></span>
+          </button>
+        ))}
+        {rows.length === 0 && <div className="empty">No deployments found.</div>}
+      </div>
+    </section>
+  );
 }
 
 function ProjectsView({projects, onEdit, onDelete, onScale, onRestart, onBuild, onProgress}) {
@@ -3140,6 +3633,22 @@ function imageTagFromReference(image) {
   return colon > slash ? withoutDigest.slice(colon + 1) : "latest";
 }
 
+function formatRepoDate(repo) {
+  const value = repo.pushed_at || repo.updated_at || repo.created_at;
+  if (!value) return repo.default_branch || "main";
+  const diff = Date.now() - new Date(value).getTime();
+  const day = 24 * 60 * 60 * 1000;
+  if (Number.isFinite(diff) && diff >= 0 && diff < 7 * day) {
+    const days = Math.max(1, Math.round(diff / day));
+    return `${days}d ago`;
+  }
+  return new Date(value).toLocaleDateString(undefined, {month: "short", day: "numeric"});
+}
+
+function ChevronIcon({open}) {
+  return <span className={open ? "chevron open" : "chevron"}>⌄</span>;
+}
+
 function profileFromToken(token) {
   const fallback = {name: "Signed in user", detail: "BeanCS session", initial: "U", scopes: []};
   if (!token || !token.includes(".")) return fallback;
@@ -3171,7 +3680,7 @@ function makeAPI(token, onUnauthorized) {
     });
     const data = await res.json().catch(() => ({}));
     if (res.status === 401 && isSessionAuthError(data)) onUnauthorized();
-    if (!res.ok) throw new Error(data.error || data.error_description || "Request failed");
+    if (!res.ok) throw new Error(data.error || data.error_description || `Request failed (${res.status})`);
     return data;
   }
   async function stream(path, options = {}) {
@@ -3185,7 +3694,7 @@ function makeAPI(token, onUnauthorized) {
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       if (res.status === 401 && isSessionAuthError(data)) onUnauthorized();
-      throw new Error(data.error || data.error_description || "Request failed");
+      throw new Error(data.error || data.error_description || `Request failed (${res.status})`);
     }
     return res;
   }
@@ -3287,8 +3796,10 @@ function subtitleFor(view, runtime, projects) {
   if (view === "accessControl") return "BasaltPass and access integrations";
   if (view === "settings") return "Workspace and version information";
   if (view === "storage" || view === "secrets") return "Planned console capabilities";
-  if (view === "alerts" || view === "events" || view === "metrics") return "See Overview for a live summary; dedicated views are planned";
-  if (view === "logs") return "Use Pod detail for container logs with lazy loading";
+  if (view === "alerts") return "Active warning signals and degraded runtime objects";
+  if (view === "events") return "Recent Kubernetes warning events and reason groups";
+  if (view === "metrics") return "Cluster resource utilization and node readings";
+  if (view === "logs") return "Project log snapshots and live streaming";
   if (runtime[view]) return `${(runtime[view] || []).length} cluster resources`;
   return "Operate k3s, GitHub, DNS, and traffic from one console.";
 }
@@ -3296,6 +3807,47 @@ function subtitleFor(view, runtime, projects) {
 function formatTime(value) {
   if (!value) return "-";
   return new Date(value).toLocaleString();
+}
+
+function formatDeploymentDate(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleDateString(undefined, {month: "short", day: "numeric"});
+}
+
+function shortRelativeDuration(value) {
+  if (!value) return "-";
+  const elapsed = Math.max(1, Math.floor((Date.now() - new Date(value).getTime()) / 1000));
+  if (elapsed < 60) return `${elapsed}s`;
+  if (elapsed < 3600) return `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`;
+  if (elapsed < 86400) return `${Math.floor(elapsed / 3600)}h ${Math.floor((elapsed % 3600) / 60)}m`;
+  return `${Math.floor(elapsed / 86400)}d`;
+}
+
+function normalizeDeploymentStatus(status) {
+  const value = String(status || "").toLowerCase();
+  if (["failed", "error", "degraded"].some((item) => value.includes(item))) return "error";
+  if (["building", "deploying", "pending", "progress"].some((item) => value.includes(item))) return "building";
+  return "ready";
+}
+
+function imageRepoName(value) {
+  if (!value) return "";
+  const withoutTag = String(value).split("@")[0].split(":")[0];
+  const parts = withoutTag.split("/").filter(Boolean);
+  return parts.slice(-2).join("/") || withoutTag;
+}
+
+function deploymentShortID(name, fallback) {
+  const base = String(name || fallback || "deployment").replace(/[^a-zA-Z0-9]/g, "");
+  return (base.slice(0, 9) || String(fallback || "deploy")).padEnd(7, "x");
+}
+
+function truncateMiddle(value, max = 28) {
+  const text = String(value || "-");
+  if (text.length <= max) return text;
+  return `${text.slice(0, Math.max(8, max - 12))}...`;
 }
 
 function formatBytes(value) {

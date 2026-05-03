@@ -3,6 +3,7 @@ package k8s
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/zeturn/beancs-controller/internal/dto"
@@ -95,6 +96,36 @@ func (m *Manager) DeleteNamespace(ctx context.Context, name string) error {
 		return nil
 	}
 	return err
+}
+
+func (m *Manager) DeleteProjectResources(ctx context.Context, namespace, projectName string) error {
+	if err := m.ensure(); err != nil {
+		return err
+	}
+	selector := metav1.ListOptions{LabelSelector: "app=" + projectName + ",managed-by=beancs"}
+	var errs []error
+	if err := m.Clientset.AppsV1().Deployments(namespace).Delete(ctx, projectName, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		errs = append(errs, fmt.Errorf("delete deployment %s: %w", projectName, err))
+	}
+	if err := m.Clientset.CoreV1().Services(namespace).Delete(ctx, projectName, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		errs = append(errs, fmt.Errorf("delete service %s: %w", projectName, err))
+	}
+	if err := m.Clientset.NetworkingV1().Ingresses(namespace).DeleteCollection(ctx, metav1.DeleteOptions{}, selector); err != nil && !apierrors.IsNotFound(err) {
+		errs = append(errs, fmt.Errorf("delete ingresses: %w", err))
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("%v", errs)
+	}
+	return nil
+}
+
+func IsSystemNamespace(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "", "default", "kube-system", "kube-public", "kube-node-lease":
+		return true
+	default:
+		return false
+	}
 }
 
 func (m *Manager) ListNamespaces(ctx context.Context) ([]NamespaceSummary, error) {

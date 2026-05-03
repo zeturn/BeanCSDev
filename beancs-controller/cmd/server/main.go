@@ -250,6 +250,7 @@ func databaseURLWithConnectTimeout(databaseURL, timeout string) string {
 
 func serveIndex(c *fiber.Ctx) error {
 	c.Type("html", "utf-8")
+	c.Set(fiber.HeaderCacheControl, "no-store")
 	body, err := web.IndexHTML()
 	if err != nil {
 		return err

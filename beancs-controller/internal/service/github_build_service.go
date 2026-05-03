@@ -108,10 +108,16 @@ func (s *GitHubBuildService) ensureWorkflow(ctx context.Context, token, owner, r
 		var err error
 		callbackEnabled, err = s.ensureWebhookSecrets(ctx, token, owner, repo, webhookURL)
 		if err != nil {
-			return err
+			if !isGitHubSecretsPermissionError(err) {
+				return err
+			}
+			callbackEnabled = false
 		}
 	}
-	return putFile(ctx, client, owner, repo, beancsBuildWorkflowPath, beancsBuildWorkflow(project, callbackEnabled), "beancs: add build workflow")
+	if err := putFile(ctx, client, owner, repo, beancsBuildWorkflowPath, beancsBuildWorkflow(project, callbackEnabled), "beancs: add build workflow"); err != nil {
+		return githubWorkflowFilePermissionError(owner, repo, err)
+	}
+	return nil
 }
 
 func (s *GitHubBuildService) ensureWebhookSecrets(ctx context.Context, token, owner, repo, webhookURL string) (bool, error) {
@@ -134,10 +140,23 @@ func (s *GitHubBuildService) dispatchWorkflow(ctx context.Context, token, owner,
 	}
 	body, _ := json.Marshal(map[string]any{"ref": branch, "inputs": inputs})
 	endpoint := fmt.Sprintf("https://api.github.com/repos/%s/%s/actions/workflows/%s/dispatches", url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(beancsBuildWorkflowFile))
-	if err := githubRequest(ctx, http.MethodPost, endpoint, token, body, nil); err != nil {
-		return githubActionsPermissionError(owner, repo, err)
+	var lastErr error
+	for attempt := 0; attempt < 12; attempt++ {
+		if err := githubRequest(ctx, http.MethodPost, endpoint, token, body, nil); err != nil {
+			if !isGitHubAPIStatus(err, http.StatusNotFound) {
+				return githubActionsPermissionError(owner, repo, err)
+			}
+			lastErr = err
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(5 * time.Second):
+			}
+			continue
+		}
+		return nil
 	}
-	return nil
+	return githubWorkflowDispatchNotFoundError(owner, repo, branch, lastErr)
 }
 
 func (s *GitHubBuildService) watchBuild(ctx context.Context, deploymentID uint, dispatchedAt time.Time) {
@@ -251,6 +270,10 @@ func (s *GitHubBuildService) waitForRun(ctx context.Context, token, owner, repo,
 	for time.Now().Before(deadline) {
 		runs, err := s.workflowRuns(ctx, token, owner, repo, branch)
 		if err != nil {
+			if isGitHubAPIStatus(err, http.StatusNotFound) {
+				time.Sleep(5 * time.Second)
+				continue
+			}
 			return workflowRun{}, err
 		}
 		for _, run := range runs {
@@ -398,20 +421,56 @@ func (e *githubAPIError) Error() string {
 	return fmt.Sprintf("GitHub API request failed: %s", e.Body)
 }
 
+func isGitHubAPIStatus(err error, status int) bool {
+	var apiErr *githubAPIError
+	return errors.As(err, &apiErr) && apiErr.StatusCode == status
+}
+
 func githubSecretsPermissionError(owner, repo string, err error) error {
 	var apiErr *githubAPIError
 	if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusForbidden && strings.Contains(apiErr.Body, "Resource not accessible by integration") {
-		return fmt.Errorf("GitHub App installation for %s/%s cannot manage repository Actions secrets. Update the GitHub App permissions to include Repository permissions: Contents read/write, Actions read/write, and Secrets read/write, then reinstall or approve the app installation", owner, repo)
+		return fmt.Errorf("GitHub App installation for %s/%s cannot manage repository Actions secrets. Update the GitHub App permissions to include Repository permissions: Contents read/write, Workflows read/write, Actions read/write, and Secrets read/write, then reinstall or approve the app installation", owner, repo)
 	}
 	return err
+}
+
+func isGitHubSecretsPermissionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var apiErr *githubAPIError
+	if errors.As(err, &apiErr) {
+		return apiErr.StatusCode == http.StatusForbidden && strings.Contains(apiErr.Body, "Resource not accessible by integration")
+	}
+	message := err.Error()
+	return strings.Contains(message, "cannot manage repository Actions secrets") ||
+		(strings.Contains(message, "Resource not accessible by integration") && strings.Contains(message, "actions/secrets"))
 }
 
 func githubActionsPermissionError(owner, repo string, err error) error {
 	var apiErr *githubAPIError
 	if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusForbidden && strings.Contains(apiErr.Body, "Resource not accessible by integration") {
-		return fmt.Errorf("GitHub App installation for %s/%s cannot dispatch GitHub Actions workflows. Update the GitHub App permissions to include Repository permissions: Actions read/write and Contents read/write, then reinstall or approve the app installation", owner, repo)
+		return fmt.Errorf("GitHub App installation for %s/%s cannot dispatch GitHub Actions workflows. Update the GitHub App permissions to include Repository permissions: Contents read/write, Workflows read/write, and Actions read/write, then reinstall or approve the app installation", owner, repo)
 	}
 	return err
+}
+
+func githubWorkflowFilePermissionError(owner, repo string, err error) error {
+	var ghErr *github.ErrorResponse
+	if errors.As(err, &ghErr) && ghErr.Response != nil && ghErr.Response.StatusCode == http.StatusForbidden && strings.Contains(ghErr.Message, "Resource not accessible by integration") {
+		return fmt.Errorf("GitHub App installation for %s/%s cannot create or update %s. Update the GitHub App permissions to include Repository permissions: Contents read/write, Workflows read/write, and Actions read/write, then reinstall or approve the app installation", owner, repo, beancsBuildWorkflowPath)
+	}
+	if strings.Contains(err.Error(), "Resource not accessible by integration") {
+		return fmt.Errorf("GitHub App installation for %s/%s cannot create or update %s. Update the GitHub App permissions to include Repository permissions: Contents read/write, Workflows read/write, and Actions read/write, then reinstall or approve the app installation", owner, repo, beancsBuildWorkflowPath)
+	}
+	return err
+}
+
+func githubWorkflowDispatchNotFoundError(owner, repo, branch string, err error) error {
+	if err == nil {
+		return fmt.Errorf("GitHub Actions workflow %s for %s/%s is not available yet. Retry in a minute, or make sure branch %q contains %s", beancsBuildWorkflowFile, owner, repo, branch, beancsBuildWorkflowPath)
+	}
+	return fmt.Errorf("GitHub Actions workflow %s for %s/%s is not available yet. GitHub may still be indexing the new workflow, or branch %q does not contain %s. Retry in a minute, or make sure the selected branch exists and contains the workflow file: %w", beancsBuildWorkflowFile, owner, repo, branch, beancsBuildWorkflowPath, err)
 }
 
 func truncateFailure(value string) string {

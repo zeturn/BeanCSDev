@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/cloudflare/cloudflare-go/v2"
 	"github.com/cloudflare/cloudflare-go/v2/dns"
@@ -55,5 +56,18 @@ func (s *DNSService) CreateRecordForHost(ctx context.Context, token string, cred
 func (s *DNSService) DeleteRecord(ctx context.Context, token, zoneID, recordID string) error {
 	client := cloudflare.NewClient(option.WithAPIToken(token))
 	_, err := client.DNS.Records.Delete(ctx, recordID, dns.RecordDeleteParams{ZoneID: cloudflare.F(zoneID)})
+	if isCloudflareRecordNotFound(err) {
+		return nil
+	}
 	return err
+}
+
+func isCloudflareRecordNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := err.Error()
+	return strings.Contains(message, "404 Not Found") ||
+		strings.Contains(message, "Record does not exist") ||
+		strings.Contains(message, `"code":81044`)
 }

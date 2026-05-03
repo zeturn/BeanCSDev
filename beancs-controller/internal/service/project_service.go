@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -127,6 +128,9 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 	req.ExposureMode = aggregateExposureMode(req.Ports)
 	primaryPort := req.Ports[0]
 	if err := validateProjectSource(&req); err != nil {
+		return nil, err
+	}
+	if err := s.ensureProjectNameAvailable(ctx, req.Name); err != nil {
 		return nil, err
 	}
 	if req.ExposureMode == model.ExposurePublic {
@@ -457,8 +461,13 @@ func (s *ProjectService) DeleteProject(ctx context.Context, project *model.Proje
 			}
 		}
 	}
-	if err := s.k8s.DeleteNamespace(ctx, project.Namespace); err != nil {
-		cleanupErrs = append(cleanupErrs, fmt.Errorf("delete namespace %s: %w", project.Namespace, err))
+	if err := s.k8s.DeleteProjectResources(ctx, project.Namespace, project.Name); err != nil {
+		cleanupErrs = append(cleanupErrs, fmt.Errorf("delete Kubernetes resources for %s/%s: %w", project.Namespace, project.Name, err))
+	}
+	if !k8s.IsSystemNamespace(project.Namespace) {
+		if err := s.k8s.DeleteNamespace(ctx, project.Namespace); err != nil {
+			cleanupErrs = append(cleanupErrs, fmt.Errorf("delete namespace %s: %w", project.Namespace, err))
+		}
 	}
 	if project.BasaltPassInstanceID != nil && project.BasaltAppID != 0 {
 		if client, err := s.registry.GetClientForInstance(*project.BasaltPassInstanceID); err == nil {
@@ -700,6 +709,18 @@ func validateProjectPorts(projectName string, ports model.ProjectPorts) error {
 			}
 			domains[p.Domain] = true
 		}
+	}
+	return nil
+}
+
+func (s *ProjectService) ensureProjectNameAvailable(ctx context.Context, name string) error {
+	var existing model.Project
+	err := s.db.WithContext(ctx).Select("id").Where("name = ?", name).First(&existing).Error
+	if err == nil {
+		return fmt.Errorf("project name %q already exists; choose a different project name", name)
+	}
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
 	}
 	return nil
 }
