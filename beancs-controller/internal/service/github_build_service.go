@@ -114,7 +114,10 @@ func (s *GitHubBuildService) ensureWorkflow(ctx context.Context, token, owner, r
 			callbackEnabled = false
 		}
 	}
-	return putFile(ctx, client, owner, repo, beancsBuildWorkflowPath, beancsBuildWorkflow(project, callbackEnabled), "beancs: add build workflow")
+	if err := putFile(ctx, client, owner, repo, beancsBuildWorkflowPath, beancsBuildWorkflow(project, callbackEnabled), "beancs: add build workflow"); err != nil {
+		return githubWorkflowFilePermissionError(owner, repo, err)
+	}
+	return nil
 }
 
 func (s *GitHubBuildService) ensureWebhookSecrets(ctx context.Context, token, owner, repo, webhookURL string) (bool, error) {
@@ -404,7 +407,7 @@ func (e *githubAPIError) Error() string {
 func githubSecretsPermissionError(owner, repo string, err error) error {
 	var apiErr *githubAPIError
 	if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusForbidden && strings.Contains(apiErr.Body, "Resource not accessible by integration") {
-		return fmt.Errorf("GitHub App installation for %s/%s cannot manage repository Actions secrets. Update the GitHub App permissions to include Repository permissions: Contents read/write, Actions read/write, and Secrets read/write, then reinstall or approve the app installation", owner, repo)
+		return fmt.Errorf("GitHub App installation for %s/%s cannot manage repository Actions secrets. Update the GitHub App permissions to include Repository permissions: Contents read/write, Workflows read/write, Actions read/write, and Secrets read/write, then reinstall or approve the app installation", owner, repo)
 	}
 	return err
 }
@@ -425,7 +428,18 @@ func isGitHubSecretsPermissionError(err error) bool {
 func githubActionsPermissionError(owner, repo string, err error) error {
 	var apiErr *githubAPIError
 	if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusForbidden && strings.Contains(apiErr.Body, "Resource not accessible by integration") {
-		return fmt.Errorf("GitHub App installation for %s/%s cannot dispatch GitHub Actions workflows. Update the GitHub App permissions to include Repository permissions: Actions read/write and Contents read/write, then reinstall or approve the app installation", owner, repo)
+		return fmt.Errorf("GitHub App installation for %s/%s cannot dispatch GitHub Actions workflows. Update the GitHub App permissions to include Repository permissions: Contents read/write, Workflows read/write, and Actions read/write, then reinstall or approve the app installation", owner, repo)
+	}
+	return err
+}
+
+func githubWorkflowFilePermissionError(owner, repo string, err error) error {
+	var ghErr *github.ErrorResponse
+	if errors.As(err, &ghErr) && ghErr.Response != nil && ghErr.Response.StatusCode == http.StatusForbidden && strings.Contains(ghErr.Message, "Resource not accessible by integration") {
+		return fmt.Errorf("GitHub App installation for %s/%s cannot create or update %s. Update the GitHub App permissions to include Repository permissions: Contents read/write, Workflows read/write, and Actions read/write, then reinstall or approve the app installation", owner, repo, beancsBuildWorkflowPath)
+	}
+	if strings.Contains(err.Error(), "Resource not accessible by integration") {
+		return fmt.Errorf("GitHub App installation for %s/%s cannot create or update %s. Update the GitHub App permissions to include Repository permissions: Contents read/write, Workflows read/write, and Actions read/write, then reinstall or approve the app installation", owner, repo, beancsBuildWorkflowPath)
 	}
 	return err
 }
