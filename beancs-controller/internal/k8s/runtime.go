@@ -16,6 +16,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -635,9 +636,77 @@ func (m *Manager) Logs(ctx context.Context, namespace, projectName string, tail 
 		return "", err
 	}
 	if len(pods) == 0 {
-		return "", nil
+		return m.projectDiagnosticLog(ctx, namespace, projectName), nil
 	}
 	return m.logsForTargets(ctx, logTargetsForPods(pods, container), tail), nil
+}
+
+func (m *Manager) projectDiagnosticLog(ctx context.Context, namespace, projectName string) string {
+	var buf strings.Builder
+	fmt.Fprintf(&buf, "==> BeanCS runtime diagnostic <==\n")
+	fmt.Fprintf(&buf, "namespace=%s\nproject=%s\nselector=app=%s,managed-by=beancs\n", namespace, projectName, projectName)
+	if ns, err := m.Clientset.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{}); err != nil {
+		if apierrors.IsNotFound(err) {
+			fmt.Fprintf(&buf, "namespace_status=not_found\n")
+		} else {
+			fmt.Fprintf(&buf, "namespace_error=%s\n", err.Error())
+		}
+		return buf.String()
+	} else {
+		fmt.Fprintf(&buf, "namespace_status=%s\n", ns.Status.Phase)
+	}
+	if dep, err := m.Clientset.AppsV1().Deployments(namespace).Get(ctx, projectName, metav1.GetOptions{}); err != nil {
+		if apierrors.IsNotFound(err) {
+			fmt.Fprintf(&buf, "deployment_status=not_found\n")
+		} else {
+			fmt.Fprintf(&buf, "deployment_error=%s\n", err.Error())
+		}
+	} else {
+		replicas := int32(1)
+		if dep.Spec.Replicas != nil {
+			replicas = *dep.Spec.Replicas
+		}
+		fmt.Fprintf(&buf, "deployment_status=found\nreplicas=%d\nready_replicas=%d\navailable_replicas=%d\n", replicas, dep.Status.ReadyReplicas, dep.Status.AvailableReplicas)
+		for _, condition := range dep.Status.Conditions {
+			fmt.Fprintf(&buf, "deployment_condition=%s/%s %s\n", condition.Type, condition.Status, condition.Message)
+		}
+	}
+	if services, err := m.Clientset.CoreV1().Services(namespace).List(ctx, metav1.ListOptions{LabelSelector: "app=" + projectName + ",managed-by=beancs"}); err != nil {
+		fmt.Fprintf(&buf, "services_error=%s\n", err.Error())
+	} else {
+		fmt.Fprintf(&buf, "services=%d\n", len(services.Items))
+		for _, svc := range services.Items {
+			fmt.Fprintf(&buf, "service=%s type=%s cluster_ip=%s ports=%s\n", svc.Name, svc.Spec.Type, serviceClusterIP(svc), strings.Join(servicePorts(svc), ","))
+		}
+	}
+	if ingresses, err := m.Clientset.NetworkingV1().Ingresses(namespace).List(ctx, metav1.ListOptions{LabelSelector: "app=" + projectName + ",managed-by=beancs"}); err != nil {
+		fmt.Fprintf(&buf, "ingresses_error=%s\n", err.Error())
+	} else {
+		fmt.Fprintf(&buf, "ingresses=%d\n", len(ingresses.Items))
+		for _, ing := range ingresses.Items {
+			fmt.Fprintf(&buf, "ingress=%s class=%s hosts=%s address=%s\n", ing.Name, ingressClass(ing), strings.Join(ingressHosts(ing), ","), ingressAddress(ing))
+		}
+	}
+	if events, err := m.Clientset.CoreV1().Events(namespace).List(ctx, metav1.ListOptions{}); err == nil {
+		count := 0
+		for _, event := range events.Items {
+			if event.InvolvedObject.Name != projectName && !strings.HasPrefix(event.InvolvedObject.Name, projectName+"-") {
+				continue
+			}
+			count++
+			fmt.Fprintf(&buf, "event[%d]=%s %s %s count=%d message=%s\n", count, event.Type, event.InvolvedObject.Kind+"/"+event.InvolvedObject.Name, event.Reason, event.Count, event.Message)
+			if count >= 20 {
+				break
+			}
+		}
+		if count == 0 {
+			fmt.Fprintf(&buf, "events=0\n")
+		}
+	} else {
+		fmt.Fprintf(&buf, "events_error=%s\n", err.Error())
+	}
+	fmt.Fprintf(&buf, "note=no matching pods exist yet, so container logs are not available\n")
+	return buf.String()
 }
 
 func (m *Manager) ProjectLogTargets(ctx context.Context, namespace, projectName, container string) ([]LogTarget, error) {

@@ -693,8 +693,13 @@ button.ghost:hover,
 .wizard-actions {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   gap: 10px;
   margin-top: 18px;
+}
+
+.wizard-actions button {
+  min-height: 36px;
 }
 
 .readiness-card {
@@ -2400,6 +2405,83 @@ button:hover {
   margin: 3px 0 0;
   color: var(--bc-muted);
   font-size: 13px;
+}
+
+.skeleton-page {
+  display: grid;
+  gap: 18px;
+}
+
+.skeleton-header {
+  display: grid;
+  gap: 10px;
+}
+
+.skeleton-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.skeleton-card {
+  border: 1px solid var(--bc-border);
+  border-radius: var(--bc-radius);
+  padding: 14px;
+  background: var(--bc-surface);
+  display: grid;
+  gap: 8px;
+}
+
+.skeleton-table {
+  border: 1px solid var(--bc-border);
+  border-radius: var(--bc-radius);
+  background: var(--bc-surface);
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.skeleton-row {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.skeleton-line {
+  height: 12px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(226, 232, 240, 0.7) 0%, rgba(226, 232, 240, 0.25) 45%, rgba(226, 232, 240, 0.7) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s ease infinite;
+}
+
+.skeleton-line.w-40 {
+  width: 40%;
+}
+
+.skeleton-line.w-50 {
+  width: 50%;
+}
+
+.skeleton-line.w-60 {
+  width: 60%;
+}
+
+.skeleton-line.w-70 {
+  width: 70%;
+}
+
+.skeleton-line.w-80 {
+  width: 80%;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 200% 50%;
+  }
 }
 
 .bc-surface,

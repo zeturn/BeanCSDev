@@ -1108,8 +1108,12 @@ function App() {
       setActiveProgressProjectID(String(created.id));
       setInstallProgress((current) => current ? {
         ...current,
-        logs: [...(current.logs || []), `Project created with id ${created.id}`, "Initial provisioning completed."],
-        steps: current.steps.map((step) => ({...step, state: "done"})),
+        logs: [...(current.logs || []), `Project created with id ${created.id}`, "BeanCS control-plane tasks returned successfully.", "Waiting for live Kubernetes resources and deployment records."],
+        steps: current.steps.map((step) => {
+          if (step.label === "Validate install source" || step.label === "Create project resources") return {...step, state: "done"};
+          if (step.label === "Apply service and ingress") return {...step, state: "running", log: "Waiting for Services, Ingresses, and Kubernetes events to confirm the route."};
+          return {...step, state: "pending", log: "Waiting for a direct Deployment, GitHub Actions build, or Argo CD sync to create workload resources."};
+        }),
       } : null);
       setDeployForm(defaultDeployForm());
       setAnalysis(null);
@@ -1156,6 +1160,17 @@ function App() {
         api.get(`/projects/${selected.id}/deployments`),
         logRequest,
       ]);
+      const deploymentRows = deployments.data || [];
+      let workflowLogs = "";
+      const latestWorkflow = deploymentRows.find((deployment) => deployment.workflow_run_id || deployment.workflow_url || deployment.failure_reason);
+      if (!projectLogFollow && latestWorkflow?.id) {
+        try {
+          const workflowLogData = await api.get(`/projects/${selected.id}/deployments/${latestWorkflow.id}/logs`);
+          workflowLogs = workflowLogData.logs || "";
+        } catch (err) {
+          workflowLogs = `GitHub Actions/deployment logs unavailable: ${err.message}\n`;
+        }
+      }
       setProjectProgress({
         project: selected,
         pods: status.pods || [],
@@ -1163,8 +1178,8 @@ function App() {
         services: status.services || [],
         ingresses: status.ingresses || [],
         events: status.events || [],
-        deployments: deployments.data || [],
-        logs: logData.logs || "",
+        deployments: deploymentRows,
+        logs: [workflowLogs, logData.logs || ""].filter(Boolean).join("\n"),
         checked_at: new Date().toISOString(),
       });
     } catch (err) {
@@ -1332,112 +1347,118 @@ function App() {
         <PageHeading title={titleFor(view)} subtitle={subtitleFor(view, runtime, projects)} actions={<button onClick={loadWorkspace} disabled={loading}><RefreshCw size={15} /> Refresh</button>} />
         {notice && <div className="notice">{notice}</div>}
         {error && <div className="alert">{error}</div>}
-        {view === "dashboard" && <DashboardView dashboard={dashboard} refresh={loadDashboard} />}
-        {view === "deploy" && (
-          <DeployView
-            credentials={credentials}
-            namespaces={runtime.namespaces || []}
-            selectedCredential={selectedCredential}
-            setSelectedCredential={setSelectedCredential}
-            repos={repos}
-            selectedRepo={selectedRepo}
-            analysis={analysis}
-            setAnalysis={setAnalysis}
-            form={deployForm}
-            setForm={setDeployForm}
-            loadRepos={loadRepos}
-            analyzeRepo={analyzeRepo}
-            checkInstallSource={checkInstallSource}
-            deployProject={deployProject}
-            containerRegistries={containerRegistries}
-            containerImages={containerImages}
-            createTrackedImageFromDeploy={createTrackedImageFromDeploy}
-            onConnectGitHub={connectGitHubApp}
-          />
+        {shouldShowSkeleton(view, loading, dashboard, network) ? (
+          <SkeletonPage />
+        ) : (
+          <>
+            {view === "dashboard" && <DashboardView dashboard={dashboard} refresh={loadDashboard} />}
+            {view === "deploy" && (
+              <DeployView
+                credentials={credentials}
+                namespaces={runtime.namespaces || []}
+                selectedCredential={selectedCredential}
+                setSelectedCredential={setSelectedCredential}
+                repos={repos}
+                selectedRepo={selectedRepo}
+                analysis={analysis}
+                setAnalysis={setAnalysis}
+                form={deployForm}
+                setForm={setDeployForm}
+                loadRepos={loadRepos}
+                analyzeRepo={analyzeRepo}
+                checkInstallSource={checkInstallSource}
+                deployProject={deployProject}
+                containerRegistries={containerRegistries}
+                containerImages={containerImages}
+                createTrackedImageFromDeploy={createTrackedImageFromDeploy}
+                onConnectGitHub={connectGitHubApp}
+              />
+            )}
+            {view === "progress" && (
+              <ProgressView
+                projects={projects}
+                activeProjectID={activeProgressProjectID}
+                setActiveProjectID={setActiveProgressProjectID}
+                progress={projectProgress}
+                installProgress={installProgress}
+                refresh={loadProjectProgress}
+                refreshList={loadWorkspace}
+                logFollow={projectLogFollow}
+                liveLogs={projectLiveLogs}
+                logStatus={projectLogStatus}
+                onStartLogFollow={startProjectLogFollow}
+                onStopLogFollow={stopProjectLogFollow}
+              />
+            )}
+            {view === "projects" && (
+              <ProjectsView projects={projects} onEdit={setEditingProject} onDelete={deleteProject} onScale={scaleProject} onRestart={restartProject} onBuild={buildProject} onProgress={(project) => { setActiveProgressProjectID(String(project.id)); setView("progress"); }} />
+            )}
+            {view === "deployments" && <DeploymentsView projects={projects} runtimeDeployments={runtime.deployments || []} refresh={loadWorkspace} />}
+            {view === "apiKeys" && <APIKeysView keys={apiKeys} createdKey={createdAPIKey} onDismissCreated={() => setCreatedAPIKey(null)} onCreate={createAPIKey} onRevoke={revokeAPIKey} onRefresh={loadAPIKeys} isAdmin={userProfile.scopes.includes("beancs.admin")} />}
+            {view === "registries" && (
+              <ContainerRegistriesView
+                presets={registryPresets}
+                registries={containerRegistries}
+                images={containerImages}
+                onAddRegistry={createContainerRegistry}
+                onDeleteRegistry={deleteContainerRegistry}
+                onAddImage={createTrackedImage}
+                onRefreshImage={refreshTrackedImage}
+                onDeleteImage={deleteTrackedImage}
+                onSyncAll={syncAllTrackedImages}
+                onRefresh={loadRegistriesPage}
+              />
+            )}
+            {view === "workloadImage" && (
+              <WorkloadImageView
+                images={containerImages}
+                onRefresh={loadRegistriesPage}
+                onOpenRegistry={() => setView("registries")}
+                onRefreshImage={refreshTrackedImage}
+                onDeleteImage={deleteTrackedImage}
+              />
+            )}
+            {view === "storage" && (
+              <ComingSoonView
+                title="Storage"
+                description="PersistentVolumeClaims, PersistentVolumes, and StorageClasses will be manageable here in a future release."
+              />
+            )}
+            {view === "secrets" && (
+              <ComingSoonView
+                title="Secrets"
+                description="Kubernetes Secret inspection and rotation workflows are not wired in this console yet. Use kubectl or your GitOps pipeline for now."
+              />
+            )}
+            {view === "alerts" && <AlertsView dashboard={dashboard} refresh={loadDashboard} />}
+            {view === "events" && <EventsView dashboard={dashboard} refresh={loadDashboard} />}
+            {view === "logs" && (
+              <LogsView
+                projects={projects}
+                activeProjectID={activeProgressProjectID}
+                setActiveProjectID={setActiveProgressProjectID}
+                progress={projectProgress}
+                refresh={loadProjectProgress}
+                logFollow={projectLogFollow}
+                liveLogs={projectLiveLogs}
+                logStatus={projectLogStatus}
+                onStartLogFollow={startProjectLogFollow}
+                onStopLogFollow={stopProjectLogFollow}
+                onOpenPods={() => setView("pods")}
+              />
+            )}
+            {view === "metrics" && <MetricsView dashboard={dashboard} runtime={runtime} refresh={loadDashboard} />}
+            {view === "settings" && <SettingsView version={appVersion} />}
+            {view === "github" && (
+              <GitHubView credentials={credentials.github} onConnect={connectGitHubApp} onRepos={loadRepos} onDelete={(id) => deleteCredential("github", id)} reposByCredential={reposByCredential} repoFilters={repoFilters} setRepoFilters={setRepoFilters} />
+            )}
+            {view === "domains" && <DomainsView domains={domains} />}
+            {view === "networking" && <NetworkingView network={network} refresh={loadNetwork} onSaveService={saveService} onDeleteService={deleteService} onSaveIngress={saveIngress} onDeleteIngress={deleteIngress} onSaveNetworkPolicy={saveNetworkPolicy} onDeleteNetworkPolicy={deleteNetworkPolicy} />}
+            {view === "cloudflare" && <CloudflareView credentials={credentials.cloudflare} domains={domains} selectedID={selectedCloudflareID} setSelectedID={setSelectedCloudflareID} dnsRecords={dnsRecords} editingRecord={editingDNSRecord} setEditingRecord={setEditingDNSRecord} onCreate={createCredential} onDelete={(id) => deleteCredential("cloudflare", id)} onLoadDNS={loadDNSRecords} onSaveDNS={saveDNSRecord} onDeleteDNS={deleteDNSRecord} />}
+            {view === "accessControl" && <CredentialManager kind="basaltpass" rows={credentials.basaltpass} onCreate={createCredential} onDelete={deleteCredential} />}
+            {["namespaces", "pods", "nodes", "ingresses", "services"].includes(view) && <RuntimeTable kind={view} rows={runtime[view] || []} nodeJoinCommand={nodeJoinCommand} onLoadNodeJoinCommand={loadNodeJoinCommand} onCreateNamespace={createNamespace} onPatchNamespace={patchNamespaceLabels} onNamespaceDetail={loadNamespaceDetail} onDeleteNamespace={deleteNamespace} onDeletePod={deletePod} onNodeDetail={loadNodeDetail} onPodLogs={loadPodLogs} onSaveService={saveService} onDeleteService={deleteService} onDetail={setRuntimeDetail} />}
+          </>
         )}
-        {view === "progress" && (
-          <ProgressView
-            projects={projects}
-            activeProjectID={activeProgressProjectID}
-            setActiveProjectID={setActiveProgressProjectID}
-            progress={projectProgress}
-            installProgress={installProgress}
-            refresh={loadProjectProgress}
-            refreshList={loadWorkspace}
-            logFollow={projectLogFollow}
-            liveLogs={projectLiveLogs}
-            logStatus={projectLogStatus}
-            onStartLogFollow={startProjectLogFollow}
-            onStopLogFollow={stopProjectLogFollow}
-          />
-        )}
-        {view === "projects" && (
-          <ProjectsView projects={projects} onEdit={setEditingProject} onDelete={deleteProject} onScale={scaleProject} onRestart={restartProject} onBuild={buildProject} onProgress={(project) => { setActiveProgressProjectID(String(project.id)); setView("progress"); }} />
-        )}
-        {view === "deployments" && <DeploymentsView projects={projects} runtimeDeployments={runtime.deployments || []} refresh={loadWorkspace} />}
-        {view === "apiKeys" && <APIKeysView keys={apiKeys} createdKey={createdAPIKey} onDismissCreated={() => setCreatedAPIKey(null)} onCreate={createAPIKey} onRevoke={revokeAPIKey} onRefresh={loadAPIKeys} isAdmin={userProfile.scopes.includes("beancs.admin")} />}
-        {view === "registries" && (
-          <ContainerRegistriesView
-            presets={registryPresets}
-            registries={containerRegistries}
-            images={containerImages}
-            onAddRegistry={createContainerRegistry}
-            onDeleteRegistry={deleteContainerRegistry}
-            onAddImage={createTrackedImage}
-            onRefreshImage={refreshTrackedImage}
-            onDeleteImage={deleteTrackedImage}
-            onSyncAll={syncAllTrackedImages}
-            onRefresh={loadRegistriesPage}
-          />
-        )}
-        {view === "workloadImage" && (
-          <WorkloadImageView
-            images={containerImages}
-            onRefresh={loadRegistriesPage}
-            onOpenRegistry={() => setView("registries")}
-            onRefreshImage={refreshTrackedImage}
-            onDeleteImage={deleteTrackedImage}
-          />
-        )}
-        {view === "storage" && (
-          <ComingSoonView
-            title="Storage"
-            description="PersistentVolumeClaims, PersistentVolumes, and StorageClasses will be manageable here in a future release."
-          />
-        )}
-        {view === "secrets" && (
-          <ComingSoonView
-            title="Secrets"
-            description="Kubernetes Secret inspection and rotation workflows are not wired in this console yet. Use kubectl or your GitOps pipeline for now."
-          />
-        )}
-        {view === "alerts" && <AlertsView dashboard={dashboard} refresh={loadDashboard} />}
-        {view === "events" && <EventsView dashboard={dashboard} refresh={loadDashboard} />}
-        {view === "logs" && (
-          <LogsView
-            projects={projects}
-            activeProjectID={activeProgressProjectID}
-            setActiveProjectID={setActiveProgressProjectID}
-            progress={projectProgress}
-            refresh={loadProjectProgress}
-            logFollow={projectLogFollow}
-            liveLogs={projectLiveLogs}
-            logStatus={projectLogStatus}
-            onStartLogFollow={startProjectLogFollow}
-            onStopLogFollow={stopProjectLogFollow}
-            onOpenPods={() => setView("pods")}
-          />
-        )}
-        {view === "metrics" && <MetricsView dashboard={dashboard} runtime={runtime} refresh={loadDashboard} />}
-        {view === "settings" && <SettingsView version={appVersion} />}
-        {view === "github" && (
-          <GitHubView credentials={credentials.github} onConnect={connectGitHubApp} onRepos={loadRepos} onDelete={(id) => deleteCredential("github", id)} reposByCredential={reposByCredential} repoFilters={repoFilters} setRepoFilters={setRepoFilters} />
-        )}
-        {view === "domains" && <DomainsView domains={domains} />}
-        {view === "networking" && <NetworkingView network={network} refresh={loadNetwork} onSaveService={saveService} onDeleteService={deleteService} onSaveIngress={saveIngress} onDeleteIngress={deleteIngress} onSaveNetworkPolicy={saveNetworkPolicy} onDeleteNetworkPolicy={deleteNetworkPolicy} />}
-        {view === "cloudflare" && <CloudflareView credentials={credentials.cloudflare} domains={domains} selectedID={selectedCloudflareID} setSelectedID={setSelectedCloudflareID} dnsRecords={dnsRecords} editingRecord={editingDNSRecord} setEditingRecord={setEditingDNSRecord} onCreate={createCredential} onDelete={(id) => deleteCredential("cloudflare", id)} onLoadDNS={loadDNSRecords} onSaveDNS={saveDNSRecord} onDeleteDNS={deleteDNSRecord} />}
-        {view === "accessControl" && <CredentialManager kind="basaltpass" rows={credentials.basaltpass} onCreate={createCredential} onDelete={deleteCredential} />}
-        {["namespaces", "pods", "nodes", "ingresses", "services"].includes(view) && <RuntimeTable kind={view} rows={runtime[view] || []} nodeJoinCommand={nodeJoinCommand} onLoadNodeJoinCommand={loadNodeJoinCommand} onCreateNamespace={createNamespace} onPatchNamespace={patchNamespaceLabels} onNamespaceDetail={loadNamespaceDetail} onDeleteNamespace={deleteNamespace} onDeletePod={deletePod} onNodeDetail={loadNodeDetail} onPodLogs={loadPodLogs} onSaveService={saveService} onDeleteService={deleteService} onDetail={setRuntimeDetail} />}
       </main>
       {editingProject && <ProjectModal project={editingProject} onClose={() => setEditingProject(null)} onSubmit={updateProject} />}
       {deletingProject && <DeleteProjectModal project={deletingProject} busy={loading} onClose={() => setDeletingProject(null)} onDelete={confirmDeleteProject} />}
@@ -1474,6 +1495,47 @@ function PageHeading({title, subtitle, actions}) {
       {actions && <div className="top-actions">{actions}</div>}
     </section>
   );
+}
+
+function SkeletonPage() {
+  return (
+    <div className="skeleton-page">
+      <div className="skeleton-header">
+        <div className="skeleton-line w-40" />
+        <div className="skeleton-line w-60" />
+      </div>
+      <div className="skeleton-grid">
+        {Array.from({length: 6}).map((_, index) => (
+          <div className="skeleton-card" key={`skeleton-card-${index}`}>
+            <div className="skeleton-line w-70" />
+            <div className="skeleton-line w-50" />
+            <div className="skeleton-line w-80" />
+          </div>
+        ))}
+      </div>
+      <div className="skeleton-table">
+        <div className="skeleton-row">
+          {Array.from({length: 6}).map((_, index) => (
+            <div className="skeleton-line w-60" key={`skeleton-head-${index}`} />
+          ))}
+        </div>
+        {Array.from({length: 4}).map((_, index) => (
+          <div className="skeleton-row" key={`skeleton-row-${index}`}>
+            {Array.from({length: 6}).map((_, cellIndex) => (
+              <div className="skeleton-line w-80" key={`skeleton-cell-${index}-${cellIndex}`} />
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function shouldShowSkeleton(view, loading, dashboard, network) {
+  if (loading) return true;
+  if (["dashboard", "alerts", "events", "metrics"].includes(view)) return !dashboard;
+  if (view === "networking") return !network;
+  return false;
 }
 
 function DeployView({credentials, namespaces, selectedCredential, setSelectedCredential, repos, selectedRepo, analysis, setAnalysis, form, setForm, loadRepos, analyzeRepo, checkInstallSource, deployProject, containerRegistries, containerImages, createTrackedImageFromDeploy, onConnectGitHub}) {
@@ -1513,6 +1575,7 @@ function DeployView({credentials, namespaces, selectedCredential, setSelectedCre
   };
   const setUpdateMode = (updateMode) => {
     setForm({...form, update_mode: form.deploy_source === "registry" ? "passive" : updateMode, auto_deploy: updateMode === "argocd"});
+    setStepIndex((current) => (deploySteps[current]?.id === "update" ? Math.min(current + 1, deploySteps.length - 1) : current));
   };
   const selectTrackedImage = (image, tag = "") => {
     const ref = imageReferenceFromTrackedImage(image, tag);
@@ -1546,6 +1609,11 @@ function DeployView({credentials, namespaces, selectedCredential, setSelectedCre
       setCheckingInstall(false);
     }
   };
+  useEffect(() => {
+    if (step.id !== "check") return;
+    if (checkingInstall || analysis) return;
+    runInstallCheck();
+  }, [step.id]);
   const next = async () => {
     if (step.id === "check") {
       const result = await runInstallCheck();
@@ -1821,7 +1889,7 @@ function DeployView({credentials, namespaces, selectedCredential, setSelectedCre
             {form.deploy_source === "gitops" && form.update_mode === "argocd" && <span>Future GHCR image <b>{ghcrPreview}</b></span>}
           </div>
         )}
-        {step.id !== "method" && (
+        {step.id !== "method" && step.id !== "update" && (
           <div className="wizard-actions">
             <button type="button" onClick={back} disabled={stepIndex === 0}>Back</button>
             {step.id === "confirm" ? (
@@ -2053,7 +2121,7 @@ function progressJobs(progress, installProgress, readyPods, pods, deployments, e
   const buildSteps = deployments.length > 0
     ? deployments.slice(0, 8).map((deployment, index) => ({
         label: deployment.image_ref || deployment.tag || deployment.commit_sha || `Deployment ${deployment.id}`,
-        status: deployment.status === "failed" ? "failed" : ["deployed", "provisioned"].includes(deployment.status) ? "done" : "running",
+        status: deployment.status === "failed" ? "failed" : ["deployed", "running"].includes(deployment.status) ? "done" : deployment.status === "provisioned" ? "running" : "running",
         duration: index === 0 ? "latest" : "",
         log: [
           `status=${deployment.status || "pending"}`,
@@ -2061,10 +2129,12 @@ function progressJobs(progress, installProgress, readyPods, pods, deployments, e
           `commit=${deployment.commit_sha || "-"}`,
           deployment.workflow_url ? `workflow=${deployment.workflow_url}` : "",
           deployment.failure_reason ? `error=${deployment.failure_reason}` : "",
+          deployment.status === "provisioned" ? "note=control-plane resources were created; waiting for workload build/sync/runtime readiness" : "",
         ].filter(Boolean).join("\n"),
       }))
     : [{label: "No build record yet", status: "pending", log: "BeanCS has not recorded a build/deployment record yet."}];
   const hasWarningEvents = events.some((event) => event.type === "Warning");
+  const missingDeployment = progress && !progress.deployment;
   const runtimeStatus = progress?.error || hasWarningEvents || pods.some((pod) => pod.status === "Failed") ? "failed" : readyPods >= pods.length && pods.length > 0 ? "done" : "running";
   const installStatus = installSteps.some((step) => step.status === "failed") ? "failed" : installSteps.some((step) => step.status === "running") ? "running" : "done";
   const buildStatus = buildSteps.some((step) => step.status === "failed") ? "failed" : buildSteps.some((step) => step.status === "running") ? "running" : buildSteps.some((step) => step.status === "pending") ? "pending" : "done";
@@ -2084,8 +2154,9 @@ function progressJobs(progress, installProgress, readyPods, pods, deployments, e
       detail: `${readyPods}/${pods.length} pods`,
       description: "Live Kubernetes workload readiness for this project.",
       steps: [
-        {label: "Load project status", status: progress ? "done" : "pending", duration: "0s", log: `checked_at=${formatTime(progress?.checked_at)}`},
-        {label: "Replica readiness", status: runtimeStatus, expanded: true, log: `ready_pods=${readyPods}\ntotal_pods=${pods.length}\nerror=${progress?.error || "-"}`},
+        {label: "Load project status", status: progress ? "done" : "pending", duration: "0s", log: `namespace=${progress?.project?.namespace || "-"}\nproject=${progress?.project?.name || "-"}\nchecked_at=${formatTime(progress?.checked_at)}`},
+        ...(missingDeployment ? [{label: "Find Kubernetes Deployment", status: "running", expanded: true, log: `deployment=${progress?.project?.namespace || "-"}/${progress?.project?.name || "-"} not found yet\nservices=${(progress?.services || []).length}\ningresses=${(progress?.ingresses || []).length}\nThis usually means the image build or GitOps/Argo CD sync has not created the workload yet.`}] : []),
+        {label: "Replica readiness", status: runtimeStatus, expanded: !missingDeployment, log: `ready_pods=${readyPods}\ntotal_pods=${pods.length}\nready_replicas=${progress?.deployment?.ready_replicas ?? 0}\ndesired_replicas=${progress?.deployment?.replicas ?? progress?.project?.replicas ?? 0}\nerror=${progress?.error || "-"}`},
         ...(hasWarningEvents ? [{label: "Kubernetes warnings", status: "failed", log: `${events.filter((event) => event.type === "Warning").length} warning event(s). See Kubernetes events below for full messages.`}] : []),
         ...pods.slice(0, 8).map((pod) => ({
           label: pod.name || "pod",
@@ -3672,8 +3743,9 @@ function profileFromToken(token) {
   if (!token || !token.includes(".")) return fallback;
   try {
     const payload = JSON.parse(base64URLDecode(token.split(".")[1]));
-    const name = payload.name || payload.preferred_username || payload.email || payload.sub || fallback.name;
-    const detail = payload.email && payload.email !== name ? payload.email : payload.preferred_username && payload.preferred_username !== name ? payload.preferred_username : "BeanCS session";
+    const pick = (values) => values.map((value) => String(value || "").trim()).find(Boolean) || "";
+    const name = pick([payload.name, payload.preferred_username, payload.username, payload.user, payload.login, payload.email, payload.sub]) || fallback.name;
+    const detail = pick([payload.email, payload.preferred_username, payload.username, payload.login, payload.sub].filter((value) => String(value || "").trim() && String(value || "").trim() !== name)) || "BeanCS session";
     return {name, detail, initial: String(name).trim().slice(0, 1).toUpperCase() || "U", scopes: String(payload.scope || "").split(/\s+/).filter(Boolean)};
   } catch {
     return fallback;
