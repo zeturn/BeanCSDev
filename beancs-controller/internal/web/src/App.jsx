@@ -1035,7 +1035,7 @@ function App() {
       setSelectedRepo(repoFullName);
       setDeployForm((current) => ({
 	    ...current,
-	    name: slugify(repoFullName.split("/")[1] || repoFullName),
+	    name: current.name || slugify(repoFullName.split("/")[1] || repoFullName),
 	    github_repo: repoFullName,
 	    github_branch: branch,
 	    dockerfile_path: data.dockerfile_path || "",
