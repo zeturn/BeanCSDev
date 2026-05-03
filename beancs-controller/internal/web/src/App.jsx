@@ -1020,21 +1020,26 @@ function App() {
 	setError("");
 	setNotice("");
 	const branch = branchOverride || deployForm.github_branch || "main";
-	const data = await api.post("/projects/analyze", {
-	  github_credential_id: Number(selectedCredential),
-	  github_repo: repoFullName,
-	  github_branch: branch,
-	});
-    setAnalysis(data);
-    setSelectedRepo(repoFullName);
-    setDeployForm((current) => ({
-	  ...current,
-	  name: slugify(repoFullName.split("/")[1] || repoFullName),
-	  github_repo: repoFullName,
-	  github_branch: branch,
-	  dockerfile_path: data.dockerfile_path || "",
-	  port: data.default_port || 8080,
-	}));
+	try {
+	  const data = await api.post("/projects/analyze", {
+	    github_credential_id: Number(selectedCredential),
+	    github_repo: repoFullName,
+	    github_branch: branch,
+	  });
+      setAnalysis(data);
+      setSelectedRepo(repoFullName);
+      setDeployForm((current) => ({
+	    ...current,
+	    name: slugify(repoFullName.split("/")[1] || repoFullName),
+	    github_repo: repoFullName,
+	    github_branch: branch,
+	    dockerfile_path: data.dockerfile_path || "",
+	    port: data.default_port || 8080,
+	  }));
+	} catch (err) {
+	  setAnalysis(null);
+	  setError(`Repository analysis failed: ${err.message}`);
+	}
   }
 
   function checkInstallSource(nextForm = deployForm) {
@@ -3332,7 +3337,7 @@ function makeAPI(token, onUnauthorized) {
     });
     const data = await res.json().catch(() => ({}));
     if (res.status === 401 && isSessionAuthError(data)) onUnauthorized();
-    if (!res.ok) throw new Error(data.error || data.error_description || "Request failed");
+    if (!res.ok) throw new Error(data.error || data.error_description || `Request failed (${res.status})`);
     return data;
   }
   async function stream(path, options = {}) {
@@ -3346,7 +3351,7 @@ function makeAPI(token, onUnauthorized) {
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       if (res.status === 401 && isSessionAuthError(data)) onUnauthorized();
-      throw new Error(data.error || data.error_description || "Request failed");
+      throw new Error(data.error || data.error_description || `Request failed (${res.status})`);
     }
     return res;
   }

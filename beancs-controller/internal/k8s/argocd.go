@@ -2,6 +2,8 @@ package k8s
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -33,6 +35,9 @@ func (m *Manager) ApplyArgoCDApplication(ctx context.Context, projectName, repoU
 	current, err := resource.Get(ctx, projectName, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		_, err = resource.Create(ctx, app, metav1.CreateOptions{})
+		if apierrors.IsNotFound(err) && strings.Contains(strings.ToLower(err.Error()), "requested resource") {
+			return fmt.Errorf("Argo CD Application CRD is not installed or not reachable in this cluster; install Argo CD first or choose passive update mode")
+		}
 		return err
 	}
 	if err != nil {
