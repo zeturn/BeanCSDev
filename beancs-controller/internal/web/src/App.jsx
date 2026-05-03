@@ -3169,8 +3169,8 @@ function makeAPI(token, onUnauthorized) {
         ...(options.headers || {}),
       },
     });
-    if (res.status === 401) onUnauthorized();
     const data = await res.json().catch(() => ({}));
+    if (res.status === 401 && isSessionAuthError(data)) onUnauthorized();
     if (!res.ok) throw new Error(data.error || data.error_description || "Request failed");
     return data;
   }
@@ -3182,9 +3182,9 @@ function makeAPI(token, onUnauthorized) {
         ...(options.headers || {}),
       },
     });
-    if (res.status === 401) onUnauthorized();
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
+      if (res.status === 401 && isSessionAuthError(data)) onUnauthorized();
       throw new Error(data.error || data.error_description || "Request failed");
     }
     return res;
@@ -3197,6 +3197,11 @@ function makeAPI(token, onUnauthorized) {
     delete: (path) => request(path, {method: "DELETE"}),
     stream,
   };
+}
+
+function isSessionAuthError(data) {
+  const error = String(data?.error || data?.error_description || "").toLowerCase();
+  return error === "missing token" || error === "invalid token" || error === "invalid api key";
 }
 
 async function consumeTextStream(res, onChunk) {
