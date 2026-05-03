@@ -1085,9 +1085,14 @@ function App() {
     setInstallProgress({
       project: payload.name,
       started_at: new Date().toISOString(),
+      logs: [
+        `Starting deploy for ${payload.name}`,
+        `Source: ${payload.github_repo || payload.image_reference || payload.build_source}`,
+        `Namespace: ${payload.namespace || `proj-${payload.name}`}`,
+      ],
       steps: [
         {label: "Validate install source", state: "done"},
-        {label: "Create namespace and secrets", state: "running"},
+        {label: "Create project resources", state: "running"},
         {label: "Apply service and ingress", state: "pending"},
         {label: "Apply deployment or GitOps manifests", state: "pending"},
       ],
@@ -1099,6 +1104,7 @@ function App() {
       setActiveProgressProjectID(String(created.id));
       setInstallProgress((current) => current ? {
         ...current,
+        logs: [...(current.logs || []), `Project created with id ${created.id}`, "Initial provisioning completed."],
         steps: current.steps.map((step) => ({...step, state: "done"})),
       } : null);
       setDeployForm(defaultDeployForm());
@@ -1110,7 +1116,8 @@ function App() {
       setError(err.message);
       setInstallProgress((current) => current ? {
         ...current,
-        steps: current.steps.map((step) => step.state === "running" ? {...step, state: "failed"} : step),
+        logs: [...(current.logs || []), `ERROR: ${err.message}`],
+        steps: current.steps.map((step) => step.state === "running" ? {...step, state: "failed", log: err.message} : step),
       } : null);
     } finally {
       setLoading(false);
@@ -1810,14 +1817,16 @@ function ProgressView({projects, activeProjectID, setActiveProjectID, progress, 
   const pods = progress?.pods || [];
   const events = progress?.events || [];
   const deployments = progress?.deployments || [];
+  const currentProjectName = progress?.project?.name || installProgress?.project || "";
+  const scopedInstallProgress = installProgress && (!progress?.project?.name || installProgress.project === progress.project.name) ? installProgress : null;
   const readyPods = pods.filter((pod) => Number(pod.ready_containers || 0) > 0 && Number(pod.ready_containers) === Number(pod.total_containers || 0)).length;
   const desiredReplicas = progress?.deployment?.replicas ?? progress?.project?.replicas ?? 0;
   const readyReplicas = progress?.deployment?.ready_replicas ?? 0;
   const logs = logFollow ? liveLogs : progress?.logs;
-  const jobs = progressJobs(progress, installProgress, readyPods, pods, deployments, events);
+  const jobs = progressJobs(progress, scopedInstallProgress, readyPods, pods, deployments, events);
   const selectedJob = jobs.find((job) => job.id === activeJob) || jobs[0];
   const visibleLogs = filterLogLines(logs || "", logQuery);
-  if (!activeProjectID) {
+  if (!activeProjectID && !scopedInstallProgress) {
     return <ProgressListView projects={projects} onSelect={(project) => setActiveProjectID(String(project.id))} refresh={refreshList} />;
   }
   return (
@@ -1825,14 +1834,14 @@ function ProgressView({projects, activeProjectID, setActiveProjectID, progress, 
       <section className="process-topbar">
         <div>
           <h2><ProgressStatusIcon status={selectedJob?.status || "pending"} /> {progress?.project?.display_name || progress?.project?.name || "Deployment process"}</h2>
-          <p>{progress?.project?.namespace || "Choose a project"}{progress?.checked_at ? ` · checked ${formatTime(progress.checked_at)}` : ""}</p>
+          <p>{progress?.project?.namespace || currentProjectName || "Choose a project"}{progress?.checked_at ? ` · checked ${formatTime(progress.checked_at)}` : ""}</p>
         </div>
         <div className="progress-controls">
           <select value={activeProjectID} onChange={(event) => setActiveProjectID(event.target.value)}>
             <option value="">Choose project</option>
             {projects.map((project) => <option key={project.id} value={project.id}>{project.display_name || project.name}</option>)}
           </select>
-          <button onClick={() => refresh()}><RefreshCw size={15} /> Refresh</button>
+          <button onClick={() => activeProjectID ? refresh() : refreshList()}><RefreshCw size={15} /> Refresh</button>
         </div>
       </section>
 
@@ -1903,6 +1912,18 @@ function ProgressView({projects, activeProjectID, setActiveProjectID, progress, 
                   </div>
                 ))}
               </div>
+              <ProgressEvidence
+                progress={progress}
+                installProgress={scopedInstallProgress}
+                deployments={deployments}
+                events={events}
+                logs={visibleLogs}
+                logFollow={logFollow}
+                logStatus={logStatus}
+                onRefresh={() => activeProjectID ? refresh() : refreshList()}
+                onStartLogFollow={() => progress?.project?.id && onStartLogFollow(progress.project.id)}
+                onStopLogFollow={onStopLogFollow}
+              />
             </>
           )}
         </section>
@@ -1938,6 +1959,55 @@ function ProgressListView({projects, onSelect, refresh}) {
   );
 }
 
+function ProgressEvidence({progress, installProgress, deployments, events, logs, logFollow, logStatus, onRefresh, onStartLogFollow, onStopLogFollow}) {
+  const installLogs = (installProgress?.logs || []).join("\n");
+  const deploymentText = deployments.length
+    ? deployments.slice(0, 12).map((deployment) => [
+        `#${deployment.id || "-"} ${deployment.status || "pending"}`,
+        `image=${deployment.image_ref || deployment.tag || "-"}`,
+        `commit=${deployment.commit_sha || "-"}`,
+        deployment.workflow_url ? `workflow=${deployment.workflow_url}` : "",
+        deployment.failure_reason ? `error=${deployment.failure_reason}` : "",
+      ].filter(Boolean).join("\n")).join("\n\n")
+    : "No deployment records yet.";
+  const eventText = events.length
+    ? events.slice(0, 20).map((event) => [
+        `${event.type || "Event"} ${event.reason || ""}`.trim(),
+        `object=${event.object || "-"}`,
+        `count=${event.count || 1}`,
+        `last_seen=${formatTime(event.last_seen)}`,
+        event.message || "",
+      ].filter(Boolean).join("\n")).join("\n\n")
+    : "No Kubernetes events reported for this project.";
+  return (
+    <div className="process-evidence-grid">
+      <section className="process-evidence-card">
+        <h3>Install log</h3>
+        <pre>{installLogs || progress?.error || "No active install log for this project."}</pre>
+      </section>
+      <section className="process-evidence-card">
+        <h3>Deployment records</h3>
+        <pre>{deploymentText}</pre>
+      </section>
+      <section className="process-evidence-card">
+        <h3>Kubernetes events</h3>
+        <pre>{eventText}</pre>
+      </section>
+      <section className="process-evidence-card span-2">
+        <div className="process-evidence-head">
+          <h3>Runtime logs</h3>
+          <div className="row-actions process-log-actions">
+            <button type="button" onClick={onRefresh} disabled={logFollow}><RefreshCw size={15} /> Snapshot</button>
+            {logFollow ? <button type="button" onClick={onStopLogFollow}>Stop follow</button> : <button type="button" className="primary" onClick={onStartLogFollow} disabled={!progress?.project?.id}>Follow live</button>}
+          </div>
+        </div>
+        {logStatus && <p className="log-status">{logStatus}</p>}
+        <pre>{logs || "No container logs yet. If the workload has not created pods, Kubernetes events above are the source of truth."}</pre>
+      </section>
+    </div>
+  );
+}
+
 function progressJobs(progress, installProgress, readyPods, pods, deployments, events) {
   if (!progress && !installProgress) {
     return [{
@@ -1953,12 +2023,12 @@ function progressJobs(progress, installProgress, readyPods, pods, deployments, e
     label: step.label,
     status: step.state,
     duration: step.state === "running" ? "now" : "",
-    log: `${step.label}: ${step.state}`,
+    log: step.log || `${step.label}: ${step.state}`,
   }));
-  const deploymentSteps = deployments.length > 0
+  const buildSteps = deployments.length > 0
     ? deployments.slice(0, 8).map((deployment, index) => ({
         label: deployment.image_ref || deployment.tag || deployment.commit_sha || `Deployment ${deployment.id}`,
-        status: deployment.status === "failed" ? "failed" : ["deployed", "provisioned", "running"].includes(deployment.status) ? "done" : "running",
+        status: deployment.status === "failed" ? "failed" : ["deployed", "provisioned"].includes(deployment.status) ? "done" : "running",
         duration: index === 0 ? "latest" : "",
         log: [
           `status=${deployment.status || "pending"}`,
@@ -1968,21 +2038,16 @@ function progressJobs(progress, installProgress, readyPods, pods, deployments, e
           deployment.failure_reason ? `error=${deployment.failure_reason}` : "",
         ].filter(Boolean).join("\n"),
       }))
-    : [{label: "No deployment events", status: "pending", log: "BeanCS has not recorded a deployment event yet."}];
-  const eventSteps = events.length > 0
-    ? events.slice(0, 10).map((event) => ({
-        label: event.reason || event.type || "Kubernetes event",
-        status: event.type === "Warning" ? "failed" : "done",
-        duration: event.count ? `${event.count}x` : "",
-        log: `${event.object || "-"}\n${event.message || ""}\nlast_seen=${formatTime(event.last_seen)}`,
-      }))
-    : [{label: "No Kubernetes events", status: "done", log: "No Kubernetes events reported for this project."}];
-  const runtimeStatus = progress?.error ? "failed" : readyPods >= pods.length && pods.length > 0 ? "done" : "running";
+    : [{label: "No build record yet", status: "pending", log: "BeanCS has not recorded a build/deployment record yet."}];
+  const hasWarningEvents = events.some((event) => event.type === "Warning");
+  const runtimeStatus = progress?.error || hasWarningEvents || pods.some((pod) => pod.status === "Failed") ? "failed" : readyPods >= pods.length && pods.length > 0 ? "done" : "running";
+  const installStatus = installSteps.some((step) => step.status === "failed") ? "failed" : installSteps.some((step) => step.status === "running") ? "running" : "done";
+  const buildStatus = buildSteps.some((step) => step.status === "failed") ? "failed" : buildSteps.some((step) => step.status === "running") ? "running" : buildSteps.some((step) => step.status === "pending") ? "pending" : "done";
   return [
     {
       id: "install",
       label: "install",
-      status: installSteps.some((step) => step.status === "failed") ? "failed" : installSteps.some((step) => step.status === "running") ? "running" : "done",
+      status: installStatus,
       detail: installSteps.length ? `${installSteps.length} steps` : "created",
       description: "Project creation, namespace preparation, and traffic route setup.",
       steps: installSteps.length ? installSteps : [{label: "Project already created", status: "done", log: "No active install step is running."}],
@@ -1996,36 +2061,21 @@ function progressJobs(progress, installProgress, readyPods, pods, deployments, e
       steps: [
         {label: "Load project status", status: progress ? "done" : "pending", duration: "0s", log: `checked_at=${formatTime(progress?.checked_at)}`},
         {label: "Replica readiness", status: runtimeStatus, expanded: true, log: `ready_pods=${readyPods}\ntotal_pods=${pods.length}\nerror=${progress?.error || "-"}`},
+        ...(hasWarningEvents ? [{label: "Kubernetes warnings", status: "failed", log: `${events.filter((event) => event.type === "Warning").length} warning event(s). See Kubernetes events below for full messages.`}] : []),
         ...pods.slice(0, 8).map((pod) => ({
           label: pod.name || "pod",
           status: pod.status === "Running" && Number(pod.ready_containers) === Number(pod.total_containers) ? "done" : pod.status === "Failed" ? "failed" : "running",
-          log: `status=${pod.status || "-"}\nready=${pod.ready_containers}/${pod.total_containers}\ncontainers=${(pod.containers || []).join(", ") || "-"}`,
+          log: `status=${pod.status || "-"}\nreason=${pod.reason || "-"}\nmessage=${pod.message || "-"}\nready=${pod.ready_containers}/${pod.total_containers}\nrestarts=${pod.restarts || 0}\ncontainers=${(pod.containers || []).join(", ") || "-"}`,
         })),
       ],
     },
     {
-      id: "deployments",
-      label: "deployments",
-      status: deploymentSteps.some((step) => step.status === "failed") ? "failed" : deploymentSteps.some((step) => step.status === "running") ? "running" : "done",
-      detail: `${deployments.length} events`,
+      id: "build",
+      label: "build",
+      status: buildStatus,
+      detail: `${deployments.length} records`,
       description: "Build, GitOps, and rollout deployment records.",
-      steps: deploymentSteps,
-    },
-    {
-      id: "events",
-      label: "events",
-      status: events.some((event) => event.type === "Warning") ? "failed" : "done",
-      detail: `${events.length} events`,
-      description: "Kubernetes events associated with the project namespace and objects.",
-      steps: eventSteps,
-    },
-    {
-      id: "logs",
-      label: "logs",
-      status: "running",
-      detail: "snapshot",
-      description: "Container log snapshot or live follow output.",
-      steps: [{label: "Container log output", status: "running", expanded: true, kind: "logs"}],
+      steps: buildSteps,
     },
   ];
 }
