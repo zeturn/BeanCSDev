@@ -108,7 +108,10 @@ func (s *GitHubBuildService) ensureWorkflow(ctx context.Context, token, owner, r
 		var err error
 		callbackEnabled, err = s.ensureWebhookSecrets(ctx, token, owner, repo, webhookURL)
 		if err != nil {
-			return err
+			if !isGitHubSecretsPermissionError(err) {
+				return err
+			}
+			callbackEnabled = false
 		}
 	}
 	return putFile(ctx, client, owner, repo, beancsBuildWorkflowPath, beancsBuildWorkflow(project, callbackEnabled), "beancs: add build workflow")
@@ -404,6 +407,19 @@ func githubSecretsPermissionError(owner, repo string, err error) error {
 		return fmt.Errorf("GitHub App installation for %s/%s cannot manage repository Actions secrets. Update the GitHub App permissions to include Repository permissions: Contents read/write, Actions read/write, and Secrets read/write, then reinstall or approve the app installation", owner, repo)
 	}
 	return err
+}
+
+func isGitHubSecretsPermissionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var apiErr *githubAPIError
+	if errors.As(err, &apiErr) {
+		return apiErr.StatusCode == http.StatusForbidden && strings.Contains(apiErr.Body, "Resource not accessible by integration")
+	}
+	message := err.Error()
+	return strings.Contains(message, "cannot manage repository Actions secrets") ||
+		(strings.Contains(message, "Resource not accessible by integration") && strings.Contains(message, "actions/secrets"))
 }
 
 func githubActionsPermissionError(owner, repo string, err error) error {
