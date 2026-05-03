@@ -1594,18 +1594,33 @@ function DeployView({credentials, namespaces, selectedCredential, setSelectedCre
                         <div className="repo-search-box"><Search size={18} /><input value={repoSearch} onChange={(event) => setRepoSearch(event.target.value)} placeholder="Search..." /></div>
                       </div>
                       <div className="import-repo-list">
-                        {visibleRepos.map((repo) => (
-                          <div key={repo.full_name} className={selectedRepo === repo.full_name ? "import-repo-row active" : "import-repo-row"}>
-                            <div>
-                              <Github size={18} />
-                              <span>{repo.name || repo.full_name.split("/")[1]}</span>
-                              <small>· {formatRepoDate(repo)}</small>
+                        {visibleRepos.map((repo) => {
+                          const isSelected = form.github_repo === repo.full_name || selectedRepo === repo.full_name;
+                          const repoName = repo.name || repo.full_name.split("/")[1];
+                          const branch = repo.default_branch || "main";
+                          return (
+                            <div key={repo.full_name} className={isSelected ? "import-repo-row active" : "import-repo-row"}>
+                              <div>
+                                <Github size={17} />
+                                <span>{repoName}</span>
+                                <small>· {branch}</small>
+                                {isSelected && <b className="selected-repo-pill"><CheckCircle2 size={14} /> Selected</b>}
+                              </div>
+                              <button type="button" onClick={() => { setForm({...form, github_repo: repo.full_name, github_branch: branch, name: form.name || slugify(repoName)}); analyzeRepo(repo.full_name, branch); }}>
+                                {isSelected ? "Selected" : "Import"}
+                              </button>
                             </div>
-                            <button type="button" onClick={() => { setForm({...form, github_repo: repo.full_name, github_branch: repo.default_branch || "main", name: slugify(repo.name || repo.full_name.split("/")[1])}); analyzeRepo(repo.full_name, repo.default_branch); }}>Import</button>
-                          </div>
-                        ))}
+                          );
+                        })}
                         {visibleRepos.length === 0 && <div className="empty">{selectedCredential ? "No repositories match this search." : "Choose a GitHub account to load repositories."}</div>}
                       </div>
+                      {form.github_repo && (
+                        <div className="selected-repo-summary">
+                          <CheckCircle2 size={16} />
+                          <span>Selected repository</span>
+                          <b>{form.github_repo} @ {form.github_branch || "main"}</b>
+                        </div>
+                      )}
                     </div>
                   </>
                 )}

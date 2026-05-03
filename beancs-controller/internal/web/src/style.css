@@ -488,13 +488,14 @@ button.ghost:hover,
 
 .import-repo-panel {
   display: grid;
-  gap: 18px;
-  max-width: 760px;
+  gap: 14px;
+  max-width: 1040px;
 }
 
 .import-repo-panel h3 {
   margin: 0;
-  font-size: 30px;
+  font-size: 22px;
+  line-height: 1.25;
   color: #020617;
 }
 
@@ -512,8 +513,8 @@ button.ghost:hover,
 .account-picker-button,
 .repo-search-box {
   width: 100%;
-  min-height: 58px;
-  border-radius: 10px;
+  min-height: 48px;
+  border-radius: 8px;
   border-color: #d1d5db;
   background: #ffffff;
 }
@@ -521,7 +522,7 @@ button.ghost:hover,
 .account-picker-button {
   justify-content: flex-start;
   padding: 0 16px;
-  font-size: 20px;
+  font-size: 15px;
 }
 
 .account-picker-button span:not(.chevron) {
@@ -556,11 +557,11 @@ button.ghost:hover,
 
 .account-menu button {
   width: 100%;
-  min-height: 50px;
+  min-height: 42px;
   justify-content: flex-start;
   border-color: transparent;
   background: transparent;
-  font-size: 18px;
+  font-size: 14px;
 }
 
 .account-menu button.active {
@@ -580,10 +581,10 @@ button.ghost:hover,
 }
 
 .repo-search-box input {
-  min-height: 54px;
+  min-height: 44px;
   border: 0;
   padding: 0;
-  font-size: 18px;
+  font-size: 15px;
 }
 
 .import-repo-list {
@@ -595,15 +596,16 @@ button.ghost:hover,
 
 .import-repo-row {
   width: 100%;
-  min-height: 88px;
+  min-height: 68px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 16px;
   align-items: center;
   border: 0;
   border-bottom: 1px solid #e5e7eb;
+  border-left: 3px solid transparent;
   border-radius: 0;
-  padding: 16px 22px;
+  padding: 14px 18px 14px 15px;
   text-align: left;
 }
 
@@ -620,33 +622,69 @@ button.ghost:hover,
 
 .import-repo-row span {
   overflow: hidden;
-  font-size: 18px;
+  font-size: 15px;
   font-weight: 700;
   text-overflow: ellipsis;
 }
 
 .import-repo-row small {
   color: #64748b;
-  font-size: 18px;
+  font-size: 14px;
   font-weight: 400;
 }
 
 .import-repo-row > button {
-  min-height: 44px;
+  min-height: 38px;
   border-color: #0f172a;
   background: #0f172a;
   color: #ffffff;
-  font-size: 18px;
+  font-size: 14px;
   font-weight: 800;
 }
 
 .import-repo-row.active {
-  background: #f1f5f9;
+  border-left-color: #155e75;
+  background: #ecfeff;
 }
 
 .import-repo-row.active > button {
   border-color: #155e75;
   background: #155e75;
+}
+
+.selected-repo-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 2px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #dff7f4;
+  color: #155e75;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.selected-repo-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #99f6e4;
+  border-radius: 8px;
+  background: #f0fdfa;
+  color: #155e75;
+  font-size: 14px;
+}
+
+.selected-repo-summary b {
+  min-width: 0;
+  overflow: hidden;
+  color: #0f172a;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .wizard-actions {
