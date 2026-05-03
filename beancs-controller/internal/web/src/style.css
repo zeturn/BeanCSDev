@@ -650,6 +650,10 @@ button.domain-tile {
   grid-template-columns: repeat(6, minmax(130px, 1fr)) minmax(160px, auto);
 }
 
+.api-key-table .tr {
+  grid-template-columns: 1.1fr 0.8fr 1.2fr 1fr 1fr 0.8fr;
+}
+
 .empty {
   padding: 24px;
   color: #64748b;
@@ -822,6 +826,101 @@ button.domain-tile {
   white-space: pre-wrap;
 }
 
+.api-key-created pre {
+  overflow: auto;
+  margin: 0;
+  padding: 12px;
+  border-radius: 7px;
+  background: #0f172a;
+  color: #dbeafe;
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+}
+
+.api-key-form {
+  grid-template-columns: minmax(220px, 1fr) minmax(220px, 0.8fr) minmax(220px, 1fr) auto;
+  align-items: center;
+}
+
+.node-detail {
+  display: grid;
+  gap: 16px;
+}
+
+.node-status-grid,
+.resource-grid,
+.condition-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.node-section {
+  display: grid;
+  gap: 10px;
+}
+
+.node-section h3 {
+  margin: 0;
+  font-size: 14px;
+  color: #334155;
+}
+
+.resource-meter,
+.condition {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.resource-meter div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.resource-meter progress {
+  width: 100%;
+  height: 10px;
+}
+
+.resource-meter small,
+.condition small,
+.condition p {
+  color: #64748b;
+  margin: 0;
+}
+
+.condition.good {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.condition.warning {
+  border-color: #fed7aa;
+  background: #fff7ed;
+}
+
+.label-cloud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 160px;
+  overflow: auto;
+}
+
+.label-cloud span {
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #475569;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
 .dot {
   width: 10px;
   height: 10px;
@@ -866,6 +965,47 @@ button.domain-tile {
   color: #dbeafe;
   font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   white-space: pre-wrap;
+}
+
+.container-log-viewer {
+  display: grid;
+  gap: 12px;
+}
+
+.container-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-height: 150px;
+  overflow: auto;
+}
+
+.container-chip {
+  height: auto;
+  min-height: 44px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  max-width: 260px;
+}
+
+.container-chip small {
+  color: #64748b;
+  max-width: 230px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.container-chip.active {
+  border-color: #155e75;
+  background: #ecfeff;
+  color: #155e75;
+}
+
+.compact-select {
+  width: auto;
+  min-width: 150px;
 }
 
 .modal h2 {

@@ -14,7 +14,10 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 type RuntimeOverview struct {
@@ -35,6 +38,53 @@ type NodeSummary struct {
 	Labels     map[string]string `json:"labels,omitempty"`
 	AgeSeconds int64             `json:"age_seconds"`
 	CreatedAt  time.Time         `json:"created_at"`
+}
+
+type NodeDetail struct {
+	Summary          NodeSummary            `json:"summary"`
+	Addresses        map[string]string      `json:"addresses"`
+	Capacity         NodeResources          `json:"capacity"`
+	Allocatable      NodeResources          `json:"allocatable"`
+	Usage            *NodeResourceUsage     `json:"usage,omitempty"`
+	Conditions       []NodeConditionSummary `json:"conditions"`
+	Taints           []string               `json:"taints"`
+	Pods             []PodSummary           `json:"pods"`
+	Labels           map[string]string      `json:"labels,omitempty"`
+	Annotations      map[string]string      `json:"annotations,omitempty"`
+	SystemInfo       map[string]string      `json:"system_info"`
+	MetricsAvailable bool                   `json:"metrics_available"`
+	MetricsError     string                 `json:"metrics_error,omitempty"`
+	CheckedAt        time.Time              `json:"checked_at"`
+}
+
+type NodeResources struct {
+	CPUMillis      int64  `json:"cpu_millis"`
+	MemoryBytes    int64  `json:"memory_bytes"`
+	Pods           int64  `json:"pods"`
+	EphemeralBytes int64  `json:"ephemeral_bytes"`
+	CPU            string `json:"cpu"`
+	Memory         string `json:"memory"`
+	Ephemeral      string `json:"ephemeral"`
+}
+
+type NodeResourceUsage struct {
+	CPUMillis                int64   `json:"cpu_millis"`
+	MemoryBytes              int64   `json:"memory_bytes"`
+	CPU                      string  `json:"cpu"`
+	Memory                   string  `json:"memory"`
+	CPUAllocatablePercent    float64 `json:"cpu_allocatable_percent"`
+	MemoryAllocatablePercent float64 `json:"memory_allocatable_percent"`
+	CPUCapacityPercent       float64 `json:"cpu_capacity_percent"`
+	MemoryCapacityPercent    float64 `json:"memory_capacity_percent"`
+}
+
+type NodeConditionSummary struct {
+	Type               string    `json:"type"`
+	Status             string    `json:"status"`
+	Reason             string    `json:"reason,omitempty"`
+	Message            string    `json:"message,omitempty"`
+	LastHeartbeatTime  time.Time `json:"last_heartbeat_time,omitempty"`
+	LastTransitionTime time.Time `json:"last_transition_time,omitempty"`
 }
 
 type PodSummary struct {
@@ -269,7 +319,7 @@ func (m *Manager) RuntimeOverview(ctx context.Context) (*RuntimeOverview, error)
 	}, nil
 }
 
-func (m *Manager) Logs(ctx context.Context, namespace, projectName string, tail int64) (string, error) {
+func (m *Manager) Logs(ctx context.Context, namespace, projectName string, tail int64, container string) (string, error) {
 	if err := m.ensure(); err != nil {
 		return "", err
 	}
@@ -280,7 +330,7 @@ func (m *Manager) Logs(ctx context.Context, namespace, projectName string, tail 
 	if len(pods) == 0 {
 		return "", nil
 	}
-	return m.logsForPods(ctx, pods, tail)
+	return m.logsForTargets(ctx, logTargetsForPods(pods, container), tail), nil
 }
 
 func (m *Manager) ProjectLogTargets(ctx context.Context, namespace, projectName, container string) ([]LogTarget, error) {
@@ -333,33 +383,38 @@ func (m *Manager) streamLogTarget(ctx context.Context, target LogTarget, tail in
 }
 
 func (m *Manager) logsForPods(ctx context.Context, pods []corev1.Pod, tail int64) (string, error) {
+	return m.logsForTargets(ctx, logTargetsForPods(pods, ""), tail), nil
+}
+
+func (m *Manager) logsForTargets(ctx context.Context, targets []LogTarget, tail int64) string {
 	var buf bytes.Buffer
-	for _, pod := range pods {
-		for _, container := range pod.Spec.Containers {
-			buf.WriteString("==> ")
-			buf.WriteString(pod.Name)
-			buf.WriteString("/")
-			buf.WriteString(container.Name)
-			buf.WriteString(" <==\n")
-			req := m.Clientset.CoreV1().Pods(pod.Namespace).GetLogs(pod.Name, &corev1.PodLogOptions{Container: container.Name, TailLines: &tail, Timestamps: true})
-			stream, err := req.Stream(ctx)
-			if err != nil {
-				buf.WriteString("log stream unavailable: ")
-				buf.WriteString(err.Error())
-				buf.WriteString("\n")
-				continue
-			}
-			_, err = io.Copy(&buf, stream)
-			_ = stream.Close()
-			if err != nil {
-				buf.WriteString("log read failed: ")
-				buf.WriteString(err.Error())
-				buf.WriteString("\n")
-			}
+	if len(targets) == 0 {
+		return "No matching containers found.\n"
+	}
+	for _, target := range targets {
+		buf.WriteString("==> ")
+		buf.WriteString(target.Pod)
+		buf.WriteString("/")
+		buf.WriteString(target.Container)
+		buf.WriteString(" <==\n")
+		req := m.Clientset.CoreV1().Pods(target.Namespace).GetLogs(target.Pod, &corev1.PodLogOptions{Container: target.Container, TailLines: &tail, Timestamps: true})
+		stream, err := req.Stream(ctx)
+		if err != nil {
+			buf.WriteString("log stream unavailable: ")
+			buf.WriteString(err.Error())
+			buf.WriteString("\n")
+			continue
+		}
+		_, err = io.Copy(&buf, stream)
+		_ = stream.Close()
+		if err != nil {
+			buf.WriteString("log read failed: ")
+			buf.WriteString(err.Error())
 			buf.WriteString("\n")
 		}
+		buf.WriteString("\n")
 	}
-	return buf.String(), nil
+	return buf.String()
 }
 
 func logTargetsForPods(pods []corev1.Pod, containerFilter string) []LogTarget {
@@ -411,25 +466,52 @@ func (m *Manager) Nodes(ctx context.Context) ([]corev1.Node, error) {
 	return list.Items, nil
 }
 
+func (m *Manager) NodeDetail(ctx context.Context, name string) (*NodeDetail, error) {
+	if err := m.ensure(); err != nil {
+		return nil, err
+	}
+	node, err := m.Clientset.CoreV1().Nodes().Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+	pods, err := m.Clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{FieldSelector: "spec.nodeName=" + name})
+	if err != nil {
+		return nil, err
+	}
+	out := &NodeDetail{
+		Summary:     nodeSummary(*node),
+		Addresses:   nodeAddresses(*node),
+		Capacity:    nodeResources(node.Status.Capacity),
+		Allocatable: nodeResources(node.Status.Allocatable),
+		Conditions:  nodeConditions(*node),
+		Taints:      nodeTaints(*node),
+		Pods:        make([]PodSummary, 0, len(pods.Items)),
+		Labels:      node.Labels,
+		Annotations: node.Annotations,
+		SystemInfo:  nodeSystemInfo(*node),
+		CheckedAt:   time.Now().UTC(),
+	}
+	for _, pod := range pods.Items {
+		out.Pods = append(out.Pods, podSummary(pod))
+	}
+	usage, metricsErr := m.nodeMetrics(ctx, name, out.Capacity, out.Allocatable)
+	if metricsErr != nil {
+		out.MetricsError = metricsErr.Error()
+	} else {
+		out.MetricsAvailable = true
+		out.Usage = usage
+	}
+	return out, nil
+}
+
 func (m *Manager) listNodeSummaries(ctx context.Context) ([]NodeSummary, error) {
 	list, err := m.Clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, err
 	}
-	now := time.Now()
 	out := make([]NodeSummary, 0, len(list.Items))
 	for _, node := range list.Items {
-		created := node.CreationTimestamp.Time
-		out = append(out, NodeSummary{
-			Name:       node.Name,
-			Status:     nodeReadyStatus(node),
-			Roles:      nodeRoles(node.Labels),
-			Version:    node.Status.NodeInfo.KubeletVersion,
-			InternalIP: nodeInternalIP(node),
-			Labels:     node.Labels,
-			AgeSeconds: int64(now.Sub(created).Seconds()),
-			CreatedAt:  created,
-		})
+		out = append(out, nodeSummary(node))
 	}
 	return out, nil
 }
@@ -439,25 +521,9 @@ func (m *Manager) listPodSummaries(ctx context.Context) ([]PodSummary, error) {
 	if err != nil {
 		return nil, err
 	}
-	now := time.Now()
 	out := make([]PodSummary, 0, len(list.Items))
 	for _, pod := range list.Items {
-		created := pod.CreationTimestamp.Time
-		ready, total, restarts := podContainerTotals(pod)
-		out = append(out, PodSummary{
-			Namespace:       pod.Namespace,
-			Name:            pod.Name,
-			Status:          string(pod.Status.Phase),
-			ReadyContainers: ready,
-			TotalContainers: total,
-			Restarts:        restarts,
-			NodeName:        pod.Spec.NodeName,
-			PodIP:           pod.Status.PodIP,
-			Containers:      podContainerNames(pod),
-			Labels:          pod.Labels,
-			AgeSeconds:      int64(now.Sub(created).Seconds()),
-			CreatedAt:       created,
-		})
+		out = append(out, podSummary(pod))
 	}
 	return out, nil
 }
@@ -516,6 +582,168 @@ func podContainerNames(pod corev1.Pod) []string {
 		out = append(out, container.Name+":"+container.Image)
 	}
 	return out
+}
+
+func nodeSummary(node corev1.Node) NodeSummary {
+	now := time.Now()
+	created := node.CreationTimestamp.Time
+	return NodeSummary{
+		Name:       node.Name,
+		Status:     nodeReadyStatus(node),
+		Roles:      nodeRoles(node.Labels),
+		Version:    node.Status.NodeInfo.KubeletVersion,
+		InternalIP: nodeInternalIP(node),
+		Labels:     node.Labels,
+		AgeSeconds: int64(now.Sub(created).Seconds()),
+		CreatedAt:  created,
+	}
+}
+
+func podSummary(pod corev1.Pod) PodSummary {
+	now := time.Now()
+	created := pod.CreationTimestamp.Time
+	ready, total, restarts := podContainerTotals(pod)
+	return PodSummary{
+		Namespace:       pod.Namespace,
+		Name:            pod.Name,
+		Status:          string(pod.Status.Phase),
+		ReadyContainers: ready,
+		TotalContainers: total,
+		Restarts:        restarts,
+		NodeName:        pod.Spec.NodeName,
+		PodIP:           pod.Status.PodIP,
+		Containers:      podContainerNames(pod),
+		Labels:          pod.Labels,
+		AgeSeconds:      int64(now.Sub(created).Seconds()),
+		CreatedAt:       created,
+	}
+}
+
+func nodeAddresses(node corev1.Node) map[string]string {
+	out := map[string]string{}
+	for _, address := range node.Status.Addresses {
+		out[string(address.Type)] = address.Address
+	}
+	return out
+}
+
+func nodeResources(resources corev1.ResourceList) NodeResources {
+	cpu := resources.Cpu()
+	memory := resources.Memory()
+	pods := resources.Pods()
+	ephemeral := resources[corev1.ResourceEphemeralStorage]
+	out := NodeResources{}
+	if cpu != nil {
+		out.CPUMillis = cpu.MilliValue()
+		out.CPU = cpu.String()
+	}
+	if memory != nil {
+		out.MemoryBytes = memory.Value()
+		out.Memory = memory.String()
+	}
+	if pods != nil {
+		out.Pods = pods.Value()
+	}
+	if !ephemeral.IsZero() {
+		out.EphemeralBytes = ephemeral.Value()
+		out.Ephemeral = ephemeral.String()
+	}
+	return out
+}
+
+func nodeConditions(node corev1.Node) []NodeConditionSummary {
+	out := make([]NodeConditionSummary, 0, len(node.Status.Conditions))
+	for _, condition := range node.Status.Conditions {
+		out = append(out, NodeConditionSummary{
+			Type:               string(condition.Type),
+			Status:             string(condition.Status),
+			Reason:             condition.Reason,
+			Message:            condition.Message,
+			LastHeartbeatTime:  condition.LastHeartbeatTime.Time,
+			LastTransitionTime: condition.LastTransitionTime.Time,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Type == "Ready" {
+			return true
+		}
+		if out[j].Type == "Ready" {
+			return false
+		}
+		return out[i].Type < out[j].Type
+	})
+	return out
+}
+
+func nodeTaints(node corev1.Node) []string {
+	out := make([]string, 0, len(node.Spec.Taints))
+	for _, taint := range node.Spec.Taints {
+		value := taint.Key
+		if taint.Value != "" {
+			value += "=" + taint.Value
+		}
+		value += ":" + string(taint.Effect)
+		out = append(out, value)
+	}
+	return out
+}
+
+func nodeSystemInfo(node corev1.Node) map[string]string {
+	info := node.Status.NodeInfo
+	return map[string]string{
+		"architecture":              info.Architecture,
+		"boot_id":                   info.BootID,
+		"container_runtime_version": info.ContainerRuntimeVersion,
+		"kernel_version":            info.KernelVersion,
+		"kube_proxy_version":        info.KubeProxyVersion,
+		"kubelet_version":           info.KubeletVersion,
+		"machine_id":                info.MachineID,
+		"operating_system":          info.OperatingSystem,
+		"os_image":                  info.OSImage,
+		"system_uuid":               info.SystemUUID,
+	}
+}
+
+func (m *Manager) nodeMetrics(ctx context.Context, name string, capacity, allocatable NodeResources) (*NodeResourceUsage, error) {
+	if m.Dynamic == nil {
+		return nil, fmt.Errorf("metrics client not configured")
+	}
+	gvr := schema.GroupVersionResource{Group: "metrics.k8s.io", Version: "v1beta1", Resource: "nodes"}
+	item, err := m.Dynamic.Resource(gvr).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+	usage, ok, err := unstructured.NestedStringMap(item.Object, "usage")
+	if err != nil || !ok {
+		return nil, fmt.Errorf("node metrics usage was not returned")
+	}
+	cpu, err := resource.ParseQuantity(usage["cpu"])
+	if err != nil {
+		return nil, err
+	}
+	memory, err := resource.ParseQuantity(usage["memory"])
+	if err != nil {
+		return nil, err
+	}
+	cpuMillis := cpu.MilliValue()
+	memoryBytes := memory.Value()
+	return &NodeResourceUsage{
+		CPUMillis:                cpuMillis,
+		MemoryBytes:              memoryBytes,
+		CPU:                      cpu.String(),
+		Memory:                   memory.String(),
+		CPUAllocatablePercent:    percent(cpuMillis, allocatable.CPUMillis),
+		MemoryAllocatablePercent: percent(memoryBytes, allocatable.MemoryBytes),
+		CPUCapacityPercent:       percent(cpuMillis, capacity.CPUMillis),
+		MemoryCapacityPercent:    percent(memoryBytes, capacity.MemoryBytes),
+	}, nil
+}
+
+func percent(used, total int64) float64 {
+	if total <= 0 {
+		return 0
+	}
+	return float64(used) * 100 / float64(total)
 }
 
 func (m *Manager) listIngressSummaries(ctx context.Context) ([]IngressSummary, error) {

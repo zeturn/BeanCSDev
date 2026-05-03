@@ -25,6 +25,7 @@ func NewRuntimeHandler(db *gorm.DB, k8sManager *k8s.Manager, v *validator.Valida
 
 func (h *RuntimeHandler) Register(r fiber.Router) {
 	r.Get("/runtime/overview", h.overview)
+	r.Get("/runtime/nodes/:name", h.nodeDetail)
 	r.Get("/runtime/namespaces", h.namespaces)
 	r.Post("/runtime/namespaces", h.createNamespace)
 	r.Patch("/runtime/namespaces/:name", h.patchNamespace)
@@ -78,7 +79,7 @@ func (h *RuntimeHandler) podLogs(c *fiber.Ctx) error {
 		}
 		return h.streamLogs(c, targets, tail)
 	}
-	out, err := h.k8s.PodLogs(c.UserContext(), c.Params("namespace"), c.Params("name"), tail)
+	out, err := h.k8s.PodLogs(c.UserContext(), c.Params("namespace"), c.Params("name"), tail, c.Query("container"))
 	if err != nil {
 		return fail(c, 400, err)
 	}
@@ -145,6 +146,14 @@ func (h *RuntimeHandler) overview(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"data": out})
 }
 
+func (h *RuntimeHandler) nodeDetail(c *fiber.Ctx) error {
+	out, err := h.k8s.NodeDetail(c.UserContext(), c.Params("name"))
+	if err != nil {
+		return fail(c, 400, err)
+	}
+	return c.JSON(fiber.Map{"data": out})
+}
+
 func (h *RuntimeHandler) status(c *fiber.Ctx) error {
 	p := projectFromCtx(c)
 	out, err := h.k8s.ProjectRuntimeStatus(c.UserContext(), p.Namespace, p.Name)
@@ -164,7 +173,7 @@ func (h *RuntimeHandler) logs(c *fiber.Ctx) error {
 		}
 		return h.streamLogs(c, targets, tail)
 	}
-	out, err := h.k8s.Logs(c.UserContext(), p.Namespace, p.Name, tail)
+	out, err := h.k8s.Logs(c.UserContext(), p.Namespace, p.Name, tail, c.Query("container"))
 	if err != nil {
 		return fail(c, 400, err)
 	}
