@@ -1,19 +1,24 @@
 import React, {useEffect, useMemo, useRef, useState} from "react";
 import {createRoot} from "react-dom/client";
 import {
+  Activity,
+  AlertTriangle,
   Boxes,
   CheckCircle2,
   Cloud,
   Code2,
+  Cpu,
   Database,
   GitBranch,
   Github,
   Globe2,
+  HardDrive,
   KeyRound,
   Layers3,
   ListRestart,
   LoaderCircle,
   Lock,
+  MemoryStick,
   Network,
   Package,
   Play,
@@ -40,12 +45,14 @@ const emptyRuntime = {
 };
 
 const nav = [
+  {id: "dashboard", label: "Dashboard", icon: Activity},
   {id: "deploy", label: "Deploy", icon: Rocket},
   {id: "progress", label: "Progress", icon: LoaderCircle},
   {id: "projects", label: "Projects", icon: Boxes},
   {id: "apiKeys", label: "API Keys", icon: KeyRound},
   {id: "github", label: "GitHub", icon: Github},
   {id: "domains", label: "Domains", icon: Globe2},
+  {id: "networking", label: "Networking", icon: Network},
   {id: "cloudflare", label: "Cloudflare", icon: Cloud},
   {id: "basaltpass", label: "BasaltPass", icon: Shield},
   {id: "namespaces", label: "Namespaces", icon: Layers3},
@@ -58,11 +65,13 @@ const nav = [
 function App() {
   const [config, setConfig] = useState(null);
   const [token, setToken] = useState(localStorage.getItem(tokenKey) || "");
-  const [view, setView] = useState("deploy");
+  const [view, setView] = useState("dashboard");
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [runtime, setRuntime] = useState(emptyRuntime);
+  const [dashboard, setDashboard] = useState(null);
+  const [network, setNetwork] = useState(null);
   const [projects, setProjects] = useState([]);
   const [credentials, setCredentials] = useState({github: [], cloudflare: [], basaltpass: []});
   const [apiKeys, setAPIKeys] = useState([]);
@@ -93,6 +102,8 @@ function App() {
   const [runtimeLogContainer, setRuntimeLogContainer] = useState("");
   const [runtimeLogTail, setRuntimeLogTail] = useState(200);
   const [runtimeLogLoaded, setRuntimeLogLoaded] = useState(false);
+  const [nodeJoinCommand, setNodeJoinCommand] = useState(null);
+  const [nodeHealth, setNodeHealth] = useState(null);
   const projectLogController = useRef(null);
   const runtimeLogController = useRef(null);
 
@@ -106,6 +117,18 @@ function App() {
   useEffect(() => {
     if (token) loadWorkspace();
   }, [token]);
+
+  useEffect(() => {
+    if (!token || view !== "dashboard") return;
+    loadDashboard();
+    const timer = setInterval(loadDashboard, 5000);
+    return () => clearInterval(timer);
+  }, [token, view]);
+
+  useEffect(() => {
+    if (!token || view !== "nodes") return;
+    loadNodeJoinCommand("agent");
+  }, [token, view]);
 
   useEffect(() => {
     if (!token || view !== "progress") return;
@@ -152,8 +175,10 @@ function App() {
     setLoading(true);
     setError("");
     try {
-      const [runtimeData, projectData, apiKeyData, githubData, cloudflareData, domainsData, basaltpassData] = await Promise.all([
+      const [dashboardData, runtimeData, networkData, projectData, apiKeyData, githubData, cloudflareData, domainsData, basaltpassData] = await Promise.all([
+        api.get("/runtime/dashboard"),
         api.get("/runtime/overview"),
+        api.get("/runtime/network/overview"),
         api.get("/projects"),
         api.get("/api-keys"),
         api.get("/credentials/github/"),
@@ -161,7 +186,9 @@ function App() {
         api.get("/credentials/cloudflare/domains"),
         api.get("/credentials/basaltpass/"),
       ]);
+      setDashboard(dashboardData.data || null);
       setRuntime(runtimeData.data || emptyRuntime);
+      setNetwork(networkData.data || null);
       setProjects(projectData.data || []);
       setAPIKeys(apiKeyData.data || []);
       setCredentials({
@@ -174,6 +201,24 @@ function App() {
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadDashboard() {
+    try {
+      const data = await api.get("/runtime/dashboard");
+      setDashboard(data.data || null);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function loadNetwork() {
+    try {
+      const data = await api.get("/runtime/network/overview");
+      setNetwork(data.data || null);
+    } catch (err) {
+      setError(err.message);
     }
   }
 
@@ -360,6 +405,105 @@ function App() {
     }
   }
 
+  async function loadNamespaceDetail(namespace) {
+    setRuntimeDetail({kind: "namespace-detail", row: {name: namespace}, loading: true});
+    try {
+      const data = await api.get(`/runtime/namespaces/${encodeURIComponent(namespace)}`);
+      setRuntimeDetail({kind: "namespace-detail", row: data.data || {name: namespace}, loading: false});
+    } catch (err) {
+      setRuntimeDetail({kind: "namespace-detail", row: {name: namespace}, loading: false, error: err.message});
+    }
+  }
+
+  async function saveResourceQuota(namespace, event) {
+    event.preventDefault();
+    const body = Object.fromEntries(new FormData(event.currentTarget).entries());
+    body.hard = parseKeyValues(body.hard);
+    try {
+      await api.put(`/runtime/namespaces/${encodeURIComponent(namespace)}/resource-quotas`, body);
+      await loadNamespaceDetail(namespace);
+      await loadWorkspace();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function deleteResourceQuota(namespace, name) {
+    if (!confirm(`Delete ResourceQuota ${name}?`)) return;
+    try {
+      await api.delete(`/runtime/namespaces/${encodeURIComponent(namespace)}/resource-quotas/${encodeURIComponent(name)}`);
+      await loadNamespaceDetail(namespace);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function saveLimitRange(namespace, event) {
+    event.preventDefault();
+    const body = Object.fromEntries(new FormData(event.currentTarget).entries());
+    body.default = parseKeyValues(body.default);
+    body.default_request = parseKeyValues(body.default_request);
+    body.min = parseKeyValues(body.min);
+    body.max = parseKeyValues(body.max);
+    try {
+      await api.put(`/runtime/namespaces/${encodeURIComponent(namespace)}/limit-ranges`, body);
+      await loadNamespaceDetail(namespace);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function deleteLimitRange(namespace, name) {
+    if (!confirm(`Delete LimitRange ${name}?`)) return;
+    try {
+      await api.delete(`/runtime/namespaces/${encodeURIComponent(namespace)}/limit-ranges/${encodeURIComponent(name)}`);
+      await loadNamespaceDetail(namespace);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function saveNamespacePermission(namespace, event) {
+    event.preventDefault();
+    const body = Object.fromEntries(new FormData(event.currentTarget).entries());
+    body.verbs = parseCSV(body.verbs);
+    body.resources = parseCSV(body.resources);
+    body.api_groups = parseCSV(body.api_groups);
+    body.subjects = parsePermissionSubjects(body.subjects, namespace);
+    try {
+      await api.put(`/runtime/namespaces/${encodeURIComponent(namespace)}/permissions`, body);
+      await loadNamespaceDetail(namespace);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function deleteNamespacePermission(namespace, name) {
+    if (!confirm(`Delete namespace permission ${name}?`)) return;
+    try {
+      await api.delete(`/runtime/namespaces/${encodeURIComponent(namespace)}/permissions/${encodeURIComponent(name)}`);
+      await loadNamespaceDetail(namespace);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function saveNamespaceIsolation(namespace, event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    try {
+      await api.put(`/runtime/namespaces/${encodeURIComponent(namespace)}/isolation`, {
+        enabled: Boolean(form.enabled.checked),
+        allow_same_namespace: Boolean(form.allow_same_namespace.checked),
+        allow_dns: Boolean(form.allow_dns.checked),
+      });
+      await loadNamespaceDetail(namespace);
+      await loadNetwork();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
   async function deleteNamespace(namespace) {
     if (!confirm(`Delete namespace ${namespace}? This removes resources inside it.`)) return;
     try {
@@ -382,11 +526,87 @@ function App() {
 
   async function loadNodeDetail(node, showModal = true) {
     if (showModal) setRuntimeDetail({kind: "node", row: node, loading: true});
+    if (showModal) setNodeHealth(null);
     try {
       const data = await api.get(`/runtime/nodes/${encodeURIComponent(node.name)}`);
       setRuntimeDetail({kind: "node", row: data.data || node, loading: false});
     } catch (err) {
       setRuntimeDetail({kind: "node", row: node, loading: false, error: err.message});
+    }
+  }
+
+  async function loadNodeHealth(nodeName) {
+    try {
+      const data = await api.get(`/runtime/nodes/${encodeURIComponent(nodeName)}/health`);
+      setNodeHealth(data.data || null);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function loadNodeJoinCommand(role = "agent") {
+    try {
+      const data = await api.get(`/runtime/nodes/join-command?role=${encodeURIComponent(role)}`);
+      setNodeJoinCommand(data.data || null);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function saveNodeLabels(nodeName, labelsText) {
+    try {
+      await api.patch(`/runtime/nodes/${encodeURIComponent(nodeName)}/labels`, {labels: parseKeyValues(labelsText)});
+      setNotice(`${nodeName} labels updated.`);
+      await loadWorkspace();
+      await loadNodeDetail({name: nodeName}, false);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function saveNodeTaints(nodeName, taintsText) {
+    try {
+      await api.put(`/runtime/nodes/${encodeURIComponent(nodeName)}/taints`, {taints: parseTaints(taintsText)});
+      setNotice(`${nodeName} taints updated.`);
+      await loadWorkspace();
+      await loadNodeDetail({name: nodeName}, false);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function cordonNode(nodeName, schedulable) {
+    try {
+      await api.post(`/runtime/nodes/${encodeURIComponent(nodeName)}/${schedulable ? "uncordon" : "cordon"}`, {});
+      setNotice(`${nodeName} ${schedulable ? "uncordoned" : "cordoned"}.`);
+      await loadWorkspace();
+      await loadNodeDetail({name: nodeName}, false);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function drainNode(nodeName, options) {
+    if (!confirm(`Drain node ${nodeName}? Workloads will be evicted from this node.`)) return;
+    try {
+      const data = await api.post(`/runtime/nodes/${encodeURIComponent(nodeName)}/drain`, options);
+      setNotice(`Drain started for ${nodeName}: ${(data.data?.evicted_pods || []).length} pods evicted, ${(data.data?.skipped_pods || []).length} skipped.`);
+      await loadWorkspace();
+      await loadNodeDetail({name: nodeName}, false);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function deleteNode(nodeName) {
+    if (!confirm(`Delete node ${nodeName}? Make sure it has been drained and removed from the K3s host first.`)) return;
+    try {
+      await api.delete(`/runtime/nodes/${encodeURIComponent(nodeName)}`);
+      setRuntimeDetail(null);
+      setNotice(`${nodeName} deleted from the cluster.`);
+      await loadWorkspace();
+    } catch (err) {
+      setError(err.message);
     }
   }
 
@@ -468,6 +688,7 @@ function App() {
     body.selector = parseKeyValues(body.selector);
     body.labels = parseKeyValues(body.labels);
     body.ports = parseServicePorts(body.ports);
+    body.external_ips = parseCSV(body.external_ips);
     try {
       if (existing) {
         await api.put(`/runtime/services/${existing.namespace}/${existing.name}`, body);
@@ -486,6 +707,68 @@ function App() {
     if (!confirm(`Delete service ${service.name}?`)) return;
     try {
       await api.delete(`/runtime/services/${service.namespace}/${service.name}`);
+      await loadWorkspace();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function saveIngress(event, existing = null) {
+    event.preventDefault();
+    const body = Object.fromEntries(new FormData(event.currentTarget).entries());
+    body.service_port = Number(body.service_port || 80);
+    body.annotations = parseKeyValues(body.annotations);
+    body.labels = parseKeyValues(body.labels);
+    try {
+      if (existing) {
+        await api.put(`/runtime/ingresses/${existing.namespace}/${existing.name}`, body);
+      } else {
+        await api.post("/runtime/ingresses", body);
+        event.currentTarget.reset();
+      }
+      setNotice(`Ingress ${body.name || existing?.name} saved.`);
+      await loadWorkspace();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function deleteIngress(ingress) {
+    if (!confirm(`Delete ingress ${ingress.namespace}/${ingress.name}?`)) return;
+    try {
+      await api.delete(`/runtime/ingresses/${ingress.namespace}/${ingress.name}`);
+      await loadWorkspace();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function saveNetworkPolicy(event, existing = null) {
+    event.preventDefault();
+    const body = Object.fromEntries(new FormData(event.currentTarget).entries());
+    body.pod_selector = parseKeyValues(body.pod_selector);
+    body.labels = parseKeyValues(body.labels);
+    body.policy_types = Array.from(event.currentTarget.querySelectorAll("input[name='policy_types']:checked")).map((input) => input.value);
+    body.allow_same_namespace = Boolean(body.allow_same_namespace);
+    body.allow_dns = Boolean(body.allow_dns);
+    try {
+      if (existing) {
+        await api.put(`/runtime/network-policies/${existing.namespace}/${existing.name}`, body);
+      } else {
+        await api.post("/runtime/network-policies", body);
+        event.currentTarget.reset();
+      }
+      setNotice(`NetworkPolicy ${body.name || existing?.name} saved.`);
+      await loadWorkspace();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function deleteNetworkPolicy(policy) {
+    if (!confirm(`Delete NetworkPolicy ${policy.namespace}/${policy.name}?`)) return;
+    try {
+      await api.delete(`/runtime/network-policies/${policy.namespace}/${policy.name}`);
       await loadWorkspace();
     } catch (err) {
       setError(err.message);
@@ -779,6 +1062,7 @@ function App() {
         </header>
         {notice && <div className="notice">{notice}</div>}
         {error && <div className="alert">{error}</div>}
+        {view === "dashboard" && <DashboardView dashboard={dashboard} refresh={loadDashboard} />}
         {view === "deploy" && (
           <DeployView
             credentials={credentials}
@@ -820,13 +1104,14 @@ function App() {
           <GitHubView credentials={credentials.github} onConnect={connectGitHubApp} onRepos={loadRepos} onDelete={(id) => deleteCredential("github", id)} reposByCredential={reposByCredential} repoFilters={repoFilters} setRepoFilters={setRepoFilters} />
         )}
         {view === "domains" && <DomainsView domains={domains} />}
+        {view === "networking" && <NetworkingView network={network} refresh={loadNetwork} onSaveService={saveService} onDeleteService={deleteService} onSaveIngress={saveIngress} onDeleteIngress={deleteIngress} onSaveNetworkPolicy={saveNetworkPolicy} onDeleteNetworkPolicy={deleteNetworkPolicy} />}
         {view === "cloudflare" && <CloudflareView credentials={credentials.cloudflare} domains={domains} selectedID={selectedCloudflareID} setSelectedID={setSelectedCloudflareID} dnsRecords={dnsRecords} editingRecord={editingDNSRecord} setEditingRecord={setEditingDNSRecord} onCreate={createCredential} onDelete={(id) => deleteCredential("cloudflare", id)} onLoadDNS={loadDNSRecords} onSaveDNS={saveDNSRecord} onDeleteDNS={deleteDNSRecord} />}
         {view === "basaltpass" && <CredentialManager kind="basaltpass" rows={credentials.basaltpass} onCreate={createCredential} onDelete={deleteCredential} />}
-        {["namespaces", "pods", "nodes", "ingresses", "services"].includes(view) && <RuntimeTable kind={view} rows={runtime[view] || []} onCreateNamespace={createNamespace} onPatchNamespace={patchNamespaceLabels} onDeleteNamespace={deleteNamespace} onDeletePod={deletePod} onNodeDetail={loadNodeDetail} onPodLogs={loadPodLogs} onSaveService={saveService} onDeleteService={deleteService} onDetail={setRuntimeDetail} />}
+        {["namespaces", "pods", "nodes", "ingresses", "services"].includes(view) && <RuntimeTable kind={view} rows={runtime[view] || []} nodeJoinCommand={nodeJoinCommand} onLoadNodeJoinCommand={loadNodeJoinCommand} onCreateNamespace={createNamespace} onPatchNamespace={patchNamespaceLabels} onNamespaceDetail={loadNamespaceDetail} onDeleteNamespace={deleteNamespace} onDeletePod={deletePod} onNodeDetail={loadNodeDetail} onPodLogs={loadPodLogs} onSaveService={saveService} onDeleteService={deleteService} onDetail={setRuntimeDetail} />}
       </main>
       {editingProject && <ProjectModal project={editingProject} onClose={() => setEditingProject(null)} onSubmit={updateProject} />}
       {deletingProject && <DeleteProjectModal project={deletingProject} busy={loading} onClose={() => setDeletingProject(null)} onDelete={confirmDeleteProject} />}
-      {runtimeDetail && <RuntimeDetailModal detail={runtimeDetail} logs={runtimeLogs} logFollow={runtimeLogFollow} logStatus={runtimeLogStatus} selectedLogContainer={runtimeLogContainer} logTail={runtimeLogTail} logLoaded={runtimeLogLoaded} onSelectLogContainer={setRuntimeLogContainer} onSetLogTail={setRuntimeLogTail} onLoadContainerLogs={loadRuntimeContainerLogs} onFollowPodLogs={startRuntimeLogFollow} onStopPodLogs={stopRuntimeLogFollow} onClose={() => { stopRuntimeLogFollow(); setRuntimeDetail(null); setRuntimeLogs(""); setRuntimeLogContainer(""); setRuntimeLogLoaded(false); setRuntimeLogStatus(""); }} onSaveService={saveService} onPatchNamespace={patchNamespaceLabels} />}
+      {runtimeDetail && <RuntimeDetailModal detail={runtimeDetail} logs={runtimeLogs} logFollow={runtimeLogFollow} logStatus={runtimeLogStatus} selectedLogContainer={runtimeLogContainer} logTail={runtimeLogTail} logLoaded={runtimeLogLoaded} nodeHealth={nodeHealth} onLoadNodeHealth={loadNodeHealth} onSaveNodeLabels={saveNodeLabels} onSaveNodeTaints={saveNodeTaints} onCordonNode={cordonNode} onDrainNode={drainNode} onDeleteNode={deleteNode} onSaveResourceQuota={saveResourceQuota} onDeleteResourceQuota={deleteResourceQuota} onSaveLimitRange={saveLimitRange} onDeleteLimitRange={deleteLimitRange} onSaveNamespacePermission={saveNamespacePermission} onDeleteNamespacePermission={deleteNamespacePermission} onSaveNamespaceIsolation={saveNamespaceIsolation} onSelectLogContainer={setRuntimeLogContainer} onSetLogTail={setRuntimeLogTail} onLoadContainerLogs={loadRuntimeContainerLogs} onFollowPodLogs={startRuntimeLogFollow} onStopPodLogs={stopRuntimeLogFollow} onClose={() => { stopRuntimeLogFollow(); setRuntimeDetail(null); setRuntimeLogs(""); setRuntimeLogContainer(""); setRuntimeLogLoaded(false); setRuntimeLogStatus(""); setNodeHealth(null); }} onSaveService={saveService} onPatchNamespace={patchNamespaceLabels} />}
     </div>
   );
 }
@@ -1155,6 +1440,124 @@ function ProgressView({projects, activeProjectID, setActiveProjectID, progress, 
   );
 }
 
+function DashboardView({dashboard, refresh}) {
+  if (!dashboard) {
+    return <section className="panel"><div className="empty">Loading cluster dashboard...</div></section>;
+  }
+  const resources = dashboard.resources || {};
+  const pods = dashboard.pods || {};
+  const nodes = dashboard.nodes || {};
+  const alerts = dashboard.alerts || [];
+  const events = dashboard.events || [];
+  return (
+    <div className="dashboard-shell">
+      <section className="dashboard-hero">
+        <div>
+          <span className="eyebrow">Cluster Operations</span>
+          <h2>{dashboard.cluster_name}</h2>
+          <p>Kubernetes {dashboard.kubernetes_version || "-"}{dashboard.k3s_version ? ` · K3s ${dashboard.k3s_version}` : ""}</p>
+        </div>
+        <div className={dashboard.healthy ? "health-badge good" : "health-badge bad"}>
+          <span>{dashboard.status || "Unknown"}</span>
+          <b>{dashboard.healthy ? "Ready" : "NotReady"}</b>
+        </div>
+        <button onClick={refresh}><RefreshCw size={15} /> Refresh</button>
+      </section>
+
+      <section className="dashboard-kpis">
+        <MetricCard icon={Server} label="Nodes" value={nodes.total || 0} detail={`${nodes.server || 0} Server · ${nodes.agent || 0} Agent · ${nodes.not_ready || 0} NotReady`} />
+        <MetricCard icon={Boxes} label="Pods" value={`${pods.running || 0} / ${pods.total || 0}`} detail={`${pods.abnormal || 0} abnormal · ${pods.pending || 0} pending`} />
+        <MetricCard icon={Cpu} label="CPU" value={`${formatPercent(resources.cpu_percent)}%`} detail={`${resources.cpu_used_millis || 0}m / ${resources.cpu_total_millis || 0}m`} />
+        <MetricCard icon={MemoryStick} label="Memory" value={`${formatPercent(resources.memory_percent)}%`} detail={`${formatBytes(resources.memory_used_bytes)} / ${formatBytes(resources.memory_total_bytes)}`} />
+        <MetricCard icon={HardDrive} label="Disk" value={`${formatPercent(resources.disk_percent)}%`} detail={`${formatBytes(resources.disk_used_bytes)} / ${formatBytes(resources.disk_total_bytes)}`} />
+        <MetricCard icon={AlertTriangle} label="Alerts" value={alerts.length} detail={`${events.length} recent warning events`} tone={alerts.length > 0 ? "warning" : "good"} />
+      </section>
+
+      <section className="dashboard-grid">
+        <div className="panel dashboard-panel">
+          <h2><Activity size={18} /> Live Resource Utilization</h2>
+          <div className="industrial-meters">
+            <IndustrialMeter label="CPU" value={resources.cpu_percent} detail={`${resources.cpu_used_millis || 0}m / ${resources.cpu_total_millis || 0}m`} />
+            <IndustrialMeter label="Memory" value={resources.memory_percent} detail={`${formatBytes(resources.memory_used_bytes)} / ${formatBytes(resources.memory_total_bytes)}`} />
+            <IndustrialMeter label="Disk" value={resources.disk_percent} detail={`${formatBytes(resources.disk_used_bytes)} / ${formatBytes(resources.disk_total_bytes)}`} />
+          </div>
+          {!dashboard.metrics_available && <p className="muted">Metrics partially unavailable: {dashboard.metrics_error || "metrics-server or node stats endpoint did not return data."}</p>}
+        </div>
+        <div className="panel dashboard-panel">
+          <h2><Server size={18} /> Cluster Runtime</h2>
+          <div className="detail-list">
+            <span>Status <b>{dashboard.status}</b></span>
+            <span>Ready nodes <b>{nodes.ready || 0}/{nodes.total || 0}</b></span>
+            <span>Running pods <b>{pods.running || 0}/{pods.total || 0}</b></span>
+            <span>Uptime <b>{formatDuration(dashboard.uptime_seconds)}</b></span>
+            <span>Last check <b>{formatTime(dashboard.checked_at)}</b></span>
+          </div>
+        </div>
+      </section>
+
+      <section className="dashboard-grid">
+        <div className="panel dashboard-panel">
+          <h2><AlertTriangle size={18} /> Recent Alerts</h2>
+          <AlertList rows={alerts} empty="No active alerts reported." />
+        </div>
+        <div className="panel dashboard-panel">
+          <h2><ListRestart size={18} /> Events and Error Signals</h2>
+          <div className="timeline">
+            {events.map((event, index) => (
+              <div className="timeline-item" key={`${event.object}-${event.reason}-${index}`}>
+                <span className="dot failed" />
+                <div>
+                  <b>{event.reason || event.type}</b>
+                  <small>{event.object} · {event.count || 1}x · {formatTime(event.last_seen)}</small>
+                  <p>{event.message}</p>
+                </div>
+              </div>
+            ))}
+            {events.length === 0 && <div className="empty">No warning events in the latest cluster feed.</div>}
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function MetricCard({icon: Icon, label, value, detail, tone = "neutral"}) {
+  return (
+    <div className={`metric-card ${tone}`}>
+      <div><Icon size={18} /><span>{label}</span></div>
+      <strong>{value}</strong>
+      <small>{detail}</small>
+    </div>
+  );
+}
+
+function IndustrialMeter({label, value, detail}) {
+  const normalized = Math.max(0, Math.min(100, Number(value || 0)));
+  return (
+    <div className="industrial-meter">
+      <div><b>{label}</b><span>{formatPercent(normalized)}%</span></div>
+      <progress value={normalized} max="100" />
+      <small>{detail}</small>
+    </div>
+  );
+}
+
+function AlertList({rows, empty}) {
+  return (
+    <div className="alert-list">
+      {rows.map((row, index) => (
+        <div className={`alert-row ${row.severity || "warning"}`} key={`${row.object}-${row.reason}-${index}`}>
+          <b>{row.reason || "Warning"}</b>
+          <span>{row.object}{row.namespace ? ` · ${row.namespace}` : ""}</span>
+          <p>{row.message}</p>
+          <small>{formatTime(row.last_seen)}</small>
+        </div>
+      ))}
+      {rows.length === 0 && <div className="empty">{empty}</div>}
+    </div>
+  );
+}
+
 function ProgressStep({step}) {
   const Icon = step.state === "done" ? CheckCircle2 : step.state === "running" ? LoaderCircle : step.state === "failed" ? Trash2 : Play;
   return (
@@ -1430,7 +1833,128 @@ function DomainsView({domains}) {
   );
 }
 
-function RuntimeTable({kind, rows, onCreateNamespace, onPatchNamespace, onDeleteNamespace, onDeletePod, onNodeDetail, onPodLogs, onSaveService, onDeleteService, onDetail}) {
+function NetworkingView({network, refresh, onSaveService, onDeleteService, onSaveIngress, onDeleteIngress, onSaveNetworkPolicy, onDeleteNetworkPolicy}) {
+  const data = network || {services: [], ingresses: [], endpoints: [], network_policies: [], access: [], controllers: {}};
+  const controllers = data.controllers || {};
+  return (
+    <div className="stack network-page">
+      <section className="panel network-overview">
+        <div className="action-panel">
+          <div>
+            <h2><Network size={18} /> Service and network management</h2>
+            <p>Manage Service, Ingress, Endpoint, NetworkPolicy, Traefik, Tailscale and TLS bindings from one operational view.</p>
+          </div>
+          <button onClick={refresh}><RefreshCw size={15} /> Refresh</button>
+        </div>
+        <div className="dashboard-kpis">
+          <MetricCard icon={Database} label="Services" value={data.services.length} detail="ClusterIP / NodePort / LoadBalancer" />
+          <MetricCard icon={Network} label="Ingresses" value={data.ingresses.length} detail={`${controllers.traefik_ingresses || 0} Traefik · ${controllers.tailscale_ingresses || 0} Tailscale`} />
+          <MetricCard icon={Shield} label="TLS" value={controllers.tls_ingresses || 0} detail="Ingress TLS bindings" />
+          <MetricCard icon={Layers3} label="Endpoints" value={data.endpoints.length} detail="Resolved backend addresses" />
+          <MetricCard icon={Lock} label="Policies" value={data.network_policies.length} detail="NetworkPolicy rules" />
+          <MetricCard icon={Globe2} label="Access URLs" value={data.access.length} detail="Service access entries" />
+        </div>
+        <div className="detail-list compact-details">
+          <span>Traefik namespaces <b>{(controllers.traefik_namespaces || []).join(", ") || "-"}</b></span>
+          <span>Tailscale namespaces <b>{(controllers.tailscale_namespaces || []).join(", ") || "-"}</b></span>
+          <span>Checked <b>{formatTime(data.checked_at)}</b></span>
+        </div>
+      </section>
+
+      <section className="panel">
+        <h2><Database size={18} /> Service, LoadBalancer and NodePort</h2>
+        <ServiceForm onSubmit={(event) => onSaveService(event)} />
+        <SimpleTable rows={data.services} columns={["namespace", "name", "type", "cluster_ip", "external_ip", "ports"]} actions={(row) => <button className="danger-button" onClick={() => onDeleteService(row)}><Trash2 size={15} /></button>} />
+      </section>
+
+      <section className="panel">
+        <h2><Network size={18} /> Ingress, domain and TLS binding</h2>
+        <IngressForm onSubmit={(event) => onSaveIngress(event)} />
+        <SimpleTable rows={data.ingresses} columns={["namespace", "name", "class", "hosts", "services", "tls", "address"]} actions={(row) => <button className="danger-button" onClick={() => onDeleteIngress(row)}><Trash2 size={15} /></button>} />
+      </section>
+
+      <section className="panel">
+        <h2><Lock size={18} /> NetworkPolicy</h2>
+        <NetworkPolicyForm onSubmit={(event) => onSaveNetworkPolicy(event)} />
+        <SimpleTable rows={data.network_policies} columns={["namespace", "name", "pod_selector", "policy_types", "ingress_rules", "egress_rules"]} actions={(row) => <button className="danger-button" onClick={() => onDeleteNetworkPolicy(row)}><Trash2 size={15} /></button>} />
+      </section>
+
+      <section className="dashboard-grid">
+        <div className="panel dashboard-panel">
+          <h2><Globe2 size={18} /> Service access addresses</h2>
+          <div className="mini-table">
+            {(data.access || []).map((item) => (
+              <div key={`${item.namespace}/${item.service}/${item.ingress || item.type}`}>
+                <span>{item.namespace}/{item.service}<small>{[item.type, item.class, item.tls ? "TLS" : "", item.load_balancer].filter(Boolean).join(" · ")}</small></span>
+                <b>{[...(item.urls || []), ...(item.node_ports || []).map((port) => `NodePort ${port}`)].join(" · ") || "-"}</b>
+              </div>
+            ))}
+            {(data.access || []).length === 0 && <div className="empty">No service access addresses reported.</div>}
+          </div>
+        </div>
+        <div className="panel dashboard-panel">
+          <h2><Layers3 size={18} /> Endpoints</h2>
+          <SimpleTable rows={data.endpoints || []} columns={["namespace", "name", "addresses", "ports"]} compact />
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function IngressForm({onSubmit}) {
+  return (
+    <form className="form-grid ingress-form" onSubmit={onSubmit}>
+      <input name="namespace" placeholder="namespace" required />
+      <input name="name" placeholder="ingress-name" required />
+      <select name="class_name" defaultValue="traefik">
+        <option value="traefik">Traefik public</option>
+        <option value="tailscale">Tailscale private</option>
+        <option value="nginx">nginx</option>
+      </select>
+      <input name="host" placeholder="app.example.com or app.tailnet.ts.net" required />
+      <input name="path" placeholder="path, default /" />
+      <input name="service_name" placeholder="service name" required />
+      <input name="service_port" type="number" min="1" max="65535" placeholder="service port" required />
+      <input name="tls_secret_name" placeholder="TLS secret, e.g. app-tls" />
+      <input name="annotations" placeholder="annotations: cert-manager.io/cluster-issuer=letsencrypt-prod" />
+      <input name="labels" placeholder="labels: app=my-app" />
+      <button className="primary" type="submit">Save ingress</button>
+    </form>
+  );
+}
+
+function NetworkPolicyForm({onSubmit}) {
+  return (
+    <form className="form-grid network-policy-form" onSubmit={onSubmit}>
+      <input name="namespace" placeholder="namespace" required />
+      <input name="name" placeholder="policy-name" required />
+      <input name="pod_selector" placeholder="pod selector: app=my-app" />
+      <label className="check-row"><input name="policy_types" type="checkbox" value="Ingress" defaultChecked /> Ingress</label>
+      <label className="check-row"><input name="policy_types" type="checkbox" value="Egress" /> Egress</label>
+      <label className="check-row"><input name="allow_same_namespace" type="checkbox" /> Allow same namespace</label>
+      <label className="check-row"><input name="allow_dns" type="checkbox" /> Allow DNS egress</label>
+      <input name="labels" placeholder="labels: managed-by=beancs" />
+      <button className="primary" type="submit">Save policy</button>
+    </form>
+  );
+}
+
+function SimpleTable({rows, columns, actions, compact = false}) {
+  return (
+    <div className={compact ? "table compact-table" : "table network-table"}>
+      <div className="tr head">{columns.map((column) => <span key={column}>{column.replaceAll("_", " ")}</span>)}{actions && <span>Actions</span>}</div>
+      {(rows || []).map((row, index) => (
+        <div className="tr" key={`${row.namespace || ""}-${row.name || row.service || index}`}>
+          {columns.map((column) => <span key={column}>{formatCell(row[column])}</span>)}
+          {actions && <span className="row-actions">{actions(row)}</span>}
+        </div>
+      ))}
+      {(!rows || rows.length === 0) && <div className="empty">No records found.</div>}
+    </div>
+  );
+}
+
+function RuntimeTable({kind, rows, nodeJoinCommand, onLoadNodeJoinCommand, onCreateNamespace, onPatchNamespace, onNamespaceDetail, onDeleteNamespace, onDeletePod, onNodeDetail, onPodLogs, onSaveService, onDeleteService, onDetail}) {
   const keys = rows[0] ? Object.keys(rows[0]).slice(0, 7) : [];
   return (
     <div className="stack">
@@ -1450,6 +1974,7 @@ function RuntimeTable({kind, rows, onCreateNamespace, onPatchNamespace, onDelete
           <ServiceForm onSubmit={(event) => onSaveService(event)} namespaces={[]} />
         </section>
       )}
+      {kind === "nodes" && <NodeJoinPanel command={nodeJoinCommand} onLoad={onLoadNodeJoinCommand} />}
       <section className="panel">
         <div className="table runtime-table">
           <div className="tr head">{keys.map((key) => <span key={key}>{key.replaceAll("_", " ")}</span>)}<span>Actions</span></div>
@@ -1457,7 +1982,7 @@ function RuntimeTable({kind, rows, onCreateNamespace, onPatchNamespace, onDelete
             <div className="tr" key={`${kind}-${row.namespace || ""}-${row.name || index}`}>
               {keys.map((key) => <span key={key}>{formatCell(row[key])}</span>)}
               <span className="row-actions">
-                <button onClick={() => kind === "nodes" ? onNodeDetail(row) : onDetail({kind, row})}>Details</button>
+                <button onClick={() => kind === "nodes" ? onNodeDetail(row) : kind === "namespaces" ? onNamespaceDetail(row.name) : onDetail({kind, row})}>Details</button>
                 {kind === "namespaces" && <button onClick={() => onDeleteNamespace(row.name)} className="danger-button"><Trash2 size={15} /></button>}
                 {kind === "pods" && <><button onClick={() => onPodLogs(row)}>Logs</button><button onClick={() => onDeletePod(row)} className="danger-button"><Trash2 size={15} /></button></>}
                 {kind === "services" && <><button onClick={() => onDetail({kind: "service-edit", row})}>Edit</button><button onClick={() => onDeleteService(row)} className="danger-button"><Trash2 size={15} /></button></>}
@@ -1471,7 +1996,29 @@ function RuntimeTable({kind, rows, onCreateNamespace, onPatchNamespace, onDelete
   );
 }
 
-function RuntimeDetailModal({detail, logs, logFollow, logStatus, selectedLogContainer, logTail, logLoaded, onSelectLogContainer, onSetLogTail, onLoadContainerLogs, onFollowPodLogs, onStopPodLogs, onClose, onSaveService, onPatchNamespace}) {
+function NodeJoinPanel({command, onLoad}) {
+  return (
+    <section className="panel node-ops-panel">
+      <div className="action-panel">
+        <div>
+          <h2><Server size={18} /> K3s node join</h2>
+          <p>Generate an agent or server join command from the configured K3s server URL and node token.</p>
+        </div>
+        <div className="row-actions">
+          <button onClick={() => onLoad("agent")}>Agent command</button>
+          <button onClick={() => onLoad("server")}>Server command</button>
+        </div>
+      </div>
+      {command?.configured ? (
+        <pre className="command-box">{command.command}</pre>
+      ) : (
+        <p className="muted">{command?.message || "Loading join command configuration..."}</p>
+      )}
+    </section>
+  );
+}
+
+function RuntimeDetailModal({detail, logs, logFollow, logStatus, selectedLogContainer, logTail, logLoaded, nodeHealth, onLoadNodeHealth, onSaveNodeLabels, onSaveNodeTaints, onCordonNode, onDrainNode, onDeleteNode, onSaveResourceQuota, onDeleteResourceQuota, onSaveLimitRange, onDeleteLimitRange, onSaveNamespacePermission, onDeleteNamespacePermission, onSaveNamespaceIsolation, onSelectLogContainer, onSetLogTail, onLoadContainerLogs, onFollowPodLogs, onStopPodLogs, onClose, onSaveService, onPatchNamespace}) {
   const row = detail.row || {};
   return (
     <div className="modal-backdrop">
@@ -1503,7 +2050,9 @@ function RuntimeDetailModal({detail, logs, logFollow, logStatus, selectedLogCont
             />
           </>
         ) : detail.kind === "node" ? (
-          <NodeDetailView detail={detail} />
+          <NodeDetailView detail={detail} health={nodeHealth} onLoadHealth={onLoadNodeHealth} onSaveLabels={onSaveNodeLabels} onSaveTaints={onSaveNodeTaints} onCordon={onCordonNode} onDrain={onDrainNode} onDelete={onDeleteNode} />
+        ) : detail.kind === "namespace-detail" ? (
+          <NamespaceDetailView detail={detail} onPatchNamespace={onPatchNamespace} onSaveResourceQuota={onSaveResourceQuota} onDeleteResourceQuota={onDeleteResourceQuota} onSaveLimitRange={onSaveLimitRange} onDeleteLimitRange={onDeleteLimitRange} onSavePermission={onSaveNamespacePermission} onDeletePermission={onDeleteNamespacePermission} onSaveIsolation={onSaveNamespaceIsolation} />
         ) : (
           <div className="detail-list">{Object.entries(row).map(([key, value]) => <span key={key}>{key.replaceAll("_", " ")} <b>{formatCell(value)}</b></span>)}</div>
         )}
@@ -1563,16 +2112,35 @@ function podContainers(pod) {
   }).filter((container) => container.name);
 }
 
-function NodeDetailView({detail}) {
+function NodeDetailView({detail, health, onLoadHealth, onSaveLabels, onSaveTaints, onCordon, onDrain, onDelete}) {
   const row = detail.row || {};
   const summary = row.summary || row;
   const usage = row.usage || {};
+  const disk = row.disk || {};
+  const network = row.network || {};
   const pods = row.pods || [];
   const conditions = row.conditions || [];
+  const nodeName = summary.name || row.name;
   return (
     <div className="node-detail">
       {detail.loading && <p className="muted">Loading live node status...</p>}
       {detail.error && <p className="error-inline">{detail.error}</p>}
+      <section className="node-section node-actions">
+        <div className="row-actions">
+          <button onClick={() => onLoadHealth(nodeName)}><CheckCircle2 size={15} /> Health check</button>
+          <button onClick={() => onCordon(nodeName, false)}>Cordon</button>
+          <button onClick={() => onCordon(nodeName, true)}>Uncordon</button>
+          <button onClick={() => onDrain(nodeName, {force: false, ignore_daemonsets: true, delete_emptydir_data: false, grace_period_seconds: 30})}>Drain safe</button>
+          <button className="danger-button" onClick={() => onDelete(nodeName)}><Trash2 size={15} /> Delete node</button>
+        </div>
+        {health && (
+          <div className={health.healthy ? "health-card good" : "health-card warning"}>
+            <b>{health.status}</b>
+            <span>{(health.checks || []).length} checks · {(health.abnormal_pods || []).length} abnormal pods · {formatTime(health.checked_at)}</span>
+            {(health.checks || []).map((check) => <small key={`${check.name}-${check.message}`}>{check.name}: {check.status}{check.message ? ` · ${check.message}` : ""}</small>)}
+          </div>
+        )}
+      </section>
       <div className="node-status-grid">
         <div className="runtime-summary">
           <strong>{summary.status || "-"}</strong>
@@ -1581,18 +2149,21 @@ function NodeDetailView({detail}) {
         <div className="detail-list compact-details">
           <span>Internal IP <b>{summary.internal_ip || row.addresses?.InternalIP || "-"}</b></span>
           <span>Roles <b>{(summary.roles || []).join(", ") || "-"}</b></span>
+          <span>Scheduling <b>{summary.schedulable === false ? "Cordoned" : "Schedulable"}</b></span>
           <span>Pods <b>{pods.length}/{row.allocatable?.pods || "-"}</b></span>
           <span>Checked <b>{formatTime(row.checked_at)}</b></span>
         </div>
       </div>
       <section className="node-section">
         <h3>Live resources</h3>
-        {row.metrics_available ? (
+        {(row.metrics_available || row.disk || row.network) ? (
           <div className="resource-grid">
-            <ResourceMeter label="CPU allocatable" value={usage.cpu_allocatable_percent} detail={`${usage.cpu_millis || 0}m / ${row.allocatable?.cpu_millis || 0}m`} />
-            <ResourceMeter label="Memory allocatable" value={usage.memory_allocatable_percent} detail={`${formatBytes(usage.memory_bytes)} / ${formatBytes(row.allocatable?.memory_bytes)}`} />
-            <ResourceMeter label="CPU capacity" value={usage.cpu_capacity_percent} detail={`${usage.cpu || "-"} / ${row.capacity?.cpu || "-"}`} />
-            <ResourceMeter label="Memory capacity" value={usage.memory_capacity_percent} detail={`${usage.memory || "-"} / ${row.capacity?.memory || "-"}`} />
+            <ResourceMeter label="CPU allocatable" value={usage.cpu_allocatable_percent} detail={row.metrics_available ? `${usage.cpu_millis || 0}m / ${row.allocatable?.cpu_millis || 0}m` : "metrics-server unavailable"} />
+            <ResourceMeter label="Memory allocatable" value={usage.memory_allocatable_percent} detail={row.metrics_available ? `${formatBytes(usage.memory_bytes)} / ${formatBytes(row.allocatable?.memory_bytes)}` : "metrics-server unavailable"} />
+            <ResourceMeter label="CPU capacity" value={usage.cpu_capacity_percent} detail={row.metrics_available ? `${usage.cpu || "-"} / ${row.capacity?.cpu || "-"}` : "metrics-server unavailable"} />
+            <ResourceMeter label="Memory capacity" value={usage.memory_capacity_percent} detail={row.metrics_available ? `${usage.memory || "-"} / ${row.capacity?.memory || "-"}` : "metrics-server unavailable"} />
+            <ResourceMeter label="Disk" value={disk.used_percent} detail={`${formatBytes(disk.used_bytes)} / ${formatBytes(disk.capacity_bytes)}`} />
+            <ResourceMeter label="Network" value={0} detail={`RX ${formatBytes(network.rx_bytes)} · TX ${formatBytes(network.tx_bytes)}`} />
           </div>
         ) : (
           <p className="muted">Metrics unavailable{row.metrics_error ? `: ${row.metrics_error}` : ". Install metrics-server to show live CPU and memory usage."}</p>
@@ -1629,14 +2200,102 @@ function NodeDetailView({detail}) {
         </div>
       </section>
       <section className="node-section">
-        <h3>Taints and labels</h3>
+        <h3>Labels</h3>
+        <form className="form-grid node-edit-form" onSubmit={(event) => { event.preventDefault(); onSaveLabels(nodeName, event.currentTarget.labels.value); }}>
+          <textarea name="labels" defaultValue={formatKeyValues(row.labels)} />
+          <button className="primary">Save labels</button>
+        </form>
+        <div className="label-cloud">
+          {Object.entries(row.labels || {}).map(([key, value]) => <span key={key}>{key}={value}</span>)}
+        </div>
+      </section>
+      <section className="node-section">
+        <h3>Taints</h3>
+        <form className="form-grid node-edit-form" onSubmit={(event) => { event.preventDefault(); onSaveTaints(nodeName, event.currentTarget.taints.value); }}>
+          <textarea name="taints" placeholder="key=value:NoSchedule, dedicated=gpu:NoExecute" defaultValue={taintsToForm(row.taints || [])} />
+          <button className="primary">Save taints</button>
+        </form>
         <div className="signal-list">
           {(row.taints || []).map((taint) => <span key={taint}>{taint}</span>)}
           {(row.taints || []).length === 0 && <span>No taints</span>}
         </div>
-        <div className="label-cloud">
-          {Object.entries(row.labels || {}).map(([key, value]) => <span key={key}>{key}={value}</span>)}
-        </div>
+      </section>
+    </div>
+  );
+}
+
+function NamespaceDetailView({detail, onPatchNamespace, onSaveResourceQuota, onDeleteResourceQuota, onSaveLimitRange, onDeleteLimitRange, onSavePermission, onDeletePermission, onSaveIsolation}) {
+  const row = detail.row || {};
+  const summary = row.summary || row;
+  const namespace = summary.name || row.name;
+  const stats = row.stats || {};
+  const isolation = row.isolation || {};
+  return (
+    <div className="namespace-detail">
+      {detail.loading && <p className="muted">Loading namespace detail...</p>}
+      {detail.error && <p className="error-inline">{detail.error}</p>}
+      <div className="dashboard-kpis">
+        <MetricCard icon={Boxes} label="Pods" value={stats.pods || 0} detail={`${stats.running_pods || 0} running · ${stats.abnormal_pods || 0} abnormal`} />
+        <MetricCard icon={Database} label="Services" value={stats.services || 0} detail={`${stats.deployments || 0} deployments`} />
+        <MetricCard icon={Network} label="Ingresses" value={stats.ingresses || 0} detail={`${stats.network_policies || 0} policies`} />
+        <MetricCard icon={KeyRound} label="Secrets" value={stats.secrets || 0} detail={`${stats.config_maps || 0} configmaps`} />
+        <MetricCard icon={Shield} label="Isolation" value={isolation.enabled ? "On" : "Off"} detail={isolation.policy_name || "No default isolation"} tone={isolation.enabled ? "good" : "warning"} />
+        <MetricCard icon={ListRestart} label="Checked" value={formatTime(row.checked_at)} detail={summary.status || "-"} />
+      </div>
+
+      <section className="node-section">
+        <h3>Namespace labels</h3>
+        <form className="form-grid node-edit-form" onSubmit={(event) => { event.preventDefault(); onPatchNamespace(namespace, event.currentTarget.labels.value); }}>
+          <textarea name="labels" defaultValue={formatKeyValues(summary.labels)} />
+          <button className="primary">Save labels</button>
+        </form>
+      </section>
+
+      <section className="node-section">
+        <h3>ResourceQuota</h3>
+        <form className="form-grid quota-form" onSubmit={(event) => onSaveResourceQuota(namespace, event)}>
+          <input name="name" placeholder="quota name" defaultValue="default-quota" required />
+          <input name="hard" placeholder="requests.cpu=4,requests.memory=8Gi,limits.cpu=8,pods=40" required />
+          <button className="primary">Save quota</button>
+        </form>
+        <SimpleTable rows={row.resource_quotas || []} columns={["name", "hard", "used"]} actions={(quota) => <button className="danger-button" onClick={() => onDeleteResourceQuota(namespace, quota.name)}><Trash2 size={15} /></button>} compact />
+      </section>
+
+      <section className="node-section">
+        <h3>LimitRange</h3>
+        <form className="form-grid limit-form" onSubmit={(event) => onSaveLimitRange(namespace, event)}>
+          <input name="name" placeholder="limit range name" defaultValue="default-limits" required />
+          <select name="type" defaultValue="Container"><option>Container</option><option>Pod</option><option>PersistentVolumeClaim</option></select>
+          <input name="default_request" placeholder="default request: cpu=100m,memory=128Mi" />
+          <input name="default" placeholder="default limit: cpu=500m,memory=512Mi" />
+          <input name="min" placeholder="min: cpu=50m,memory=64Mi" />
+          <input name="max" placeholder="max: cpu=2,memory=2Gi" />
+          <button className="primary">Save limits</button>
+        </form>
+        <SimpleTable rows={row.limit_ranges || []} columns={["name", "types"]} actions={(limit) => <button className="danger-button" onClick={() => onDeleteLimitRange(namespace, limit.name)}><Trash2 size={15} /></button>} compact />
+      </section>
+
+      <section className="node-section">
+        <h3>Namespace permissions</h3>
+        <form className="form-grid permission-form" onSubmit={(event) => onSavePermission(namespace, event)}>
+          <input name="name" placeholder="permission name" defaultValue="namespace-admin" required />
+          <input name="subjects" placeholder="subjects: User:alice,Group:platform,ServiceAccount:builder" required />
+          <input name="verbs" placeholder="verbs: get,list,watch,create,update,delete" defaultValue="get,list,watch" required />
+          <input name="resources" placeholder="resources: pods,services,deployments" defaultValue="pods,services" required />
+          <input name="api_groups" placeholder="api groups: ,apps,networking.k8s.io" />
+          <button className="primary">Save permission</button>
+        </form>
+        <SimpleTable rows={row.role_bindings || []} columns={["name", "role_ref", "subjects"]} actions={(binding) => <button className="danger-button" onClick={() => onDeletePermission(namespace, binding.name)}><Trash2 size={15} /></button>} compact />
+      </section>
+
+      <section className="node-section">
+        <h3>Namespace isolation</h3>
+        <form className="form-grid isolation-form" onSubmit={(event) => onSaveIsolation(namespace, event)}>
+          <label className="check-row"><input name="enabled" type="checkbox" defaultChecked={Boolean(isolation.enabled)} /> Enable default deny isolation</label>
+          <label className="check-row"><input name="allow_same_namespace" type="checkbox" defaultChecked={Boolean(isolation.allow_same_namespace)} /> Allow same namespace traffic</label>
+          <label className="check-row"><input name="allow_dns" type="checkbox" defaultChecked={Boolean(isolation.allow_dns)} /> Allow DNS egress</label>
+          <button className="primary">Save isolation</button>
+        </form>
       </section>
     </div>
   );
@@ -1660,8 +2319,15 @@ function ServiceForm({existing, onSubmit}) {
       {!existing && <input name="name" placeholder="service-name" required />}
       <select name="type" defaultValue={existing?.type || "ClusterIP"}><option>ClusterIP</option><option>NodePort</option><option>LoadBalancer</option></select>
       <input name="selector" placeholder="selector: app=my-app,managed-by=beancs" defaultValue={formatKeyValues(existing?.selector)} />
-      <input name="ports" placeholder="ports: http:80:8080/TCP,https:443:8443/TCP" defaultValue={portsToForm(existing?.ports)} required />
+      <input name="ports" placeholder="ports: http:80:8080:30080/TCP,https:443:8443/TCP" defaultValue={portsToForm(existing?.ports)} required />
       <input name="labels" placeholder="labels: app=my-app" defaultValue={formatKeyValues(existing?.labels)} />
+      <input name="load_balancer_ip" placeholder="LoadBalancer IP, optional" />
+      <input name="external_ips" placeholder="External IPs: 1.2.3.4,5.6.7.8" />
+      <select name="external_traffic_policy" defaultValue="">
+        <option value="">Traffic policy</option>
+        <option value="Cluster">Cluster</option>
+        <option value="Local">Local</option>
+      </select>
       <button className="primary" type="submit">{existing ? "Save service" : "Create service"}</button>
     </form>
   );
@@ -1910,10 +2576,12 @@ async function finishLogin(config) {
 }
 
 function titleFor(view) {
-  return ({deploy: "Deploy project", progress: "Progress", projects: "Projects", apiKeys: "API Keys", github: "GitHub", domains: "Domains", cloudflare: "Cloudflare", basaltpass: "BasaltPass", namespaces: "Namespaces", pods: "Pods", nodes: "Nodes", ingresses: "Ingresses", services: "Services"}[view] || "BeanCS");
+  return ({dashboard: "Dashboard", deploy: "Deploy project", progress: "Progress", projects: "Projects", apiKeys: "API Keys", github: "GitHub", domains: "Domains", networking: "Networking", cloudflare: "Cloudflare", basaltpass: "BasaltPass", namespaces: "Namespaces", pods: "Pods", nodes: "Nodes", ingresses: "Ingresses", services: "Services"}[view] || "BeanCS");
 }
 
 function subtitleFor(view, runtime, projects) {
+  if (view === "dashboard") return "Real-time cluster health and operating signals";
+  if (view === "networking") return "Service, Ingress, Endpoint, NetworkPolicy, Traefik and Tailscale operations";
   if (view === "projects") return `${projects.length} managed projects`;
   if (view === "progress") return "Watch installs and runtime readiness";
   if (view === "apiKeys") return "Issue and revoke API keys for automation";
@@ -1939,6 +2607,21 @@ function formatBytes(value) {
   return `${size.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
 }
 
+function formatPercent(value) {
+  return Number(value || 0).toFixed(0);
+}
+
+function formatDuration(seconds) {
+  const value = Number(seconds || 0);
+  if (!value) return "-";
+  const days = Math.floor(value / 86400);
+  const hours = Math.floor((value % 86400) / 3600);
+  const minutes = Math.floor((value % 3600) / 60);
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
+
 function formatCell(value) {
   if (Array.isArray(value)) return value.join(", ") || "-";
   if (typeof value === "object" && value !== null) return formatKeyValues(value);
@@ -1961,6 +2644,33 @@ function formatKeyValues(value) {
   return Object.entries(value).map(([key, val]) => `${key}=${val}`).join(",");
 }
 
+function parseTaints(value) {
+  return String(value || "").split(",").map((item) => item.trim()).filter(Boolean).map((item) => {
+    const [left, effect = "NoSchedule"] = item.split(":");
+    const [key, ...valueParts] = left.split("=");
+    return {key: key.trim(), value: valueParts.join("=").trim(), effect: effect.trim() || "NoSchedule"};
+  }).filter((taint) => taint.key);
+}
+
+function parseCSV(value) {
+  return String(value || "").split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+function parsePermissionSubjects(value, namespace) {
+  return parseCSV(value).map((item) => {
+    const [kind = "User", name = item, subjectNamespace = ""] = item.split(":");
+    return {
+      kind: kind.trim(),
+      name: name.trim(),
+      namespace: subjectNamespace.trim() || (kind.trim() === "ServiceAccount" ? namespace : ""),
+    };
+  }).filter((subject) => subject.name);
+}
+
+function taintsToForm(taints) {
+  return (taints || []).join(",");
+}
+
 function parseServicePorts(value) {
   return String(value || "").split(",").map((item) => item.trim()).filter(Boolean).map((item) => {
     const [left, protocol = "TCP"] = item.split("/");
@@ -1971,6 +2681,7 @@ function parseServicePorts(value) {
       name: hasName ? parts[0] : "",
       port,
       target_port: Number(hasName ? (parts[2] || parts[1]) : (parts[1] || parts[0])),
+      node_port: Number(hasName ? (parts[3] || 0) : (parts[2] || 0)),
       protocol: protocol || "TCP",
     };
   });

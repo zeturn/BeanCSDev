@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -29,15 +31,122 @@ type RuntimeOverview struct {
 	Ingresses   []IngressSummary    `json:"ingresses"`
 }
 
+type NetworkOverview struct {
+	Services        []ServiceSummary       `json:"services"`
+	Ingresses       []IngressSummary       `json:"ingresses"`
+	Endpoints       []EndpointSummary      `json:"endpoints"`
+	NetworkPolicies []NetworkPolicySummary `json:"network_policies"`
+	Access          []ServiceAccessSummary `json:"access"`
+	Controllers     NetworkControllers     `json:"controllers"`
+	CheckedAt       time.Time              `json:"checked_at"`
+}
+
+type EndpointSummary struct {
+	Namespace  string    `json:"namespace"`
+	Name       string    `json:"name"`
+	Addresses  []string  `json:"addresses"`
+	Ports      []string  `json:"ports"`
+	AgeSeconds int64     `json:"age_seconds"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+type NetworkPolicySummary struct {
+	Namespace    string            `json:"namespace"`
+	Name         string            `json:"name"`
+	PodSelector  map[string]string `json:"pod_selector,omitempty"`
+	PolicyTypes  []string          `json:"policy_types"`
+	IngressRules int               `json:"ingress_rules"`
+	EgressRules  int               `json:"egress_rules"`
+	AgeSeconds   int64             `json:"age_seconds"`
+	CreatedAt    time.Time         `json:"created_at"`
+}
+
+type ServiceAccessSummary struct {
+	Namespace    string   `json:"namespace"`
+	Service      string   `json:"service"`
+	Type         string   `json:"type"`
+	Hosts        []string `json:"hosts,omitempty"`
+	URLs         []string `json:"urls"`
+	TLS          bool     `json:"tls"`
+	Ingress      string   `json:"ingress,omitempty"`
+	Class        string   `json:"class,omitempty"`
+	LoadBalancer string   `json:"load_balancer,omitempty"`
+	NodePorts    []string `json:"node_ports,omitempty"`
+}
+
+type NetworkControllers struct {
+	TraefikNamespaces   []string `json:"traefik_namespaces"`
+	TailscaleNamespaces []string `json:"tailscale_namespaces"`
+	TraefikIngresses    int      `json:"traefik_ingresses"`
+	TailscaleIngresses  int      `json:"tailscale_ingresses"`
+	TLSIngresses        int      `json:"tls_ingresses"`
+}
+
+type ClusterDashboard struct {
+	ClusterName       string                `json:"cluster_name"`
+	Status            string                `json:"status"`
+	Healthy           bool                  `json:"healthy"`
+	Nodes             ClusterNodeTotals     `json:"nodes"`
+	KubernetesVersion string                `json:"kubernetes_version"`
+	K3sVersion        string                `json:"k3s_version,omitempty"`
+	Resources         ClusterResourceTotals `json:"resources"`
+	Pods              ClusterPodTotals      `json:"pods"`
+	Alerts            []ClusterAlert        `json:"alerts"`
+	Events            []EventSummary        `json:"events"`
+	UptimeSeconds     int64                 `json:"uptime_seconds"`
+	StartedAt         time.Time             `json:"started_at,omitempty"`
+	MetricsAvailable  bool                  `json:"metrics_available"`
+	MetricsError      string                `json:"metrics_error,omitempty"`
+	CheckedAt         time.Time             `json:"checked_at"`
+}
+
+type ClusterNodeTotals struct {
+	Total    int `json:"total"`
+	Ready    int `json:"ready"`
+	NotReady int `json:"not_ready"`
+	Server   int `json:"server"`
+	Agent    int `json:"agent"`
+}
+
+type ClusterResourceTotals struct {
+	CPUPercent       float64 `json:"cpu_percent"`
+	MemoryPercent    float64 `json:"memory_percent"`
+	DiskPercent      float64 `json:"disk_percent"`
+	CPUUsedMillis    int64   `json:"cpu_used_millis"`
+	CPUTotalMillis   int64   `json:"cpu_total_millis"`
+	MemoryUsedBytes  int64   `json:"memory_used_bytes"`
+	MemoryTotalBytes int64   `json:"memory_total_bytes"`
+	DiskUsedBytes    int64   `json:"disk_used_bytes"`
+	DiskTotalBytes   int64   `json:"disk_total_bytes"`
+}
+
+type ClusterPodTotals struct {
+	Total    int `json:"total"`
+	Running  int `json:"running"`
+	Abnormal int `json:"abnormal"`
+	Pending  int `json:"pending"`
+	Failed   int `json:"failed"`
+}
+
+type ClusterAlert struct {
+	Severity  string    `json:"severity"`
+	Reason    string    `json:"reason"`
+	Message   string    `json:"message"`
+	Object    string    `json:"object"`
+	LastSeen  time.Time `json:"last_seen"`
+	Namespace string    `json:"namespace,omitempty"`
+}
+
 type NodeSummary struct {
-	Name       string            `json:"name"`
-	Status     string            `json:"status"`
-	Roles      []string          `json:"roles"`
-	Version    string            `json:"version"`
-	InternalIP string            `json:"internal_ip,omitempty"`
-	Labels     map[string]string `json:"labels,omitempty"`
-	AgeSeconds int64             `json:"age_seconds"`
-	CreatedAt  time.Time         `json:"created_at"`
+	Name        string            `json:"name"`
+	Status      string            `json:"status"`
+	Schedulable bool              `json:"schedulable"`
+	Roles       []string          `json:"roles"`
+	Version     string            `json:"version"`
+	InternalIP  string            `json:"internal_ip,omitempty"`
+	Labels      map[string]string `json:"labels,omitempty"`
+	AgeSeconds  int64             `json:"age_seconds"`
+	CreatedAt   time.Time         `json:"created_at"`
 }
 
 type NodeDetail struct {
@@ -46,6 +155,8 @@ type NodeDetail struct {
 	Capacity         NodeResources          `json:"capacity"`
 	Allocatable      NodeResources          `json:"allocatable"`
 	Usage            *NodeResourceUsage     `json:"usage,omitempty"`
+	Disk             *NodeDiskUsage         `json:"disk,omitempty"`
+	Network          *NodeNetworkUsage      `json:"network,omitempty"`
 	Conditions       []NodeConditionSummary `json:"conditions"`
 	Taints           []string               `json:"taints"`
 	Pods             []PodSummary           `json:"pods"`
@@ -76,6 +187,47 @@ type NodeResourceUsage struct {
 	MemoryAllocatablePercent float64 `json:"memory_allocatable_percent"`
 	CPUCapacityPercent       float64 `json:"cpu_capacity_percent"`
 	MemoryCapacityPercent    float64 `json:"memory_capacity_percent"`
+}
+
+type NodeDiskUsage struct {
+	UsedBytes     int64   `json:"used_bytes"`
+	CapacityBytes int64   `json:"capacity_bytes"`
+	UsedPercent   float64 `json:"used_percent"`
+}
+
+type NodeNetworkUsage struct {
+	RxBytes int64 `json:"rx_bytes"`
+	TxBytes int64 `json:"tx_bytes"`
+}
+
+type NodeHealthCheck struct {
+	Name         string           `json:"name"`
+	Healthy      bool             `json:"healthy"`
+	Status       string           `json:"status"`
+	Checks       []NodeHealthItem `json:"checks"`
+	AbnormalPods []PodSummary     `json:"abnormal_pods"`
+	MetricsError string           `json:"metrics_error,omitempty"`
+	CheckedAt    time.Time        `json:"checked_at"`
+}
+
+type NodeHealthItem struct {
+	Name     string `json:"name"`
+	Status   string `json:"status"`
+	Severity string `json:"severity"`
+	Message  string `json:"message,omitempty"`
+}
+
+type NodeJoinCommand struct {
+	Role       string `json:"role"`
+	Configured bool   `json:"configured"`
+	Command    string `json:"command,omitempty"`
+	Message    string `json:"message,omitempty"`
+}
+
+type DrainNodeResult struct {
+	Node        string   `json:"node"`
+	EvictedPods []string `json:"evicted_pods"`
+	SkippedPods []string `json:"skipped_pods"`
 }
 
 type NodeConditionSummary struct {
@@ -132,6 +284,7 @@ type IngressSummary struct {
 	Class      string    `json:"class,omitempty"`
 	Hosts      []string  `json:"hosts"`
 	Address    string    `json:"address,omitempty"`
+	Services   []string  `json:"services,omitempty"`
 	TLS        bool      `json:"tls"`
 	AgeSeconds int64     `json:"age_seconds"`
 	CreatedAt  time.Time `json:"created_at"`
@@ -247,6 +400,7 @@ func (m *Manager) ProjectRuntimeStatus(ctx context.Context, namespace, projectNa
 			Class:      ingressClass(ing),
 			Hosts:      ingressHosts(ing),
 			Address:    ingressAddress(ing),
+			Services:   ingressBackendServices(ing),
 			TLS:        len(ing.Spec.TLS) > 0,
 			AgeSeconds: int64(now.Sub(created).Seconds()),
 			CreatedAt:  created,
@@ -317,6 +471,158 @@ func (m *Manager) RuntimeOverview(ctx context.Context) (*RuntimeOverview, error)
 		Services:    services,
 		Ingresses:   ingresses,
 	}, nil
+}
+
+func (m *Manager) NetworkOverview(ctx context.Context) (*NetworkOverview, error) {
+	if err := m.ensure(); err != nil {
+		return nil, err
+	}
+	services, err := m.listServiceSummaries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ingresses, err := m.listIngressSummaries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	endpoints, err := m.listEndpointSummaries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	policies, err := m.listNetworkPolicySummaries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &NetworkOverview{
+		Services:        services,
+		Ingresses:       ingresses,
+		Endpoints:       endpoints,
+		NetworkPolicies: policies,
+		Access:          serviceAccessSummaries(services, ingresses),
+		Controllers: NetworkControllers{
+			TraefikNamespaces:   m.PublicIngressNamespaces,
+			TailscaleNamespaces: m.PrivateIngressNamespaces,
+			TraefikIngresses:    countIngressClass(ingresses, "traefik"),
+			TailscaleIngresses:  countIngressClass(ingresses, "tailscale"),
+			TLSIngresses:        countTLSIngresses(ingresses),
+		},
+		CheckedAt: time.Now().UTC(),
+	}, nil
+}
+
+func (m *Manager) ClusterDashboard(ctx context.Context) (*ClusterDashboard, error) {
+	if err := m.ensure(); err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	out := &ClusterDashboard{
+		ClusterName:  m.ClusterName,
+		Status:       "Healthy",
+		Healthy:      true,
+		CheckedAt:    now,
+		Alerts:       []ClusterAlert{},
+		Events:       []EventSummary{},
+		MetricsError: "",
+	}
+	if out.ClusterName == "" {
+		out.ClusterName = "production-k3s"
+	}
+
+	nodes, err := m.Clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	pods, err := m.Clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	events, err := m.Clientset.CoreV1().Events("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	if version, err := m.Clientset.Discovery().ServerVersion(); err == nil && version != nil {
+		out.KubernetesVersion = version.GitVersion
+	}
+
+	var startedAt time.Time
+	for _, node := range nodes.Items {
+		out.Nodes.Total++
+		if nodeReadyStatus(node) == "Ready" {
+			out.Nodes.Ready++
+		} else {
+			out.Nodes.NotReady++
+			out.Healthy = false
+		}
+		if nodeIsServer(node) {
+			out.Nodes.Server++
+		} else {
+			out.Nodes.Agent++
+		}
+		if out.K3sVersion == "" && strings.Contains(strings.ToLower(node.Status.NodeInfo.KubeletVersion), "k3s") {
+			out.K3sVersion = node.Status.NodeInfo.KubeletVersion
+		}
+		out.Resources.CPUTotalMillis += nodeResources(node.Status.Allocatable).CPUMillis
+		out.Resources.MemoryTotalBytes += nodeResources(node.Status.Allocatable).MemoryBytes
+		if startedAt.IsZero() || node.CreationTimestamp.Time.Before(startedAt) {
+			startedAt = node.CreationTimestamp.Time
+		}
+	}
+	if !startedAt.IsZero() {
+		out.StartedAt = startedAt
+		out.UptimeSeconds = int64(now.Sub(startedAt).Seconds())
+	}
+
+	for _, pod := range pods.Items {
+		out.Pods.Total++
+		switch pod.Status.Phase {
+		case corev1.PodRunning:
+			out.Pods.Running++
+		case corev1.PodPending:
+			out.Pods.Pending++
+		case corev1.PodFailed:
+			out.Pods.Failed++
+		}
+		if podAbnormal(pod) {
+			out.Pods.Abnormal++
+			out.Healthy = false
+			if len(out.Alerts) < 12 {
+				out.Alerts = append(out.Alerts, podAlert(pod))
+			}
+		}
+	}
+
+	if err := m.applyDashboardMetrics(ctx, nodes.Items, out); err != nil {
+		out.MetricsError = err.Error()
+	}
+	out.Resources.CPUPercent = percent(out.Resources.CPUUsedMillis, out.Resources.CPUTotalMillis)
+	out.Resources.MemoryPercent = percent(out.Resources.MemoryUsedBytes, out.Resources.MemoryTotalBytes)
+	out.Resources.DiskPercent = percent(out.Resources.DiskUsedBytes, out.Resources.DiskTotalBytes)
+	if out.Resources.CPUUsedMillis > 0 || out.Resources.MemoryUsedBytes > 0 {
+		out.MetricsAvailable = true
+	}
+
+	warnings := dashboardWarningEvents(events.Items)
+	out.Events = warnings
+	for _, event := range warnings {
+		if len(out.Alerts) >= 12 {
+			break
+		}
+		out.Alerts = append(out.Alerts, ClusterAlert{
+			Severity: strings.ToLower(event.Type),
+			Reason:   event.Reason,
+			Message:  event.Message,
+			Object:   event.Object,
+			LastSeen: event.LastSeen,
+		})
+	}
+	if out.Nodes.NotReady > 0 || out.Pods.Abnormal > 0 || len(out.Alerts) > 0 {
+		out.Status = "Degraded"
+	}
+	if out.Nodes.Total == 0 || out.Nodes.Ready == 0 {
+		out.Status = "NotReady"
+		out.Healthy = false
+	}
+	return out, nil
 }
 
 func (m *Manager) Logs(ctx context.Context, namespace, projectName string, tail int64, container string) (string, error) {
@@ -501,6 +807,12 @@ func (m *Manager) NodeDetail(ctx context.Context, name string) (*NodeDetail, err
 		out.MetricsAvailable = true
 		out.Usage = usage
 	}
+	if disk, network, err := m.nodeUsageStats(ctx, name); err == nil {
+		out.Disk = disk
+		out.Network = network
+	} else if out.MetricsError == "" {
+		out.MetricsError = err.Error()
+	}
 	return out, nil
 }
 
@@ -588,14 +900,15 @@ func nodeSummary(node corev1.Node) NodeSummary {
 	now := time.Now()
 	created := node.CreationTimestamp.Time
 	return NodeSummary{
-		Name:       node.Name,
-		Status:     nodeReadyStatus(node),
-		Roles:      nodeRoles(node.Labels),
-		Version:    node.Status.NodeInfo.KubeletVersion,
-		InternalIP: nodeInternalIP(node),
-		Labels:     node.Labels,
-		AgeSeconds: int64(now.Sub(created).Seconds()),
-		CreatedAt:  created,
+		Name:        node.Name,
+		Status:      nodeReadyStatus(node),
+		Schedulable: !node.Spec.Unschedulable,
+		Roles:       nodeRoles(node.Labels),
+		Version:     node.Status.NodeInfo.KubeletVersion,
+		InternalIP:  nodeInternalIP(node),
+		Labels:      node.Labels,
+		AgeSeconds:  int64(now.Sub(created).Seconds()),
+		CreatedAt:   created,
 	}
 }
 
@@ -704,6 +1017,193 @@ func nodeSystemInfo(node corev1.Node) map[string]string {
 	}
 }
 
+func nodeIsServer(node corev1.Node) bool {
+	for key := range node.Labels {
+		if key == "node-role.kubernetes.io/control-plane" || key == "node-role.kubernetes.io/master" || key == "node-role.kubernetes.io/etcd" {
+			return true
+		}
+	}
+	return false
+}
+
+func podAbnormal(pod corev1.Pod) bool {
+	if pod.Status.Phase == corev1.PodFailed || pod.Status.Phase == corev1.PodUnknown {
+		return true
+	}
+	if pod.Status.Phase == corev1.PodPending {
+		return true
+	}
+	for _, status := range pod.Status.ContainerStatuses {
+		if status.State.Waiting != nil && status.State.Waiting.Reason != "" && status.State.Waiting.Reason != "ContainerCreating" && status.State.Waiting.Reason != "PodInitializing" {
+			return true
+		}
+		if status.State.Terminated != nil && status.State.Terminated.ExitCode != 0 {
+			return true
+		}
+		if status.RestartCount > 5 {
+			return true
+		}
+	}
+	return false
+}
+
+func podAlert(pod corev1.Pod) ClusterAlert {
+	reason := string(pod.Status.Phase)
+	message := strings.TrimSpace(pod.Status.Message)
+	for _, status := range pod.Status.ContainerStatuses {
+		if status.State.Waiting != nil && status.State.Waiting.Reason != "" {
+			reason = status.State.Waiting.Reason
+			message = status.State.Waiting.Message
+			break
+		}
+		if status.State.Terminated != nil && status.State.Terminated.ExitCode != 0 {
+			reason = status.State.Terminated.Reason
+			message = status.State.Terminated.Message
+			break
+		}
+	}
+	if message == "" {
+		message = fmt.Sprintf("Pod phase is %s", pod.Status.Phase)
+	}
+	return ClusterAlert{
+		Severity:  "warning",
+		Reason:    reason,
+		Message:   message,
+		Object:    "Pod/" + pod.Name,
+		Namespace: pod.Namespace,
+		LastSeen:  time.Now().UTC(),
+	}
+}
+
+func dashboardWarningEvents(events []corev1.Event) []EventSummary {
+	out := []EventSummary{}
+	for _, event := range events {
+		if event.Type != corev1.EventTypeWarning {
+			continue
+		}
+		lastSeen := event.LastTimestamp.Time
+		if lastSeen.IsZero() {
+			lastSeen = event.EventTime.Time
+		}
+		firstSeen := event.FirstTimestamp.Time
+		out = append(out, EventSummary{
+			Type:      event.Type,
+			Reason:    event.Reason,
+			Message:   event.Message,
+			Object:    event.InvolvedObject.Kind + "/" + event.InvolvedObject.Namespace + "/" + event.InvolvedObject.Name,
+			Count:     event.Count,
+			LastSeen:  lastSeen,
+			FirstSeen: firstSeen,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].LastSeen.After(out[j].LastSeen) })
+	if len(out) > 10 {
+		return out[:10]
+	}
+	return out
+}
+
+func (m *Manager) applyDashboardMetrics(ctx context.Context, nodes []corev1.Node, out *ClusterDashboard) error {
+	var metricErrs []string
+	if err := m.applyNodeMetrics(ctx, out); err != nil {
+		metricErrs = append(metricErrs, "metrics.k8s.io: "+err.Error())
+	}
+	for _, node := range nodes {
+		used, total, err := m.nodeDiskUsage(ctx, node.Name)
+		if err != nil {
+			if len(metricErrs) < 3 {
+				metricErrs = append(metricErrs, "disk "+node.Name+": "+err.Error())
+			}
+			continue
+		}
+		out.Resources.DiskUsedBytes += used
+		out.Resources.DiskTotalBytes += total
+	}
+	if len(metricErrs) > 0 {
+		return errors.New(strings.Join(metricErrs, "; "))
+	}
+	return nil
+}
+
+func (m *Manager) applyNodeMetrics(ctx context.Context, out *ClusterDashboard) error {
+	if m.Dynamic == nil {
+		return fmt.Errorf("metrics client not configured")
+	}
+	gvr := schema.GroupVersionResource{Group: "metrics.k8s.io", Version: "v1beta1", Resource: "nodes"}
+	list, err := m.Dynamic.Resource(gvr).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return err
+	}
+	for _, item := range list.Items {
+		usage, ok, err := unstructured.NestedStringMap(item.Object, "usage")
+		if err != nil || !ok {
+			continue
+		}
+		cpu, err := resource.ParseQuantity(usage["cpu"])
+		if err == nil {
+			out.Resources.CPUUsedMillis += cpu.MilliValue()
+		}
+		memory, err := resource.ParseQuantity(usage["memory"])
+		if err == nil {
+			out.Resources.MemoryUsedBytes += memory.Value()
+		}
+	}
+	return nil
+}
+
+type nodeStatsSummary struct {
+	Node struct {
+		FS struct {
+			AvailableBytes uint64 `json:"availableBytes"`
+			CapacityBytes  uint64 `json:"capacityBytes"`
+		} `json:"fs"`
+		Network struct {
+			RxBytes uint64 `json:"rxBytes"`
+			TxBytes uint64 `json:"txBytes"`
+		} `json:"network"`
+	} `json:"node"`
+}
+
+func (m *Manager) nodeDiskUsage(ctx context.Context, nodeName string) (int64, int64, error) {
+	disk, _, err := m.nodeUsageStats(ctx, nodeName)
+	if err != nil {
+		return 0, 0, err
+	}
+	return disk.UsedBytes, disk.CapacityBytes, nil
+}
+
+func (m *Manager) nodeUsageStats(ctx context.Context, nodeName string) (*NodeDiskUsage, *NodeNetworkUsage, error) {
+	raw, err := m.Clientset.CoreV1().RESTClient().
+		Get().
+		Resource("nodes").
+		Name(nodeName).
+		SubResource("proxy").
+		Suffix("stats/summary").
+		DoRaw(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	var summary nodeStatsSummary
+	if err := json.Unmarshal(raw, &summary); err != nil {
+		return nil, nil, err
+	}
+	total := int64(summary.Node.FS.CapacityBytes)
+	available := int64(summary.Node.FS.AvailableBytes)
+	if total <= 0 || available < 0 {
+		return nil, nil, fmt.Errorf("node fs metrics unavailable")
+	}
+	disk := &NodeDiskUsage{
+		UsedBytes:     total - available,
+		CapacityBytes: total,
+		UsedPercent:   percent(total-available, total),
+	}
+	network := &NodeNetworkUsage{
+		RxBytes: int64(summary.Node.Network.RxBytes),
+		TxBytes: int64(summary.Node.Network.TxBytes),
+	}
+	return disk, network, nil
+}
+
 func (m *Manager) nodeMetrics(ctx context.Context, name string, capacity, allocatable NodeResources) (*NodeResourceUsage, error) {
 	if m.Dynamic == nil {
 		return nil, fmt.Errorf("metrics client not configured")
@@ -761,9 +1261,54 @@ func (m *Manager) listIngressSummaries(ctx context.Context) ([]IngressSummary, e
 			Class:      ingressClass(ing),
 			Hosts:      ingressHosts(ing),
 			Address:    ingressAddress(ing),
+			Services:   ingressBackendServices(ing),
 			TLS:        len(ing.Spec.TLS) > 0,
 			AgeSeconds: int64(now.Sub(created).Seconds()),
 			CreatedAt:  created,
+		})
+	}
+	return out, nil
+}
+
+func (m *Manager) listEndpointSummaries(ctx context.Context) ([]EndpointSummary, error) {
+	list, err := m.Clientset.CoreV1().Endpoints("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	out := make([]EndpointSummary, 0, len(list.Items))
+	for _, endpoint := range list.Items {
+		created := endpoint.CreationTimestamp.Time
+		out = append(out, EndpointSummary{
+			Namespace:  endpoint.Namespace,
+			Name:       endpoint.Name,
+			Addresses:  endpointAddresses(endpoint),
+			Ports:      endpointPorts(endpoint),
+			AgeSeconds: int64(now.Sub(created).Seconds()),
+			CreatedAt:  created,
+		})
+	}
+	return out, nil
+}
+
+func (m *Manager) listNetworkPolicySummaries(ctx context.Context) ([]NetworkPolicySummary, error) {
+	list, err := m.Clientset.NetworkingV1().NetworkPolicies("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	out := make([]NetworkPolicySummary, 0, len(list.Items))
+	for _, policy := range list.Items {
+		created := policy.CreationTimestamp.Time
+		out = append(out, NetworkPolicySummary{
+			Namespace:    policy.Namespace,
+			Name:         policy.Name,
+			PodSelector:  policy.Spec.PodSelector.MatchLabels,
+			PolicyTypes:  policyTypes(policy.Spec.PolicyTypes),
+			IngressRules: len(policy.Spec.Ingress),
+			EgressRules:  len(policy.Spec.Egress),
+			AgeSeconds:   int64(now.Sub(created).Seconds()),
+			CreatedAt:    created,
 		})
 	}
 	return out, nil
@@ -931,6 +1476,125 @@ func servicePorts(svc corev1.Service) []string {
 	return ports
 }
 
+func endpointAddresses(endpoint corev1.Endpoints) []string {
+	out := []string{}
+	for _, subset := range endpoint.Subsets {
+		for _, address := range subset.Addresses {
+			if address.TargetRef != nil {
+				out = append(out, address.IP+" ("+address.TargetRef.Kind+"/"+address.TargetRef.Name+")")
+			} else {
+				out = append(out, address.IP)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func endpointPorts(endpoint corev1.Endpoints) []string {
+	out := []string{}
+	for _, subset := range endpoint.Subsets {
+		for _, port := range subset.Ports {
+			name := port.Name
+			if name == "" {
+				name = "port"
+			}
+			out = append(out, fmt.Sprintf("%s:%d/%s", name, port.Port, port.Protocol))
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func policyTypes(types []networkingv1.PolicyType) []string {
+	out := make([]string, 0, len(types))
+	for _, item := range types {
+		out = append(out, string(item))
+	}
+	return out
+}
+
+func serviceAccessSummaries(services []ServiceSummary, ingresses []IngressSummary) []ServiceAccessSummary {
+	out := []ServiceAccessSummary{}
+	for _, svc := range services {
+		item := ServiceAccessSummary{
+			Namespace:    svc.Namespace,
+			Service:      svc.Name,
+			Type:         svc.Type,
+			URLs:         []string{},
+			LoadBalancer: svc.ExternalIP,
+			NodePorts:    serviceNodePorts(svc.Ports),
+		}
+		if svc.ClusterIP != "" && svc.ClusterIP != "None" {
+			item.URLs = append(item.URLs, fmt.Sprintf("http://%s.%s.svc.cluster.local", svc.Name, svc.Namespace))
+		}
+		if svc.ExternalIP != "" {
+			item.URLs = append(item.URLs, svc.ExternalIP)
+		}
+		for _, ing := range ingresses {
+			if ing.Namespace != svc.Namespace || !ingressMayRouteService(ing, svc.Name) {
+				continue
+			}
+			item.Ingress = ing.Name
+			item.Class = ing.Class
+			item.Hosts = append(item.Hosts, ing.Hosts...)
+			item.TLS = item.TLS || ing.TLS
+			scheme := "http"
+			if ing.TLS {
+				scheme = "https"
+			}
+			for _, host := range ing.Hosts {
+				item.URLs = append(item.URLs, scheme+"://"+host)
+			}
+		}
+		if len(item.URLs) > 0 || len(item.NodePorts) > 0 {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func serviceNodePorts(ports []string) []string {
+	out := []string{}
+	for _, port := range ports {
+		parts := strings.Split(port, "/")
+		left := strings.Split(parts[0], ":")
+		if len(left) >= 3 {
+			out = append(out, left[len(left)-1]+"/"+parts[len(parts)-1])
+		}
+	}
+	return out
+}
+
+func ingressMayRouteService(ing IngressSummary, serviceName string) bool {
+	for _, svc := range ing.Services {
+		if svc == serviceName {
+			return true
+		}
+	}
+	return strings.HasPrefix(ing.Name, serviceName+"-") || ing.Name == serviceName
+}
+
+func countIngressClass(ingresses []IngressSummary, className string) int {
+	count := 0
+	for _, ing := range ingresses {
+		if strings.EqualFold(ing.Class, className) {
+			count++
+		}
+	}
+	return count
+}
+
+func countTLSIngresses(ingresses []IngressSummary) int {
+	count := 0
+	for _, ing := range ingresses {
+		if ing.TLS {
+			count++
+		}
+	}
+	return count
+}
+
 func ingressClass(ing networkingv1.Ingress) string {
 	if ing.Spec.IngressClassName != nil {
 		return *ing.Spec.IngressClassName
@@ -947,6 +1611,25 @@ func ingressHosts(ing networkingv1.Ingress) []string {
 	}
 	sort.Strings(hosts)
 	return hosts
+}
+
+func ingressBackendServices(ing networkingv1.Ingress) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, rule := range ing.Spec.Rules {
+		if rule.HTTP == nil {
+			continue
+		}
+		for _, path := range rule.HTTP.Paths {
+			if path.Backend.Service == nil || path.Backend.Service.Name == "" || seen[path.Backend.Service.Name] {
+				continue
+			}
+			seen[path.Backend.Service.Name] = true
+			out = append(out, path.Backend.Service.Name)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func ingressAddress(ing networkingv1.Ingress) string {

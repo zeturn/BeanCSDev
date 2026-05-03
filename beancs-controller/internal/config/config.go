@@ -41,6 +41,9 @@ type Config struct {
 
 	ControllerNamespace string `env:"POD_NAMESPACE" envDefault:"beancs-system"`
 	ControllerName      string `env:"BEANCS_CONTROLLER_NAME" envDefault:"beancs-controller"`
+	ClusterName         string `env:"BEANCS_CLUSTER_NAME" envDefault:"production-k3s"`
+	K3sServerURL        string `env:"BEANCS_K3S_SERVER_URL"`
+	K3sJoinToken        string `env:"BEANCS_K3S_JOIN_TOKEN"`
 	SelfManageIngress   bool   `env:"BEANCS_SELF_MANAGE_INGRESS" envDefault:"true"`
 	SelfPublicHost      string `env:"BEANCS_PUBLIC_HOST"`
 	SelfTailscaleHost   string `env:"BEANCS_TAILSCALE_HOST" envDefault:"beancs-controller"`
