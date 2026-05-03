@@ -3,18 +3,25 @@ import {createRoot} from "react-dom/client";
 import {
   Activity,
   AlertTriangle,
+  Bell,
   Boxes,
+  Box,
   CheckCircle2,
   Cloud,
   Code2,
+  Container,
   Cpu,
   Database,
+  FileText,
   GitBranch,
   Github,
   Globe2,
   HardDrive,
+  Image as ImageIcon,
   KeyRound,
   Layers3,
+  LayoutDashboard,
+  LineChart,
   ListRestart,
   LoaderCircle,
   Lock,
@@ -25,8 +32,11 @@ import {
   Plus,
   RefreshCw,
   Rocket,
+  ScrollText,
   Server,
+  Settings,
   Shield,
+  ShieldCheck,
   Trash2,
   Upload,
 } from "lucide-react";
@@ -44,23 +54,67 @@ const emptyRuntime = {
   ingresses: [],
 };
 
-const nav = [
-  {id: "dashboard", label: "Dashboard", icon: Activity},
-  {id: "deploy", label: "Deploy", icon: Rocket},
-  {id: "progress", label: "Progress", icon: LoaderCircle},
-  {id: "projects", label: "Projects", icon: Boxes},
-  {id: "apiKeys", label: "API Keys", icon: KeyRound},
-  {id: "registries", label: "镜像仓库", icon: Package},
-  {id: "github", label: "GitHub", icon: Github},
-  {id: "domains", label: "Domains", icon: Globe2},
-  {id: "networking", label: "Networking", icon: Network},
-  {id: "cloudflare", label: "Cloudflare", icon: Cloud},
-  {id: "basaltpass", label: "BasaltPass", icon: Shield},
-  {id: "namespaces", label: "Namespaces", icon: Layers3},
-  {id: "pods", label: "Pods", icon: Layers3},
-  {id: "nodes", label: "Nodes", icon: Server},
-  {id: "ingresses", label: "Ingresses", icon: Network},
-  {id: "services", label: "Services", icon: Database},
+const navOverview = {id: "dashboard", label: "Overview", icon: LayoutDashboard};
+
+const navSections = [
+  {
+    id: "workloads",
+    label: "Workloads",
+    items: [
+      {id: "projects", label: "Projects", icon: Boxes},
+      {id: "deploy", label: "Deploy", icon: Rocket},
+      {id: "progress", label: "Progress", icon: LoaderCircle},
+      {id: "deployments", label: "Deployments", icon: Box},
+      {id: "pods", label: "Pods", icon: Layers3},
+      {id: "services", label: "Services", icon: Database},
+      {id: "ingresses", label: "Ingresses", icon: Network},
+      {id: "workloadImage", label: "Image", icon: ImageIcon},
+    ],
+  },
+  {
+    id: "infrastructure",
+    label: "Infrastructure",
+    items: [
+      {id: "nodes", label: "Nodes", icon: Server},
+      {id: "namespaces", label: "Namespaces", icon: Layers3},
+      {id: "networking", label: "Networking", icon: Network},
+      {id: "storage", label: "Storage", icon: HardDrive},
+    ],
+  },
+  {
+    id: "integrations",
+    label: "Integrations",
+    items: [
+      {id: "github", label: "GitHub", icon: Github},
+      {id: "cloudflare", label: "Cloudflare", icon: Cloud},
+      {id: "domains", label: "Domains", icon: Globe2},
+      {id: "registries", label: "Image Registry", icon: Package},
+    ],
+  },
+  {
+    id: "security",
+    label: "Security",
+    items: [
+      {id: "apiKeys", label: "API Keys", icon: KeyRound},
+      {id: "secrets", label: "Secrets", icon: Lock},
+      {id: "accessControl", label: "Access Control", icon: ShieldCheck},
+    ],
+  },
+  {
+    id: "observability",
+    label: "Observability",
+    items: [
+      {id: "alerts", label: "Alerts", icon: Bell},
+      {id: "events", label: "Events", icon: ScrollText},
+      {id: "logs", label: "Logs", icon: FileText},
+      {id: "metrics", label: "Metrics", icon: LineChart},
+    ],
+  },
+  {
+    id: "settings",
+    label: "Settings",
+    items: [{id: "settings", label: "Settings", icon: Settings}],
+  },
 ];
 
 function App() {
@@ -79,6 +133,7 @@ function App() {
   const [registryPresets, setRegistryPresets] = useState([]);
   const [containerRegistries, setContainerRegistries] = useState([]);
   const [containerImages, setContainerImages] = useState([]);
+  const [appVersion, setAppVersion] = useState("");
   const [createdAPIKey, setCreatedAPIKey] = useState(null);
   const [domains, setDomains] = useState([]);
   const [repos, setRepos] = useState([]);
@@ -171,7 +226,14 @@ function App() {
   }, [token, runtimeDetail?.kind, runtimeDetail?.row?.summary?.name, runtimeDetail?.row?.name]);
 
   useEffect(() => {
-    if (!token || view !== "registries") return;
+    if (!token || view !== "settings") return;
+    publicJSON(`${API}/version`)
+      .then((d) => setAppVersion(d.version || ""))
+      .catch(() => setAppVersion(""));
+  }, [token, view]);
+
+  useEffect(() => {
+    if (!token || !["registries", "workloadImage"].includes(view)) return;
     loadRegistriesPage();
     const timer = setInterval(() => {
       if (!document.hidden) loadContainerImages();
@@ -1211,14 +1273,29 @@ function App() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">BeanCS</div>
-        {nav.map((item) => {
-          const Icon = item.icon;
-          return (
-            <button key={item.id} className={view === item.id ? "nav active" : "nav"} onClick={() => setView(item.id)}>
-              <Icon size={17} /> {item.label}
-            </button>
-          );
-        })}
+        <div className="sidebar-nav">
+          {(() => {
+            const OverviewIcon = navOverview.icon;
+            return (
+              <button type="button" className={view === navOverview.id ? "nav nav-featured active" : "nav nav-featured"} onClick={() => setView(navOverview.id)}>
+                <OverviewIcon size={18} /> {navOverview.label}
+              </button>
+            );
+          })()}
+          {navSections.map((section) => (
+            <div className="nav-section" key={section.id}>
+              <div className="nav-section-label">{section.label}</div>
+              {section.items.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <button key={item.id} type="button" className={view === item.id ? "nav active" : "nav"} onClick={() => setView(item.id)}>
+                    <Icon size={16} /> {item.label}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </div>
         <div className="sidebar-user">
           <div className="user-avatar">{userProfile.initial}</div>
           <div className="user-copy">
@@ -1292,14 +1369,68 @@ function App() {
             onRefresh={loadRegistriesPage}
           />
         )}
+        {view === "workloadImage" && (
+          <WorkloadImageView
+            images={containerImages}
+            onRefresh={loadRegistriesPage}
+            onOpenRegistry={() => setView("registries")}
+            onRefreshImage={refreshTrackedImage}
+            onDeleteImage={deleteTrackedImage}
+          />
+        )}
+        {view === "storage" && (
+          <ComingSoonView
+            title="Storage"
+            description="PersistentVolumeClaims, PersistentVolumes, and StorageClasses will be manageable here in a future release."
+          />
+        )}
+        {view === "secrets" && (
+          <ComingSoonView
+            title="Secrets"
+            description="Kubernetes Secret inspection and rotation workflows are not wired in this console yet. Use kubectl or your GitOps pipeline for now."
+          />
+        )}
+        {view === "alerts" && (
+          <ComingSoonView
+            title="Alerts"
+            description="Summary alerts appear on the Overview dashboard today. Dedicated alert routing is planned."
+            actionLabel="Open Overview"
+            onAction={() => setView("dashboard")}
+          />
+        )}
+        {view === "events" && (
+          <ComingSoonView
+            title="Events"
+            description="Recent cluster events are included on the Overview dashboard. A dedicated event stream view will follow."
+            actionLabel="Open Overview"
+            onAction={() => setView("dashboard")}
+          />
+        )}
+        {view === "logs" && (
+          <ComingSoonView
+            title="Logs"
+            description="Open Workloads → Pods, pick a pod, then use Logs in the detail drawer. Live streaming uses lazy loading to protect the browser."
+            actionLabel="Go to Pods"
+            onAction={() => setView("pods")}
+          />
+        )}
+        {view === "metrics" && (
+          <ComingSoonView
+            title="Metrics"
+            description="CPU and memory utilization are shown on Overview, node detail, and workload tables when metrics-server is installed."
+            actionLabel="Open Overview"
+            onAction={() => setView("dashboard")}
+          />
+        )}
+        {view === "settings" && <SettingsView version={appVersion} />}
         {view === "github" && (
           <GitHubView credentials={credentials.github} onConnect={connectGitHubApp} onRepos={loadRepos} onDelete={(id) => deleteCredential("github", id)} reposByCredential={reposByCredential} repoFilters={repoFilters} setRepoFilters={setRepoFilters} />
         )}
         {view === "domains" && <DomainsView domains={domains} />}
         {view === "networking" && <NetworkingView network={network} refresh={loadNetwork} onSaveService={saveService} onDeleteService={deleteService} onSaveIngress={saveIngress} onDeleteIngress={deleteIngress} onSaveNetworkPolicy={saveNetworkPolicy} onDeleteNetworkPolicy={deleteNetworkPolicy} />}
         {view === "cloudflare" && <CloudflareView credentials={credentials.cloudflare} domains={domains} selectedID={selectedCloudflareID} setSelectedID={setSelectedCloudflareID} dnsRecords={dnsRecords} editingRecord={editingDNSRecord} setEditingRecord={setEditingDNSRecord} onCreate={createCredential} onDelete={(id) => deleteCredential("cloudflare", id)} onLoadDNS={loadDNSRecords} onSaveDNS={saveDNSRecord} onDeleteDNS={deleteDNSRecord} />}
-        {view === "basaltpass" && <CredentialManager kind="basaltpass" rows={credentials.basaltpass} onCreate={createCredential} onDelete={deleteCredential} />}
-        {["namespaces", "pods", "nodes", "ingresses", "services"].includes(view) && <RuntimeTable kind={view} rows={runtime[view] || []} nodeJoinCommand={nodeJoinCommand} onLoadNodeJoinCommand={loadNodeJoinCommand} onCreateNamespace={createNamespace} onPatchNamespace={patchNamespaceLabels} onNamespaceDetail={loadNamespaceDetail} onDeleteNamespace={deleteNamespace} onDeletePod={deletePod} onNodeDetail={loadNodeDetail} onPodLogs={loadPodLogs} onSaveService={saveService} onDeleteService={deleteService} onDetail={setRuntimeDetail} />}
+        {view === "accessControl" && <CredentialManager kind="basaltpass" rows={credentials.basaltpass} onCreate={createCredential} onDelete={deleteCredential} />}
+        {["namespaces", "pods", "nodes", "ingresses", "services", "deployments"].includes(view) && <RuntimeTable kind={view} rows={runtime[view] || []} nodeJoinCommand={nodeJoinCommand} onLoadNodeJoinCommand={loadNodeJoinCommand} onCreateNamespace={createNamespace} onPatchNamespace={patchNamespaceLabels} onNamespaceDetail={loadNamespaceDetail} onDeleteNamespace={deleteNamespace} onDeletePod={deletePod} onNodeDetail={loadNodeDetail} onPodLogs={loadPodLogs} onSaveService={saveService} onDeleteService={deleteService} onDetail={setRuntimeDetail} />}
       </main>
       {editingProject && <ProjectModal project={editingProject} onClose={() => setEditingProject(null)} onSubmit={updateProject} />}
       {deletingProject && <DeleteProjectModal project={deletingProject} busy={loading} onClose={() => setDeletingProject(null)} onDelete={confirmDeleteProject} />}
@@ -1975,6 +2106,77 @@ function ContainerRegistriesView({presets, registries, images, onAddRegistry, on
           </div>
         ))}
         {(images || []).length === 0 && <div className="empty">尚未添加镜像仓库跟踪。</div>}
+      </section>
+    </div>
+  );
+}
+
+function WorkloadImageView({images, onRefresh, onOpenRegistry, onRefreshImage, onDeleteImage}) {
+  return (
+    <div className="stack">
+      <section className="panel action-panel">
+        <div>
+          <h2><ImageIcon size={18} /> Image</h2>
+          <p>Running workload images are visible on Pods and Deployments. Tracked registry tags and sync use <b>Integrations → Image Registry</b>.</p>
+        </div>
+        <button type="button" onClick={onRefresh}><RefreshCw size={15} /> Refresh</button>
+      </section>
+      <section className="panel">
+        <h2><Package size={18} /> Tracked image tags</h2>
+        <p className="muted">Mirrors and tag lists you have registered. To add registries or repositories, open Image Registry.</p>
+        <div className="row-actions" style={{marginBottom: 12}}>
+          <button type="button" className="primary" onClick={onOpenRegistry}><Package size={15} /> Open Image Registry</button>
+        </div>
+        {(images || []).map((im) => (
+          <div className="registry-image-card" key={im.id}>
+            <div className="registry-image-head">
+              <div>
+                <div className="mono strong">{im.repository}</div>
+                <small className="muted">{im.registry?.name || `registry #${im.registry_id}`} · {formatTime(im.refreshed_at)}</small>
+              </div>
+              <div className="row-actions">
+                <button type="button" onClick={() => onRefreshImage(im.id)}><RefreshCw size={15} /> Sync</button>
+                <button type="button" className="danger-button" onClick={() => onDeleteImage(im)}><Trash2 size={15} /> Remove</button>
+              </div>
+            </div>
+            <div className="tag-chip-grid">
+              {(im.tags || []).slice(0, 120).map((t) => (
+                <span className="tag-chip" key={t}>{t}</span>
+              ))}
+              {(im.tags || []).length > 120 && <span className="muted">… {(im.tags || []).length} tags</span>}
+              {(im.tags || []).length === 0 && <span className="muted">No tags cached yet.</span>}
+            </div>
+          </div>
+        ))}
+        {(images || []).length === 0 && <div className="empty">No tracked images. Configure mirrors under Image Registry.</div>}
+      </section>
+    </div>
+  );
+}
+
+function ComingSoonView({title, description, actionLabel, onAction}) {
+  return (
+    <div className="stack">
+      <section className="panel">
+        <h2>{title}</h2>
+        <p className="muted">{description}</p>
+        {actionLabel && onAction && (
+          <div style={{marginTop: 14}}>
+            <button type="button" className="primary" onClick={onAction}>{actionLabel}</button>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function SettingsView({version}) {
+  return (
+    <div className="stack">
+      <section className="panel">
+        <h2><Settings size={18} /> Settings</h2>
+        <p className="muted">Controller API version: <code className="mono">{version || "—"}</code></p>
+        <p className="muted">Authentication uses BasaltPass. Manage identity provider connections under <b>Security → Access Control</b>.</p>
       </section>
     </div>
   );
@@ -2893,7 +3095,34 @@ async function finishLogin(config) {
 }
 
 function titleFor(view) {
-  return ({dashboard: "Dashboard", deploy: "Deploy project", progress: "Progress", projects: "Projects", apiKeys: "API Keys", registries: "镜像与版本", github: "GitHub", domains: "Domains", networking: "Networking", cloudflare: "Cloudflare", basaltpass: "BasaltPass", namespaces: "Namespaces", pods: "Pods", nodes: "Nodes", ingresses: "Ingresses", services: "Services"}[view] || "BeanCS");
+  const map = {
+    dashboard: "Overview",
+    deploy: "Deploy",
+    progress: "Progress",
+    projects: "Projects",
+    deployments: "Deployments",
+    pods: "Pods",
+    services: "Services",
+    ingresses: "Ingresses",
+    workloadImage: "Image",
+    nodes: "Nodes",
+    namespaces: "Namespaces",
+    networking: "Networking",
+    storage: "Storage",
+    github: "GitHub",
+    cloudflare: "Cloudflare",
+    domains: "Domains",
+    registries: "Image Registry",
+    apiKeys: "API Keys",
+    secrets: "Secrets",
+    accessControl: "Access Control",
+    alerts: "Alerts",
+    events: "Events",
+    logs: "Logs",
+    metrics: "Metrics",
+    settings: "Settings",
+  };
+  return map[view] || "BeanCS";
 }
 
 function subtitleFor(view, runtime, projects) {
@@ -2901,10 +3130,16 @@ function subtitleFor(view, runtime, projects) {
   if (view === "networking") return "Service, Ingress, Endpoint, NetworkPolicy, Traefik and Tailscale operations";
   if (view === "projects") return `${projects.length} managed projects`;
   if (view === "progress") return "Watch installs and runtime readiness";
-  if (view === "registries") return "注册 OCI 镜像源并同步各仓库标签（仅当前账户可见）";
+  if (view === "registries") return "Register OCI mirrors and sync image tags for this account";
+  if (view === "workloadImage") return "Tracked registry tags; use Image Registry to add mirrors";
   if (view === "apiKeys") return "Issue and revoke API keys for automation";
-  if (runtime[view]) return `${runtime[view].length} cluster resources`;
-  return "Select a repository, verify containerization, and publish traffic.";
+  if (view === "accessControl") return "BasaltPass and access integrations";
+  if (view === "settings") return "Workspace and version information";
+  if (view === "storage" || view === "secrets") return "Planned console capabilities";
+  if (view === "alerts" || view === "events" || view === "metrics") return "See Overview for a live summary; dedicated views are planned";
+  if (view === "logs") return "Use Pod detail for container logs with lazy loading";
+  if (runtime[view]) return `${(runtime[view] || []).length} cluster resources`;
+  return "Operate k3s, GitHub, DNS, and traffic from one console.";
 }
 
 function formatTime(value) {
