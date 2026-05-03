@@ -461,8 +461,13 @@ func (s *ProjectService) DeleteProject(ctx context.Context, project *model.Proje
 			}
 		}
 	}
-	if err := s.k8s.DeleteNamespace(ctx, project.Namespace); err != nil {
-		cleanupErrs = append(cleanupErrs, fmt.Errorf("delete namespace %s: %w", project.Namespace, err))
+	if err := s.k8s.DeleteProjectResources(ctx, project.Namespace, project.Name); err != nil {
+		cleanupErrs = append(cleanupErrs, fmt.Errorf("delete Kubernetes resources for %s/%s: %w", project.Namespace, project.Name, err))
+	}
+	if !k8s.IsSystemNamespace(project.Namespace) {
+		if err := s.k8s.DeleteNamespace(ctx, project.Namespace); err != nil {
+			cleanupErrs = append(cleanupErrs, fmt.Errorf("delete namespace %s: %w", project.Namespace, err))
+		}
 	}
 	if project.BasaltPassInstanceID != nil && project.BasaltAppID != 0 {
 		if client, err := s.registry.GetClientForInstance(*project.BasaltPassInstanceID); err == nil {
