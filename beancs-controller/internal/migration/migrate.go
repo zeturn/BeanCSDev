@@ -17,6 +17,8 @@ func AutoMigrate(db *gorm.DB) error {
 		&model.ResourceQuota{},
 		&model.AuditLog{},
 		&model.APIKey{},
+		&model.ContainerRegistry{},
+		&model.ContainerImage{},
 	); err != nil {
 		return err
 	}

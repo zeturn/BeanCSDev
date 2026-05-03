@@ -2,8 +2,11 @@ package handler
 
 import (
 	"bufio"
+	"context"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2"
@@ -15,8 +18,11 @@ import (
 
 type RuntimeHandler struct {
 	Base
-	db  *gorm.DB
-	k8s *k8s.Manager
+	db                *gorm.DB
+	k8s               *k8s.Manager
+	dashboardMu       sync.Mutex
+	dashboardCache    *k8s.ClusterDashboard
+	dashboardCachedAt time.Time
 }
 
 func NewRuntimeHandler(db *gorm.DB, k8sManager *k8s.Manager, v *validator.Validate) *RuntimeHandler {
@@ -326,10 +332,30 @@ func (h *RuntimeHandler) overview(c *fiber.Ctx) error {
 }
 
 func (h *RuntimeHandler) dashboard(c *fiber.Ctx) error {
-	out, err := h.k8s.ClusterDashboard(c.UserContext())
+	if h.dashboardCache != nil && time.Since(h.dashboardCachedAt) < 10*time.Second {
+		return c.JSON(fiber.Map{"data": h.dashboardCache, "cached": true})
+	}
+	if !h.dashboardMu.TryLock() {
+		if h.dashboardCache != nil {
+			return c.JSON(fiber.Map{"data": h.dashboardCache, "cached": true, "refreshing": true})
+		}
+		return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{"error": "dashboard refresh already in progress"})
+	}
+	defer h.dashboardMu.Unlock()
+	if h.dashboardCache != nil && time.Since(h.dashboardCachedAt) < 10*time.Second {
+		return c.JSON(fiber.Map{"data": h.dashboardCache, "cached": true})
+	}
+	ctx, cancel := context.WithTimeout(c.UserContext(), 4*time.Second)
+	defer cancel()
+	out, err := h.k8s.ClusterDashboard(ctx)
 	if err != nil {
+		if h.dashboardCache != nil {
+			return c.JSON(fiber.Map{"data": h.dashboardCache, "cached": true, "stale": true, "refresh_error": err.Error()})
+		}
 		return fail(c, 400, err)
 	}
+	h.dashboardCache = out
+	h.dashboardCachedAt = time.Now()
 	return c.JSON(fiber.Map{"data": out})
 }
 

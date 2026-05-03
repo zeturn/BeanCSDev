@@ -536,9 +536,10 @@ func (m *Manager) ClusterDashboard(ctx context.Context) (*ClusterDashboard, erro
 	if err != nil {
 		return nil, err
 	}
-	events, err := m.Clientset.CoreV1().Events("").List(ctx, metav1.ListOptions{})
+	events, err := m.Clientset.CoreV1().Events("").List(ctx, metav1.ListOptions{Limit: 100})
 	if err != nil {
-		return nil, err
+		events = &corev1.EventList{}
+		out.MetricsError = "events unavailable: " + err.Error()
 	}
 	if version, err := m.Clientset.Discovery().ServerVersion(); err == nil && version != nil {
 		out.KubernetesVersion = version.GitVersion
@@ -1105,11 +1106,18 @@ func dashboardWarningEvents(events []corev1.Event) []EventSummary {
 
 func (m *Manager) applyDashboardMetrics(ctx context.Context, nodes []corev1.Node, out *ClusterDashboard) error {
 	var metricErrs []string
-	if err := m.applyNodeMetrics(ctx, out); err != nil {
+	metricsCtx, metricsCancel := context.WithTimeout(ctx, 1200*time.Millisecond)
+	defer metricsCancel()
+	if err := m.applyNodeMetrics(metricsCtx, out); err != nil {
 		metricErrs = append(metricErrs, "metrics.k8s.io: "+err.Error())
 	}
 	for _, node := range nodes {
-		used, total, err := m.nodeDiskUsage(ctx, node.Name)
+		if ctx.Err() != nil {
+			break
+		}
+		diskCtx, diskCancel := context.WithTimeout(ctx, 700*time.Millisecond)
+		used, total, err := m.nodeDiskUsage(diskCtx, node.Name)
+		diskCancel()
 		if err != nil {
 			if len(metricErrs) < 3 {
 				metricErrs = append(metricErrs, "disk "+node.Name+": "+err.Error())

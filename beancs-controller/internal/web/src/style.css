@@ -61,6 +61,19 @@ button:disabled {
   color: #ffffff;
 }
 
+button.ghost,
+.ghost {
+  background: transparent;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+
+button.ghost:hover,
+.ghost:hover {
+  border-color: #155e75;
+  color: #155e75;
+}
+
 .login-screen {
   min-height: 100vh;
   display: grid;
@@ -669,6 +682,66 @@ button.domain-tile {
 .compact-table .tr {
   grid-template-columns: repeat(4, minmax(160px, 1fr));
   min-width: 760px;
+}
+
+.registry-page .panel-heading-inline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.registry-page .panel-heading-inline h2 {
+  margin: 0;
+}
+
+.registry-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+.registry-form .span-2 {
+  grid-column: span 2;
+}
+
+.registry-table .tr {
+  grid-template-columns: 1.2fr 0.9fr 2fr 0.7fr minmax(120px, auto);
+  min-width: 920px;
+}
+
+.registry-image-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 14px;
+  margin-top: 14px;
+  background: #ffffff;
+}
+
+.registry-image-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+
+.tag-chip-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.tag-chip {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid #cbd5e1;
+  background: #f1f5f9;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 .api-key-table .tr {
@@ -1313,6 +1386,14 @@ button.domain-tile {
 
   .dashboard-kpis {
     grid-template-columns: repeat(2, minmax(150px, 1fr));
+  }
+
+  .registry-form {
+    grid-template-columns: 1fr;
+  }
+
+  .registry-form .span-2 {
+    grid-column: span 1;
   }
 
   .topbar,

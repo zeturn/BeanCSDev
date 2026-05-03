@@ -50,6 +50,7 @@ const nav = [
   {id: "progress", label: "Progress", icon: LoaderCircle},
   {id: "projects", label: "Projects", icon: Boxes},
   {id: "apiKeys", label: "API Keys", icon: KeyRound},
+  {id: "registries", label: "镜像仓库", icon: Package},
   {id: "github", label: "GitHub", icon: Github},
   {id: "domains", label: "Domains", icon: Globe2},
   {id: "networking", label: "Networking", icon: Network},
@@ -75,6 +76,9 @@ function App() {
   const [projects, setProjects] = useState([]);
   const [credentials, setCredentials] = useState({github: [], cloudflare: [], basaltpass: []});
   const [apiKeys, setAPIKeys] = useState([]);
+  const [registryPresets, setRegistryPresets] = useState([]);
+  const [containerRegistries, setContainerRegistries] = useState([]);
+  const [containerImages, setContainerImages] = useState([]);
   const [createdAPIKey, setCreatedAPIKey] = useState(null);
   const [domains, setDomains] = useState([]);
   const [repos, setRepos] = useState([]);
@@ -106,6 +110,12 @@ function App() {
   const [nodeHealth, setNodeHealth] = useState(null);
   const projectLogController = useRef(null);
   const runtimeLogController = useRef(null);
+  const workspaceLoadingRef = useRef(false);
+  const dashboardLoadingRef = useRef(false);
+  const networkLoadingRef = useRef(false);
+  const progressLoadingRef = useRef(false);
+  const nodeDetailLoadingRef = useRef(false);
+  const registriesLoadingRef = useRef(false);
 
   const api = useMemo(() => makeAPI(token, logout), [token]);
   const userProfile = useMemo(() => profileFromToken(token), [token]);
@@ -121,7 +131,18 @@ function App() {
   useEffect(() => {
     if (!token || view !== "dashboard") return;
     loadDashboard();
-    const timer = setInterval(loadDashboard, 5000);
+    const timer = setInterval(() => {
+      if (!document.hidden) loadDashboard();
+    }, 15000);
+    return () => clearInterval(timer);
+  }, [token, view]);
+
+  useEffect(() => {
+    if (!token || view !== "networking") return;
+    loadNetwork();
+    const timer = setInterval(() => {
+      if (!document.hidden) loadNetwork();
+    }, 30000);
     return () => clearInterval(timer);
   }, [token, view]);
 
@@ -133,7 +154,9 @@ function App() {
   useEffect(() => {
     if (!token || view !== "progress") return;
     loadProjectProgress();
-    const timer = setInterval(loadProjectProgress, 3000);
+    const timer = setInterval(() => {
+      if (!document.hidden) loadProjectProgress();
+    }, 10000);
     return () => clearInterval(timer);
   }, [token, view, activeProgressProjectID, projects.length, projectLogFollow]);
 
@@ -141,9 +164,20 @@ function App() {
     if (!token || runtimeDetail?.kind !== "node") return;
     const nodeName = runtimeDetail.row?.summary?.name || runtimeDetail.row?.name;
     if (!nodeName) return;
-    const timer = setInterval(() => loadNodeDetail({name: nodeName}, false), 5000);
+    const timer = setInterval(() => {
+      if (!document.hidden) loadNodeDetail({name: nodeName}, false);
+    }, 15000);
     return () => clearInterval(timer);
   }, [token, runtimeDetail?.kind, runtimeDetail?.row?.summary?.name, runtimeDetail?.row?.name]);
+
+  useEffect(() => {
+    if (!token || view !== "registries") return;
+    loadRegistriesPage();
+    const timer = setInterval(() => {
+      if (!document.hidden) loadContainerImages();
+    }, 120000);
+    return () => clearInterval(timer);
+  }, [token, view]);
 
   useEffect(() => {
     return () => {
@@ -172,13 +206,13 @@ function App() {
   }
 
   async function loadWorkspace() {
+    if (workspaceLoadingRef.current) return;
+    workspaceLoadingRef.current = true;
     setLoading(true);
     setError("");
     try {
-      const [dashboardData, runtimeData, networkData, projectData, apiKeyData, githubData, cloudflareData, domainsData, basaltpassData] = await Promise.all([
-        api.get("/runtime/dashboard"),
+      const [runtimeData, projectData, apiKeyData, githubData, cloudflareData, domainsData, basaltpassData] = await Promise.all([
         api.get("/runtime/overview"),
-        api.get("/runtime/network/overview"),
         api.get("/projects"),
         api.get("/api-keys"),
         api.get("/credentials/github/"),
@@ -186,9 +220,7 @@ function App() {
         api.get("/credentials/cloudflare/domains"),
         api.get("/credentials/basaltpass/"),
       ]);
-      setDashboard(dashboardData.data || null);
       setRuntime(runtimeData.data || emptyRuntime);
-      setNetwork(networkData.data || null);
       setProjects(projectData.data || []);
       setAPIKeys(apiKeyData.data || []);
       setCredentials({
@@ -200,25 +232,34 @@ function App() {
     } catch (err) {
       setError(err.message);
     } finally {
+      workspaceLoadingRef.current = false;
       setLoading(false);
     }
   }
 
   async function loadDashboard() {
+    if (dashboardLoadingRef.current) return;
+    dashboardLoadingRef.current = true;
     try {
       const data = await api.get("/runtime/dashboard");
       setDashboard(data.data || null);
     } catch (err) {
       setError(err.message);
+    } finally {
+      dashboardLoadingRef.current = false;
     }
   }
 
   async function loadNetwork() {
+    if (networkLoadingRef.current) return;
+    networkLoadingRef.current = true;
     try {
       const data = await api.get("/runtime/network/overview");
       setNetwork(data.data || null);
     } catch (err) {
       setError(err.message);
+    } finally {
+      networkLoadingRef.current = false;
     }
   }
 
@@ -307,6 +348,133 @@ function App() {
   async function loadAPIKeys() {
     const data = await api.get("/api-keys");
     setAPIKeys(data.data || []);
+  }
+
+  async function loadRegistriesPage() {
+    if (registriesLoadingRef.current) return;
+    registriesLoadingRef.current = true;
+    setError("");
+    try {
+      const [presetData, regData, imgData] = await Promise.all([
+        api.get("/container-registries/presets"),
+        api.get("/container-registries"),
+        api.get("/container-images"),
+      ]);
+      setRegistryPresets(presetData.data || []);
+      setContainerRegistries(regData.data || []);
+      setContainerImages(imgData.data || []);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      registriesLoadingRef.current = false;
+    }
+  }
+
+  async function loadContainerImages() {
+    try {
+      const imgData = await api.get("/container-images");
+      setContainerImages(imgData.data || []);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function createContainerRegistry(event) {
+    event.preventDefault();
+    setError("");
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const kind = String(data.get("kind") || "").trim();
+    const host = String(data.get("host") || "").trim();
+    const body = {
+      kind,
+      name: String(data.get("name") || "").trim(),
+      host,
+      username: String(data.get("username") || "").trim(),
+      password: String(data.get("password") || ""),
+      insecure_tls: data.get("insecure_tls") === "on",
+    };
+    try {
+      await api.post("/container-registries", body);
+      form.reset();
+      await loadRegistriesPage();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function deleteContainerRegistry(row) {
+    if (!confirm(`删除镜像源「${row.name}」？关联的镜像跟踪也会删除。`)) return;
+    try {
+      await api.delete(`/container-registries/${row.id}`);
+      setNotice("镜像源已删除。");
+      await loadRegistriesPage();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function createTrackedImage(event) {
+    event.preventDefault();
+    setError("");
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const body = {
+      registry_id: Number(data.get("registry_id")),
+      repository: String(data.get("repository") || "").trim(),
+    };
+    if (!body.registry_id || !body.repository) {
+      setError("请选择镜像源并填写仓库路径。");
+      return;
+    }
+    try {
+      await api.post("/container-images", body);
+      form.reset();
+      await loadRegistriesPage();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function refreshTrackedImage(id) {
+    setError("");
+    try {
+      await api.post(`/container-images/${id}/refresh`, {});
+      await loadContainerImages();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function deleteTrackedImage(row) {
+    if (!confirm(`从列表中移除「${row.repository}」？`)) return;
+    try {
+      await api.delete(`/container-images/${row.id}`);
+      await loadContainerImages();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function syncAllTrackedImages() {
+    setError("");
+    let list = [];
+    try {
+      const imgData = await api.get("/container-images");
+      list = imgData.data || [];
+    } catch (err) {
+      setError(err.message);
+      return;
+    }
+    for (const im of list) {
+      try {
+        await api.post(`/container-images/${im.id}/refresh`, {});
+      } catch (err) {
+        setError(err.message);
+        break;
+      }
+    }
+    await loadContainerImages();
   }
 
   async function revokeAPIKey(key) {
@@ -525,6 +693,8 @@ function App() {
   }
 
   async function loadNodeDetail(node, showModal = true) {
+    if (nodeDetailLoadingRef.current) return;
+    nodeDetailLoadingRef.current = true;
     if (showModal) setRuntimeDetail({kind: "node", row: node, loading: true});
     if (showModal) setNodeHealth(null);
     try {
@@ -532,6 +702,8 @@ function App() {
       setRuntimeDetail({kind: "node", row: data.data || node, loading: false});
     } catch (err) {
       setRuntimeDetail({kind: "node", row: node, loading: false, error: err.message});
+    } finally {
+      nodeDetailLoadingRef.current = false;
     }
   }
 
@@ -874,18 +1046,22 @@ function App() {
   }
 
   async function loadProjectProgress(projectID = activeProgressProjectID) {
+    if (progressLoadingRef.current) return;
+    progressLoadingRef.current = true;
     let selected = projectID
       ? projects.find((project) => String(project.id) === String(projectID))
       : projects[0];
     if (!selected) {
       if (!projectID) {
         setProjectProgress(null);
+        progressLoadingRef.current = false;
         return;
       }
       try {
         selected = await api.get(`/projects/${projectID}`);
       } catch (err) {
         setProjectProgress(null);
+        progressLoadingRef.current = false;
         return;
       }
     }
@@ -910,6 +1086,8 @@ function App() {
       });
     } catch (err) {
       setProjectProgress({project: selected, pods: [], deployments: [], error: err.message, checked_at: new Date().toISOString()});
+    } finally {
+      progressLoadingRef.current = false;
     }
   }
 
@@ -1100,6 +1278,20 @@ function App() {
           <ProjectsView projects={projects} onEdit={setEditingProject} onDelete={deleteProject} onScale={scaleProject} onRestart={restartProject} onBuild={buildProject} onProgress={(project) => { setActiveProgressProjectID(String(project.id)); setView("progress"); }} />
         )}
         {view === "apiKeys" && <APIKeysView keys={apiKeys} createdKey={createdAPIKey} onDismissCreated={() => setCreatedAPIKey(null)} onCreate={createAPIKey} onRevoke={revokeAPIKey} onRefresh={loadAPIKeys} isAdmin={userProfile.scopes.includes("beancs.admin")} />}
+        {view === "registries" && (
+          <ContainerRegistriesView
+            presets={registryPresets}
+            registries={containerRegistries}
+            images={containerImages}
+            onAddRegistry={createContainerRegistry}
+            onDeleteRegistry={deleteContainerRegistry}
+            onAddImage={createTrackedImage}
+            onRefreshImage={refreshTrackedImage}
+            onDeleteImage={deleteTrackedImage}
+            onSyncAll={syncAllTrackedImages}
+            onRefresh={loadRegistriesPage}
+          />
+        )}
         {view === "github" && (
           <GitHubView credentials={credentials.github} onConnect={connectGitHubApp} onRepos={loadRepos} onDelete={(id) => deleteCredential("github", id)} reposByCredential={reposByCredential} repoFilters={repoFilters} setRepoFilters={setRepoFilters} />
         )}
@@ -1659,6 +1851,131 @@ function DeleteProjectModal({project, busy, onClose, onDelete}) {
           <button className="danger-button filled" type="button" onClick={onDelete} disabled={busy}><Trash2 size={15} /> Delete</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function ContainerRegistriesView({presets, registries, images, onAddRegistry, onDeleteRegistry, onAddImage, onRefreshImage, onDeleteImage, onSyncAll, onRefresh}) {
+  const presetByKind = useMemo(() => Object.fromEntries((presets || []).map((p) => [p.kind, p])), [presets]);
+  const [previewKind, setPreviewKind] = useState("ghcr");
+
+  return (
+    <div className="stack registry-page">
+      <section className="panel action-panel">
+        <div>
+          <h2><Package size={18} /> 镜像源</h2>
+          <p>基于 Docker Registry HTTP API V2 列出标签；Docker Hub 会使用 registry-1.docker.io；私有仓库请填写凭据。</p>
+        </div>
+        <button type="button" onClick={onRefresh}><RefreshCw size={15} /> 刷新</button>
+      </section>
+
+      <section className="panel">
+        <h2><Plus size={18} /> 添加镜像源</h2>
+        <form className="form-grid registry-form" onSubmit={onAddRegistry}>
+          <label>
+            类型
+            <select name="kind" value={previewKind} onChange={(e) => setPreviewKind(e.target.value)}>
+              {(presets || []).map((p) => (
+                <option key={p.kind} value={p.kind}>{p.label}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            显示名称（可选）
+            <input name="name" placeholder={`例如 ${presetByKind[previewKind]?.label || ""}`} />
+          </label>
+          <label className="span-2">
+            镜像源地址
+            <input name="host" required placeholder={presetByKind[previewKind]?.example_host || "registry.example.com"} />
+          </label>
+          <label>
+            用户名（可选）
+            <input name="username" autoComplete="off" placeholder="私有仓库 / PAT 用户名" />
+          </label>
+          <label>
+            密码或 Token（可选）
+            <input name="password" type="password" autoComplete="new-password" placeholder="不会明文存储" />
+          </label>
+          <label className="checkbox-row span-2">
+            <input name="insecure_tls" type="checkbox" />
+            跳过 TLS 校验（仅可信内网）
+          </label>
+          {presetByKind[previewKind]?.hint && (
+            <p className="muted span-2">{presetByKind[previewKind].hint}</p>
+          )}
+          <button className="primary" type="submit"><Plus size={15} /> 保存镜像源</button>
+        </form>
+      </section>
+
+      <section className="panel">
+        <h2><Database size={18} /> 已保存的镜像源</h2>
+        <div className="table compact-table registry-table">
+          <div className="tr head"><span>名称</span><span>类型</span><span>API 根</span><span>鉴权</span><span /></div>
+          {(registries || []).map((r) => (
+            <div className="tr" key={r.id}>
+              <span className="strong">{r.name}</span>
+              <span>{r.kind}</span>
+              <span className="mono">{r.api_base}</span>
+              <span>{r.has_auth ? "已配置" : "匿名"}</span>
+              <span className="row-actions">
+                <button type="button" className="danger-button" onClick={() => onDeleteRegistry(r)}><Trash2 size={15} /> 删除</button>
+              </span>
+            </div>
+          ))}
+          {(registries || []).length === 0 && <div className="empty">尚未添加镜像源。</div>}
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-heading-inline">
+          <h2><Boxes size={18} /> 镜像与标签</h2>
+          <button type="button" className="ghost" onClick={onSyncAll} disabled={!(images || []).length}>
+            <RefreshCw size={15} /> 同步全部远程标签
+          </button>
+        </div>
+        <p className="muted">仓库路径需与 Registry API 一致（例如 Docker Hub 官方 nginx：<span className="mono">library/nginx</span>；GHCR：<span className="mono">owner/repo</span>）。保存后会立即拉取标签；页面每 2 分钟刷新本地缓存列表。</p>
+        <form className="form-grid registry-form" onSubmit={onAddImage}>
+          <label>
+            镜像源
+            <select name="registry_id" required>
+              <option value="">选择...</option>
+              {(registries || []).map((r) => (
+                <option key={r.id} value={r.id}>{r.name} ({r.kind})</option>
+              ))}
+            </select>
+          </label>
+          <label className="span-2">
+            仓库路径（repository）
+            <input name="repository" required placeholder="namespace/name" />
+          </label>
+          <button className="primary" type="submit"><Plus size={15} /> 添加并同步标签</button>
+        </form>
+
+        {(images || []).map((im) => (
+          <div className="registry-image-card" key={im.id}>
+            <div className="registry-image-head">
+              <div>
+                <div className="mono strong">{im.repository}</div>
+                <small className="muted">来源：{im.registry?.name || `registry #${im.registry_id}`} · 更新 {formatTime(im.refreshed_at)}</small>
+              </div>
+              <div className="row-actions">
+                <button type="button" onClick={() => onRefreshImage(im.id)}><RefreshCw size={15} /> 同步标签</button>
+                <button type="button" className="danger-button" onClick={() => onDeleteImage(im)}><Trash2 size={15} /> 移除</button>
+              </div>
+            </div>
+            <div className="tag-chip-grid">
+              {(im.tags || []).slice(0, 200).map((t) => (
+                <span className="tag-chip" key={t}>{t}</span>
+              ))}
+              {(im.tags || []).length > 200 && (
+                <span className="muted">… 共 {(im.tags || []).length} 个标签，仅显示前 200 个</span>
+              )}
+              {(im.tags || []).length === 0 && <span className="muted">暂无标签或未同步成功。</span>}
+            </div>
+          </div>
+        ))}
+        {(images || []).length === 0 && <div className="empty">尚未添加镜像仓库跟踪。</div>}
+      </section>
     </div>
   );
 }
@@ -2576,7 +2893,7 @@ async function finishLogin(config) {
 }
 
 function titleFor(view) {
-  return ({dashboard: "Dashboard", deploy: "Deploy project", progress: "Progress", projects: "Projects", apiKeys: "API Keys", github: "GitHub", domains: "Domains", networking: "Networking", cloudflare: "Cloudflare", basaltpass: "BasaltPass", namespaces: "Namespaces", pods: "Pods", nodes: "Nodes", ingresses: "Ingresses", services: "Services"}[view] || "BeanCS");
+  return ({dashboard: "Dashboard", deploy: "Deploy project", progress: "Progress", projects: "Projects", apiKeys: "API Keys", registries: "镜像与版本", github: "GitHub", domains: "Domains", networking: "Networking", cloudflare: "Cloudflare", basaltpass: "BasaltPass", namespaces: "Namespaces", pods: "Pods", nodes: "Nodes", ingresses: "Ingresses", services: "Services"}[view] || "BeanCS");
 }
 
 function subtitleFor(view, runtime, projects) {
@@ -2584,6 +2901,7 @@ function subtitleFor(view, runtime, projects) {
   if (view === "networking") return "Service, Ingress, Endpoint, NetworkPolicy, Traefik and Tailscale operations";
   if (view === "projects") return `${projects.length} managed projects`;
   if (view === "progress") return "Watch installs and runtime readiness";
+  if (view === "registries") return "注册 OCI 镜像源并同步各仓库标签（仅当前账户可见）";
   if (view === "apiKeys") return "Issue and revoke API keys for automation";
   if (runtime[view]) return `${runtime[view].length} cluster resources`;
   return "Select a repository, verify containerization, and publish traffic.";
