@@ -946,6 +946,225 @@ button.domain-tile {
   align-items: start;
 }
 
+.process-page {
+  display: grid;
+  gap: 14px;
+}
+
+.process-topbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: end;
+}
+
+.process-topbar h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 2px;
+  font-size: 21px;
+}
+
+.process-topbar p {
+  margin: 0;
+  color: #64748b;
+}
+
+.process-back {
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  color: #475569;
+}
+
+.process-shell {
+  display: grid;
+  grid-template-columns: 288px minmax(0, 1fr);
+  min-height: 620px;
+  border: 1px solid #dbe4ed;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.process-sidebar {
+  border-right: 1px solid #dbe4ed;
+  background: #f8fafc;
+  padding: 16px 14px;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.process-nav,
+.process-job {
+  width: 100%;
+  justify-content: flex-start;
+  border-color: transparent;
+  background: transparent;
+  text-align: left;
+}
+
+.process-nav.active,
+.process-job.active {
+  border-color: #dbe4ed;
+  background: #e2e8f0;
+}
+
+.process-job {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  min-height: 38px;
+}
+
+.process-job small {
+  grid-column: 2;
+  color: #64748b;
+  font-size: 11px;
+}
+
+.process-nav-heading {
+  margin: 12px 4px 4px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.process-run-detail {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 10px;
+  color: #475569;
+}
+
+.process-run-detail b {
+  color: #0f172a;
+}
+
+.process-main {
+  min-width: 0;
+  background: #f6f8fa;
+}
+
+.process-job-header {
+  min-height: 80px;
+  border-bottom: 1px solid #dbe4ed;
+  padding: 18px 24px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+}
+
+.process-job-header h2 {
+  margin: 0;
+  color: #0969da;
+  font-size: 16px;
+}
+
+.process-job-header p {
+  margin: 3px 0 0;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.process-log-tools {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.process-search {
+  min-width: 260px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 0 10px;
+  background: #ffffff;
+}
+
+.process-search input {
+  min-height: 30px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.process-step-list {
+  padding: 12px 16px 24px;
+}
+
+.process-step {
+  border-radius: 7px;
+}
+
+.process-step.expanded {
+  background: #ffffff;
+}
+
+.process-step-row {
+  display: grid;
+  grid-template-columns: 18px 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 0 8px;
+  border-radius: 7px;
+}
+
+.process-step.expanded .process-step-row {
+  background: #e2e8f0;
+}
+
+.process-step-row small,
+.process-chevron {
+  color: #475569;
+}
+
+.process-log-block {
+  padding: 12px 64px 18px;
+}
+
+.process-log-actions {
+  margin-bottom: 10px;
+}
+
+.process-log-block pre {
+  max-height: 440px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #0f172a;
+  font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+}
+
+.process-summary {
+  padding: 24px;
+}
+
+.process-status.done {
+  color: #1a7f37;
+}
+
+.process-status.failed {
+  color: #cf222e;
+}
+
+.process-status.running {
+  color: #9a6700;
+}
+
+.process-status.pending {
+  color: #57606a;
+}
+
 .dashboard-shell {
   display: grid;
   gap: 16px;
@@ -1552,6 +1771,27 @@ button.domain-tile {
 
   .progress-grid {
     grid-template-columns: 1fr;
+  }
+
+  .process-topbar,
+  .process-shell,
+  .process-job-header {
+    grid-template-columns: 1fr;
+  }
+
+  .process-sidebar {
+    border-right: 0;
+    border-bottom: 1px solid #dbe4ed;
+  }
+
+  .process-log-tools,
+  .process-search {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .process-log-block {
+    padding: 12px;
   }
 
   .dashboard-hero,
