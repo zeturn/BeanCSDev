@@ -121,40 +121,6 @@ const navSections = [
   },
 ];
 
-const sidebarPrimaryItems = [
-  {id: "projects", label: "Projects", icon: Boxes},
-  {id: "deploy", label: "Deploy", icon: Rocket},
-  {id: "progress", label: "Progress", icon: LoaderCircle},
-  {id: "deployments", label: "Deployments", icon: Box},
-  {id: "logs", label: "Logs", icon: FileText},
-  {id: "metrics", label: "Analytics", icon: LineChart},
-  {id: "dashboard", label: "Speed Insights", icon: Activity},
-  {id: "alerts", label: "Observability", icon: Bell},
-  {id: "networking", label: "Firewall", icon: Shield},
-  {id: "cloudflare", label: "CDN", icon: Globe2},
-];
-
-const sidebarSecondaryItems = [
-  {id: "secrets", label: "Environment Variables", icon: Code2, badge: "1"},
-  {id: "domains", label: "Domains", icon: Globe2},
-  {id: "github", label: "Integrations", icon: Package},
-  {id: "storage", label: "Storage", icon: Database},
-  {id: "settings", label: "Flags", icon: Settings},
-];
-
-const sidebarResourceItems = [
-  {id: "pods", label: "Pods", icon: Layers3},
-  {id: "services", label: "Services", icon: Database},
-  {id: "ingresses", label: "Ingresses", icon: Network},
-  {id: "nodes", label: "Nodes", icon: Server},
-  {id: "namespaces", label: "Namespaces", icon: Layers3},
-  {id: "workloadImage", label: "Image Registry", icon: ImageIcon},
-  {id: "apiKeys", label: "API Keys", icon: KeyRound},
-  {id: "accessControl", label: "Access Control", icon: ShieldCheck},
-  {id: "registries", label: "Registries", icon: Package},
-  {id: "events", label: "Events", icon: ScrollText},
-];
-
 function App() {
   const [config, setConfig] = useState(null);
   const [token, setToken] = useState(localStorage.getItem(tokenKey) || "");
@@ -1337,9 +1303,7 @@ function App() {
       <aside className="sidebar">
         <div className="sidebar-product">
           <span className="brand-orb" />
-          <b>{userProfile.name || "zeturn"}'s projects</b>
-          <em>Hobby</em>
-          <ChevronDown size={16} />
+          <b>BeanCS</b>
         </div>
         <button type="button" className="sidebar-search">
           <Search size={19} />
@@ -1347,13 +1311,10 @@ function App() {
           <kbd>F</kbd>
         </button>
         <div className="sidebar-nav">
-          <SidebarNavGroup items={sidebarPrimaryItems} view={view} onSelect={selectNav} />
-          <div className="nav-divider" />
-          <SidebarNavGroup items={sidebarSecondaryItems} view={view} onSelect={selectNav} />
-          <details className="nav-more">
-            <summary>Infrastructure</summary>
-            <SidebarNavGroup items={sidebarResourceItems} view={view} onSelect={selectNav} />
-          </details>
+          <SidebarNavGroup items={[navOverview]} view={view} onSelect={selectNav} />
+          {navSections.map((section) => (
+            <SidebarNavGroup key={section.id} label={section.label} items={section.items} view={view} onSelect={selectNav} />
+          ))}
         </div>
         <div className="sidebar-user">
           <div className="user-avatar">{userProfile.initial}</div>
@@ -1367,19 +1328,7 @@ function App() {
         </div>
       </aside>
       <main className="workspace">
-        <header className="topbar">
-          <button type="button" className="workspace-picker">
-            All Projects <ChevronDown size={15} />
-          </button>
-          <div className="topbar-title">
-            <h1>{titleFor(view)}</h1>
-            <p>{subtitleFor(view, runtime, projects)}</p>
-          </div>
-          <div className="top-actions">
-            <button className="icon-button" type="button" aria-label="Page actions"><MoreHorizontal size={18} /></button>
-            <button onClick={loadWorkspace} disabled={loading}><RefreshCw size={16} /> Refresh</button>
-          </div>
-        </header>
+        <PageHeading title={titleFor(view)} subtitle={subtitleFor(view, runtime, projects)} actions={<button onClick={loadWorkspace} disabled={loading}><RefreshCw size={15} /> Refresh</button>} />
         {notice && <div className="notice">{notice}</div>}
         {error && <div className="alert">{error}</div>}
         {view === "dashboard" && <DashboardView dashboard={dashboard} refresh={loadDashboard} />}
@@ -1496,9 +1445,10 @@ function App() {
   );
 }
 
-function SidebarNavGroup({items, view, onSelect}) {
+function SidebarNavGroup({label, items, view, onSelect}) {
   return (
     <div className="nav-group">
+      {label && <div className="nav-group-label">{label}</div>}
       {items.map((item) => {
         const Icon = item.icon;
         return (
@@ -1510,6 +1460,18 @@ function SidebarNavGroup({items, view, onSelect}) {
         );
       })}
     </div>
+  );
+}
+
+function PageHeading({title, subtitle, actions}) {
+  return (
+    <section className="page-heading">
+      <div>
+        <h1>{title}</h1>
+        {subtitle && <p>{subtitle}</p>}
+      </div>
+      {actions && <div className="top-actions">{actions}</div>}
+    </section>
   );
 }
 
