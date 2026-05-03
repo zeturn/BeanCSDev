@@ -3,6 +3,7 @@ package k8s
 import (
 	"context"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -28,6 +29,16 @@ func (m *Manager) ApplyArgoCDApplication(ctx context.Context, projectName, repoU
 			"syncPolicy":  map[string]any{"automated": map[string]any{"prune": true, "selfHeal": true}},
 		},
 	}}
-	_, err := m.Dynamic.Resource(gvr).Namespace("argocd").Create(ctx, app, metav1.CreateOptions{})
+	resource := m.Dynamic.Resource(gvr).Namespace("argocd")
+	current, err := resource.Get(ctx, projectName, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		_, err = resource.Create(ctx, app, metav1.CreateOptions{})
+		return err
+	}
+	if err != nil {
+		return err
+	}
+	app.SetResourceVersion(current.GetResourceVersion())
+	_, err = resource.Update(ctx, app, metav1.UpdateOptions{})
 	return err
 }

@@ -367,6 +367,12 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 		rollback()
 		return nil, err
 	}
+	if project.BuildSource == model.BuildSourceGitHub && project.AutoDeploy && ghCred.GitOpsRepo != "" {
+		if err := s.k8s.ApplyArgoCDApplication(ctx, project.Name, gitOpsRepoURL(ghCred), fmt.Sprintf("apps/%s/overlays/dev", project.Name), project.Namespace); err != nil {
+			rollback()
+			return nil, err
+		}
+	}
 	_ = s.db.WithContext(ctx).Model(deployment).Updates(map[string]any{"status": "provisioned"}).Error
 	if s.build != nil && project.BuildSource == model.BuildSourceGitHub && project.AutoDeploy {
 		if _, err := s.build.Start(ctx, project, userID); err != nil {
@@ -563,6 +569,10 @@ func validateProjectSource(req *dto.CreateProjectRequest) error {
 		if !strings.HasPrefix(strings.ToLower(req.ImageReference), "ghcr.io/") {
 			return fmt.Errorf("ghcr image_reference must start with ghcr.io/")
 		}
+	case model.BuildSourceRegistry:
+		if err := validateImageReference(req.ImageReference); err != nil {
+			return fmt.Errorf("registry image_reference: %w", err)
+		}
 	case model.BuildSourceSourceUpload:
 		if req.SourceArchiveName == "" {
 			return fmt.Errorf("source_archive_name is required for source uploads")
@@ -571,7 +581,7 @@ func validateProjectSource(req *dto.CreateProjectRequest) error {
 			return fmt.Errorf("source upload image_reference: %w", err)
 		}
 	default:
-		return fmt.Errorf("build_source must be github, dockerhub, ghcr, or source-upload")
+		return fmt.Errorf("build_source must be github, dockerhub, ghcr, registry, or source-upload")
 	}
 	return nil
 }
@@ -588,6 +598,24 @@ func validateImageReference(image string) error {
 		return fmt.Errorf("must be a valid container image reference")
 	}
 	return nil
+}
+
+func gitOpsRepoURL(cred model.GitHubCredential) string {
+	repo := strings.TrimSpace(cred.GitOpsRepo)
+	if repo == "" {
+		return ""
+	}
+	if strings.HasPrefix(repo, "http://") || strings.HasPrefix(repo, "https://") || strings.HasPrefix(repo, "git@") {
+		return repo
+	}
+	owner, name, ok := splitRepo(repo)
+	if !ok && cred.Org != "" {
+		owner, name, ok = cred.Org, repo, true
+	}
+	if !ok {
+		return repo
+	}
+	return fmt.Sprintf("https://github.com/%s/%s.git", owner, name)
 }
 
 func composeFileCandidates() []string {

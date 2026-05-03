@@ -7,7 +7,7 @@ type CreateProjectRequest struct {
 	DisplayName            string             `json:"display_name" validate:"omitempty,max=256"`
 	Description            string             `json:"description" validate:"omitempty,max=2000"`
 	TeamID                 string             `json:"team_id" validate:"omitempty,max=128"`
-	BuildSource            string             `json:"build_source" validate:"omitempty,oneof=github dockerhub ghcr source-upload"`
+	BuildSource            string             `json:"build_source" validate:"omitempty,oneof=github dockerhub ghcr registry source-upload"`
 	ImageReference         string             `json:"image_reference" validate:"omitempty,max=512"`
 	SourceArchiveName      string             `json:"source_archive_name" validate:"omitempty,max=256"`
 	GitHubCredentialID     uint               `json:"github_credential_id" validate:"omitempty"`

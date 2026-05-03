@@ -62,6 +62,7 @@ func main() {
 	registry := basaltpass.NewClientRegistry(db, cipher, cfg)
 	credentialSvc := service.NewCredentialService(db, cipher, cfg)
 	apiKeySvc := service.NewAPIKeyService(db)
+	registryImageSvc := service.NewContainerRegistryService(db, cipher)
 	quotaSvc := service.NewQuotaService(db)
 	dnsSvc := service.NewDNSService(cfg.IngressIP)
 	gitopsSvc := service.NewGitOpsService()
@@ -83,8 +84,8 @@ func main() {
 	app.Use(logger.New())
 	app.Use(cors.New(cors.Config{AllowOrigins: cfg.CORSOrigins}))
 
-	registerAPI(app.Group("/v1/api"), cfg, db, registry, credentialSvc, apiKeySvc, projectSvc, deploymentSvc, k8sManager, v)
-	registerAPI(app.Group("/api/v1"), cfg, db, registry, credentialSvc, apiKeySvc, projectSvc, deploymentSvc, k8sManager, v)
+	registerAPI(app.Group("/v1/api"), cfg, db, registry, credentialSvc, apiKeySvc, registryImageSvc, projectSvc, deploymentSvc, k8sManager, v)
+	registerAPI(app.Group("/api/v1"), cfg, db, registry, credentialSvc, apiKeySvc, registryImageSvc, projectSvc, deploymentSvc, k8sManager, v)
 
 	app.Get("/assets/*", serveAsset)
 	app.Get("/", serveIndex)
@@ -128,7 +129,7 @@ func main() {
 	}
 }
 
-func registerAPI(api fiber.Router, cfg *config.Config, db *gorm.DB, registry *basaltpass.ClientRegistry, credentialSvc *service.CredentialService, apiKeySvc *service.APIKeyService, projectSvc *service.ProjectService, deploymentSvc *service.DeploymentService, k8sManager *k8s.Manager, v *validator.Validate) {
+func registerAPI(api fiber.Router, cfg *config.Config, db *gorm.DB, registry *basaltpass.ClientRegistry, credentialSvc *service.CredentialService, apiKeySvc *service.APIKeyService, registryImageSvc *service.ContainerRegistryService, projectSvc *service.ProjectService, deploymentSvc *service.DeploymentService, k8sManager *k8s.Manager, v *validator.Validate) {
 	api.Get("/health", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{"status": "ok", "version": cfg.Version})
 	})
@@ -180,6 +181,7 @@ func registerAPI(api fiber.Router, cfg *config.Config, db *gorm.DB, registry *ba
 	secured := api.Group("/", authLimiter, middleware.Auth(registry, apiKeySvc), middleware.Audit(db))
 	credentialHandler.Register(secured)
 	handler.NewAPIKeyHandler(apiKeySvc, v).Register(secured)
+	handler.NewContainerRegistryHandler(registryImageSvc, v).Register(secured)
 	handler.NewProjectHandler(db, projectSvc, k8sManager, v).Register(secured)
 	handler.NewDeploymentHandler(db, deploymentSvc, v).Register(secured)
 	handler.NewRuntimeHandler(db, k8sManager, v).Register(secured)
@@ -227,8 +229,8 @@ type databasePool interface {
 }
 
 func configureDatabasePool(db databasePool) {
-	db.SetMaxOpenConns(10)
-	db.SetMaxIdleConns(5)
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(10)
 	db.SetConnMaxLifetime(30 * time.Minute)
 	db.SetConnMaxIdleTime(5 * time.Minute)
 }

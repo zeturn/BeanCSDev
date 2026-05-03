@@ -15,6 +15,7 @@ const (
 	BuildSourceGitHub       = "github"
 	BuildSourceDockerHub    = "dockerhub"
 	BuildSourceGHCR         = "ghcr"
+	BuildSourceRegistry     = "registry"
 	BuildSourceSourceUpload = "source-upload"
 )
 

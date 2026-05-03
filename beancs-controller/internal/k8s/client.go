@@ -17,6 +17,9 @@ type Manager struct {
 	PublicIngressNamespaces  []string
 	PrivateIngressNamespaces []string
 	CertManager              CertManagerOptions
+	ClusterName              string
+	K3sServerURL             string
+	K3sJoinToken             string
 	err                      error
 }
 
@@ -51,6 +54,9 @@ func NewManager(cfg *config.Config) *Manager {
 	return &Manager{
 		Clientset:                clientset,
 		Dynamic:                  dyn,
+		ClusterName:              cfg.ClusterName,
+		K3sServerURL:             strings.TrimSpace(cfg.K3sServerURL),
+		K3sJoinToken:             strings.TrimSpace(cfg.K3sJoinToken),
 		PublicIngressNamespaces:  splitNamespaces(cfg.PublicIngressNamespaces, []string{"kube-system", "traefik"}),
 		PrivateIngressNamespaces: splitNamespaces(cfg.PrivateIngressNamespaces, []string{"tailscale", "tailscale-system"}),
 		CertManager: CertManagerOptions{
