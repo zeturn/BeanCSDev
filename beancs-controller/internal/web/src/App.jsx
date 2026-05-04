@@ -129,6 +129,7 @@ function App() {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [reposLoading, setReposLoading] = useState(false);
   const [runtime, setRuntime] = useState(emptyRuntime);
   const [dashboard, setDashboard] = useState(null);
   const [network, setNetwork] = useState(null);
@@ -570,7 +571,7 @@ function App() {
     setSelectedCredential(String(credentialID));
     setAnalysis(null);
     setRepos([]);
-    setLoading(true);
+    setReposLoading(true);
     try {
       const data = await api.get(`/credentials/github/${credentialID}/repositories`);
       setRepos(data.data || []);
@@ -578,7 +579,7 @@ function App() {
     } catch (err) {
       setError(err.message);
     } finally {
-      setLoading(false);
+      setReposLoading(false);
     }
   }
 
@@ -1347,7 +1348,7 @@ function App() {
         <PageHeading title={titleFor(view)} subtitle={subtitleFor(view, runtime, projects)} actions={<button onClick={loadWorkspace} disabled={loading}><RefreshCw size={15} /> Refresh</button>} />
         {notice && <div className="notice">{notice}</div>}
         {error && <div className="alert">{error}</div>}
-        {shouldShowSkeleton(view, loading, dashboard, network) ? (
+        {shouldShowSkeleton(view, dashboard, network) ? (
           <SkeletonPage />
         ) : (
           <>
@@ -1372,6 +1373,7 @@ function App() {
                 containerImages={containerImages}
                 createTrackedImageFromDeploy={createTrackedImageFromDeploy}
                 onConnectGitHub={connectGitHubApp}
+                reposLoading={reposLoading}
               />
             )}
             {view === "progress" && (
@@ -1531,14 +1533,30 @@ function SkeletonPage() {
   );
 }
 
-function shouldShowSkeleton(view, loading, dashboard, network) {
-  if (loading) return true;
+function RepoListSkeleton() {
+  return (
+    <>
+      {Array.from({length: 4}).map((_, index) => (
+        <div className="import-repo-row repo-skeleton-row" key={`repo-skeleton-${index}`}>
+          <div>
+            <div className="skeleton-dot" />
+            <span className="skeleton-line w-40" />
+            <small className="skeleton-line w-20" />
+          </div>
+          <div className="skeleton-button" />
+        </div>
+      ))}
+    </>
+  );
+}
+
+function shouldShowSkeleton(view, dashboard, network) {
   if (["dashboard", "alerts", "events", "metrics"].includes(view)) return !dashboard;
   if (view === "networking") return !network;
   return false;
 }
 
-function DeployView({credentials, namespaces, selectedCredential, setSelectedCredential, repos, selectedRepo, analysis, setAnalysis, form, setForm, loadRepos, analyzeRepo, checkInstallSource, deployProject, containerRegistries, containerImages, createTrackedImageFromDeploy, onConnectGitHub}) {
+function DeployView({credentials, namespaces, selectedCredential, setSelectedCredential, repos, selectedRepo, analysis, setAnalysis, form, setForm, loadRepos, analyzeRepo, checkInstallSource, deployProject, containerRegistries, containerImages, createTrackedImageFromDeploy, onConnectGitHub, reposLoading}) {
   const [stepIndex, setStepIndex] = useState(0);
   const [creatingImage, setCreatingImage] = useState(false);
   const [checkingInstall, setCheckingInstall] = useState(false);
@@ -1692,7 +1710,8 @@ function DeployView({credentials, namespaces, selectedCredential, setSelectedCre
                         <div className="repo-search-box"><Search size={18} /><input value={repoSearch} onChange={(event) => setRepoSearch(event.target.value)} placeholder="Search..." /></div>
                       </div>
                       <div className="import-repo-list">
-                        {visibleRepos.map((repo) => {
+                        {reposLoading && <RepoListSkeleton />}
+                        {!reposLoading && visibleRepos.map((repo) => {
                           const isSelected = form.github_repo === repo.full_name || selectedRepo === repo.full_name;
                           const repoName = repo.name || repo.full_name.split("/")[1];
                           const branch = repo.default_branch || "main";
@@ -1710,7 +1729,7 @@ function DeployView({credentials, namespaces, selectedCredential, setSelectedCre
                             </div>
                           );
                         })}
-                        {visibleRepos.length === 0 && <div className="empty">{selectedCredential ? "No repositories match this search." : "Choose a GitHub account to load repositories."}</div>}
+                        {!reposLoading && visibleRepos.length === 0 && <div className="empty">{selectedCredential ? "No repositories match this search." : "Choose a GitHub account to load repositories."}</div>}
                       </div>
                       {form.github_repo && (
                         <div className="selected-repo-summary">
