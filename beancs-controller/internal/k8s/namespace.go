@@ -110,8 +110,14 @@ func (m *Manager) DeleteProjectResources(ctx context.Context, namespace, project
 	if err := m.Clientset.CoreV1().Services(namespace).Delete(ctx, projectName, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
 		errs = append(errs, fmt.Errorf("delete service %s: %w", projectName, err))
 	}
-	if err := m.Clientset.NetworkingV1().Ingresses(namespace).DeleteCollection(ctx, metav1.DeleteOptions{}, selector); err != nil && !apierrors.IsNotFound(err) {
-		errs = append(errs, fmt.Errorf("delete ingresses: %w", err))
+	ingresses, err := m.Clientset.NetworkingV1().Ingresses(namespace).List(ctx, selector)
+	if err != nil && !apierrors.IsNotFound(err) {
+		errs = append(errs, fmt.Errorf("list ingresses: %w", err))
+	}
+	for _, ing := range ingresses.Items {
+		if err := m.Clientset.NetworkingV1().Ingresses(namespace).Delete(ctx, ing.Name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+			errs = append(errs, fmt.Errorf("delete ingress %s: %w", ing.Name, err))
+		}
 	}
 	if len(errs) > 0 {
 		return fmt.Errorf("%v", errs)

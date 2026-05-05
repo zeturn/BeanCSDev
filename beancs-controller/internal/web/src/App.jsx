@@ -3765,7 +3765,7 @@ function buildProjectPayload(form, githubCredentialID, credentials) {
     github_credential_id: source === "github" ? Number(githubCredentialID) : undefined,
     github_repo: source === "github" ? form.github_repo : undefined,
     github_branch: form.github_branch || "main",
-    dockerfile_path: form.dockerfile_path || "Dockerfile",
+    dockerfile_path: form.dockerfile_path || undefined,
     auto_deploy: source === "github" ? form.update_mode === "argocd" : false,
     basaltpass_instance_id: form.basaltpass_instance_id ? Number(form.basaltpass_instance_id) : undefined,
     cloudflare_credential_id: exposure === "public" ? Number(form.cloudflare_credential_id) : undefined,

@@ -111,8 +111,11 @@ func (s *ProjectService) AnalyzeRepository(ctx context.Context, userID string, r
 	}
 	if !out.Containerized && sourceSignals > 0 {
 		out.Scaffoldable = true
-		out.Deployable = true
 		out.Warnings = append(out.Warnings, "Source layout detected, but no container recipe was found. Add a Dockerfile or Docker Compose file before deploying to avoid image build failures.")
+	}
+	if out.ComposePath != "" && out.DockerfilePath == "" {
+		out.Deployable = false
+		out.Warnings = append(out.Warnings, "Docker Compose was detected, but BeanCS GitHub Actions builds currently require a Dockerfile or Containerfile path.")
 	}
 	if !out.Containerized {
 		out.Warnings = append(out.Warnings, "No Dockerfile, Containerfile, or Docker Compose file was found in the repository root or common app directories.")
@@ -193,6 +196,14 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 		if err != nil {
 			rollback()
 			return nil, err
+		}
+		if req.BuildSource == model.BuildSourceGitHub {
+			dockerfilePath, err := s.resolveGitHubDockerfilePath(ctx, ghToken, req)
+			if err != nil {
+				rollback()
+				return nil, err
+			}
+			req.DockerfilePath = dockerfilePath
 		}
 	}
 
@@ -645,6 +656,34 @@ func composeFileCandidates() []string {
 
 func dockerfileCandidates() []string {
 	return pathCandidates([]string{"Dockerfile", "dockerfile", "Containerfile"})
+}
+
+func (s *ProjectService) resolveGitHubDockerfilePath(ctx context.Context, token string, req dto.CreateProjectRequest) (string, error) {
+	owner, repo, ok := splitRepo(req.GitHubRepo)
+	if !ok {
+		return "", fmt.Errorf("github_repo must be in owner/repo format")
+	}
+	branch := coalesce(req.GitHubBranch, "main")
+	if path := strings.TrimSpace(req.DockerfilePath); path != "" {
+		exists, err := githubContentExists(ctx, token, owner, repo, path, branch)
+		if err != nil {
+			return "", err
+		}
+		if !exists {
+			return "", fmt.Errorf("dockerfile_path %q was not found in %s on branch %s", path, req.GitHubRepo, branch)
+		}
+		return path, nil
+	}
+	for _, candidate := range dockerfileCandidates() {
+		exists, err := githubContentExists(ctx, token, owner, repo, candidate, branch)
+		if err != nil {
+			return "", err
+		}
+		if exists {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("no Dockerfile or Containerfile was found in %s on branch %s; add one or set dockerfile_path to the correct path before deploying", req.GitHubRepo, branch)
 }
 
 func sourceFileCandidates() []string {
