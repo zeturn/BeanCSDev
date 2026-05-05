@@ -166,8 +166,13 @@ jobs:
       - name: Deploy bundled Postgres
         shell: bash
         env:
+          BEANCS_DATABASE_URL: ${{ secrets.BEANCS_DATABASE_URL }}
           POSTGRES_PASSWORD: ${{ secrets.BEANCS_POSTGRES_PASSWORD }}
         run: |
+          if [ -n "${BEANCS_DATABASE_URL}" ]; then
+            echo "BEANCS_DATABASE_URL is set; skipping bundled Postgres deployment"
+            exit 0
+          fi
           if [ -z "${POSTGRES_PASSWORD}" ]; then
             echo "BEANCS_POSTGRES_PASSWORD secret is required"
             exit 1
