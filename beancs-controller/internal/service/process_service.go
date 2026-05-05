@@ -219,6 +219,17 @@ func (r *processRun) validate() error {
 	if r.project.Namespace == "" {
 		return r.svc.failJob(r.ctx, job, "project namespace is empty")
 	}
+	if r.project.BuildSource == model.BuildSourceGitHub {
+		if err := r.prepareGitHub(job); err != nil {
+			return r.svc.failJob(r.ctx, job, err.Error())
+		}
+		path, err := r.resolveDockerfilePath(job)
+		if err != nil {
+			return r.svc.failJob(r.ctx, job, err.Error())
+		}
+		r.project.DockerfilePath = path
+		r.svc.appendJobLog(r.ctx, job, "dockerfile_path="+path)
+	}
 	if r.svc.k8s != nil {
 		if err := r.svc.k8s.CreateNamespace(r.ctx, r.project.Namespace, r.project.Name); err != nil {
 			return r.svc.failJob(r.ctx, job, err.Error())
@@ -317,6 +328,34 @@ func (r *processRun) prepareGitHub(job *model.ProcessJob) error {
 	r.token, r.owner, r.repo = token, owner, repo
 	r.svc.appendJobLog(r.ctx, job, "repo="+r.project.GitHubRepo)
 	return nil
+}
+
+func (r *processRun) resolveDockerfilePath(job *model.ProcessJob) (string, error) {
+	branch := coalesce(r.project.GitHubBranch, "main")
+	if path := strings.TrimSpace(r.project.DockerfilePath); path != "" {
+		exists, err := githubContentExists(r.ctx, r.token, r.owner, r.repo, path, branch)
+		if err != nil {
+			return "", err
+		}
+		if !exists {
+			return "", fmt.Errorf("dockerfile_path %q was not found in %s on branch %s", path, r.project.GitHubRepo, branch)
+		}
+		return path, nil
+	}
+	for _, candidate := range dockerfileCandidates() {
+		exists, err := githubContentExists(r.ctx, r.token, r.owner, r.repo, candidate, branch)
+		if err != nil {
+			return "", err
+		}
+		if exists {
+			if err := r.svc.db.WithContext(r.ctx).Model(r.project).Update("dockerfile_path", candidate).Error; err != nil {
+				return "", err
+			}
+			r.svc.appendJobLog(r.ctx, job, "discovered dockerfile_path="+candidate)
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("no Dockerfile or Containerfile was found in %s on branch %s; add one or set dockerfile_path to the correct path before deploying", r.project.GitHubRepo, branch)
 }
 
 func (r *processRun) githubWorkflow() error {
