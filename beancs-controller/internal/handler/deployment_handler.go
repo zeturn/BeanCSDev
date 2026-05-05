@@ -24,6 +24,7 @@ func (h *DeploymentHandler) Register(r fiber.Router) {
 	r.Post("/projects/:id/deployments", middleware.ProjectAccess(h.db), h.create)
 	r.Get("/projects/:id/deployments", middleware.ProjectAccess(h.db), h.list)
 	r.Get("/projects/:id/deployments/:did", middleware.ProjectAccess(h.db), h.get)
+	r.Get("/projects/:id/deployments/:did/logs", middleware.ProjectAccess(h.db), h.logs)
 	r.Post("/projects/:id/deployments/:did/rollback", middleware.ProjectOwner(h.db), h.rollback)
 }
 
@@ -36,6 +37,10 @@ func (h *DeploymentHandler) create(c *fiber.Ctx) error {
 	out, err := h.service.Create(c.UserContext(), project.ID, req.Tag, req.CommitSHA, middleware.UserID(c))
 	if err != nil {
 		return fail(c, 400, err)
+	}
+	var process model.Process
+	if err := h.db.Preload("Jobs", func(db *gorm.DB) *gorm.DB { return db.Order("step_index asc") }).Where("deployment_id = ?", out.ID).Order("created_at desc").First(&process).Error; err == nil {
+		return c.Status(201).JSON(fiber.Map{"deployment": out, "process": process})
 	}
 	return c.Status(201).JSON(out)
 }
@@ -60,6 +65,19 @@ func (h *DeploymentHandler) get(c *fiber.Ctx) error {
 		return fail(c, 404, err)
 	}
 	return c.JSON(out)
+}
+
+func (h *DeploymentHandler) logs(c *fiber.Ctx) error {
+	project := projectFromCtx(c)
+	did, err := idParam(c, "did")
+	if err != nil {
+		return fail(c, 400, err)
+	}
+	out, err := h.service.Logs(c.UserContext(), *project, did)
+	if err != nil {
+		return fail(c, 400, err)
+	}
+	return c.JSON(fiber.Map{"logs": out})
 }
 
 func (h *DeploymentHandler) rollback(c *fiber.Ctx) error {
