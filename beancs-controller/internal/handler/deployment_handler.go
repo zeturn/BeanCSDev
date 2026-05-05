@@ -38,6 +38,10 @@ func (h *DeploymentHandler) create(c *fiber.Ctx) error {
 	if err != nil {
 		return fail(c, 400, err)
 	}
+	var process model.Process
+	if err := h.db.Preload("Jobs", func(db *gorm.DB) *gorm.DB { return db.Order("step_index asc") }).Where("deployment_id = ?", out.ID).Order("created_at desc").First(&process).Error; err == nil {
+		return c.Status(201).JSON(fiber.Map{"deployment": out, "process": process})
+	}
 	return c.Status(201).JSON(out)
 }
 

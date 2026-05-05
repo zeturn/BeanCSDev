@@ -13,6 +13,8 @@ func AutoMigrate(db *gorm.DB) error {
 		&model.UserCredential{},
 		&model.Project{},
 		&model.Deployment{},
+		&model.Process{},
+		&model.ProcessJob{},
 		&model.DNSRecord{},
 		&model.ResourceQuota{},
 		&model.AuditLog{},

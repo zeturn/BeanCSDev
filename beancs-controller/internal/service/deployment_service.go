@@ -21,19 +21,37 @@ type DeploymentService struct {
 	build       *GitHubBuildService
 	credentials *CredentialService
 	gitops      *GitOpsService
+	processes   *ProcessService
 }
 
-func NewDeploymentService(db *gorm.DB, build *GitHubBuildService, credentials *CredentialService, gitops *GitOpsService) *DeploymentService {
-	return &DeploymentService{db: db, build: build, credentials: credentials, gitops: gitops}
+func NewDeploymentService(db *gorm.DB, build *GitHubBuildService, credentials *CredentialService, gitops *GitOpsService, processes *ProcessService) *DeploymentService {
+	return &DeploymentService{db: db, build: build, credentials: credentials, gitops: gitops, processes: processes}
 }
 
 func (s *DeploymentService) Create(ctx context.Context, projectID uint, tag, commit, triggeredBy string) (*model.Deployment, error) {
 	var project model.Project
-	if err := s.db.WithContext(ctx).First(&project, projectID).Error; err == nil && s.build != nil && project.BuildSource == model.BuildSourceGitHub {
-		return s.build.Start(ctx, &project, triggeredBy)
+	if err := s.db.WithContext(ctx).First(&project, projectID).Error; err != nil {
+		return nil, err
 	}
-	dep := &model.Deployment{ProjectID: projectID, Tag: tag, CommitSHA: commit, Status: "pending", TriggeredBy: triggeredBy}
-	return dep, s.db.WithContext(ctx).Create(dep).Error
+	dep := &model.Deployment{ProjectID: projectID, Tag: tag, CommitSHA: commit, Status: "queued", TriggeredBy: triggeredBy}
+	if project.BuildSource == model.BuildSourceGitHub {
+		image := buildImageReference(&project)
+		dep.Tag = coalesce(tag, image)
+		dep.ImageRef = image
+		dep.CommitSHA = coalesce(commit, project.GitHubBranch)
+	}
+	if err := s.db.WithContext(ctx).Create(dep).Error; err != nil {
+		return nil, err
+	}
+	if s.processes != nil {
+		process, err := s.processes.CreateDeploymentProcess(ctx, dep, triggeredBy)
+		if err != nil {
+			_ = s.db.WithContext(ctx).Model(dep).Updates(map[string]any{"status": "failed", "failure_reason": truncateFailure(err.Error())}).Error
+			return nil, err
+		}
+		s.processes.Start(process.ID)
+	}
+	return dep, nil
 }
 
 func (s *DeploymentService) List(ctx context.Context, projectID uint) ([]model.Deployment, error) {

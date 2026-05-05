@@ -68,7 +68,8 @@ func main() {
 	gitopsSvc := service.NewGitOpsService()
 	buildSvc := service.NewGitHubBuildService(db, cfg, credentialSvc, gitopsSvc)
 	projectSvc := service.NewProjectService(db, credentialSvc, quotaSvc, dnsSvc, gitopsSvc, buildSvc, k8sManager, registry, cipher)
-	deploymentSvc := service.NewDeploymentService(db, buildSvc, credentialSvc, gitopsSvc)
+	processSvc := service.NewProcessService(db, buildSvc, credentialSvc, gitopsSvc, dnsSvc, k8sManager)
+	deploymentSvc := service.NewDeploymentService(db, buildSvc, credentialSvc, gitopsSvc, processSvc)
 
 	app := fiber.New(fiber.Config{
 		ErrorHandler: func(c *fiber.Ctx, err error) error {
@@ -84,8 +85,8 @@ func main() {
 	app.Use(logger.New())
 	app.Use(cors.New(cors.Config{AllowOrigins: cfg.CORSOrigins}))
 
-	registerAPI(app.Group("/v1/api"), cfg, db, registry, credentialSvc, apiKeySvc, registryImageSvc, projectSvc, deploymentSvc, k8sManager, v)
-	registerAPI(app.Group("/api/v1"), cfg, db, registry, credentialSvc, apiKeySvc, registryImageSvc, projectSvc, deploymentSvc, k8sManager, v)
+	registerAPI(app.Group("/v1/api"), cfg, db, registry, credentialSvc, apiKeySvc, registryImageSvc, projectSvc, deploymentSvc, processSvc, k8sManager, v)
+	registerAPI(app.Group("/api/v1"), cfg, db, registry, credentialSvc, apiKeySvc, registryImageSvc, projectSvc, deploymentSvc, processSvc, k8sManager, v)
 
 	app.Get("/assets/*", serveAsset)
 	app.Get("/", serveIndex)
@@ -129,7 +130,7 @@ func main() {
 	}
 }
 
-func registerAPI(api fiber.Router, cfg *config.Config, db *gorm.DB, registry *basaltpass.ClientRegistry, credentialSvc *service.CredentialService, apiKeySvc *service.APIKeyService, registryImageSvc *service.ContainerRegistryService, projectSvc *service.ProjectService, deploymentSvc *service.DeploymentService, k8sManager *k8s.Manager, v *validator.Validate) {
+func registerAPI(api fiber.Router, cfg *config.Config, db *gorm.DB, registry *basaltpass.ClientRegistry, credentialSvc *service.CredentialService, apiKeySvc *service.APIKeyService, registryImageSvc *service.ContainerRegistryService, projectSvc *service.ProjectService, deploymentSvc *service.DeploymentService, processSvc *service.ProcessService, k8sManager *k8s.Manager, v *validator.Validate) {
 	api.Get("/health", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{"status": "ok", "version": cfg.Version})
 	})
@@ -184,6 +185,7 @@ func registerAPI(api fiber.Router, cfg *config.Config, db *gorm.DB, registry *ba
 	handler.NewContainerRegistryHandler(registryImageSvc, v).Register(secured)
 	handler.NewProjectHandler(db, projectSvc, k8sManager, v).Register(secured)
 	handler.NewDeploymentHandler(db, deploymentSvc, v).Register(secured)
+	handler.NewProcessHandler(db, processSvc).Register(secured)
 	handler.NewRuntimeHandler(db, k8sManager, v).Register(secured)
 	secured.Use("/admin", middleware.RequireScope("beancs.admin"))
 	handler.NewAdminHandler(db, k8sManager, v).Register(secured)
