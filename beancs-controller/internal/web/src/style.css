@@ -2160,6 +2160,7 @@ button:hover {
   border-right: 1px solid var(--bc-border);
   background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
   color: var(--bc-text);
+  transition: transform 200ms ease, box-shadow 200ms ease;
 }
 
 .sidebar-product {
@@ -2384,6 +2385,40 @@ button:hover {
   overflow: auto;
   padding: var(--bc-space-page);
   background: var(--bc-bg);
+}
+
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms ease;
+  z-index: 20;
+}
+
+.sidebar-overlay.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.mobile-topbar {
+  display: none;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  position: sticky;
+  top: 0;
+  z-index: 15;
+  background: var(--bc-bg);
+  border-bottom: 1px solid var(--bc-border);
+}
+
+.mobile-brand {
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: -0.01em;
 }
 
 .page-heading {
@@ -2777,22 +2812,29 @@ textarea {
   }
 
   .sidebar {
-    position: sticky;
+    position: fixed;
+    left: 0;
     top: 0;
-    height: auto;
-    min-height: 0;
-    z-index: 5;
-    flex-direction: row;
-    overflow-x: auto;
+    height: 100vh;
+    min-height: 100vh;
+    width: min(84vw, 320px);
+    transform: translateX(-100%);
+    z-index: 30;
+    overflow-y: auto;
+    flex-direction: column;
   }
 
-  .brand {
-    margin: 0 12px 0 4px;
+  .sidebar.open {
+    transform: translateX(0);
+    box-shadow: 0 20px 50px rgba(15, 23, 42, 0.25);
   }
 
-  .nav {
-    width: auto;
-    white-space: nowrap;
+  .sidebar-overlay {
+    display: block;
+  }
+
+  .mobile-topbar {
+    display: flex;
   }
 
   .deploy-grid {

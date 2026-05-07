@@ -28,6 +28,7 @@ import {
   ListRestart,
   LoaderCircle,
   Lock,
+  Menu,
   MemoryStick,
   MoreHorizontal,
   Network,
@@ -156,6 +157,7 @@ function App() {
   const [deployForm, setDeployForm] = useState(defaultDeployForm());
   const [editingProject, setEditingProject] = useState(null);
   const [deletingProject, setDeletingProject] = useState(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activeProgressProjectID, setActiveProgressProjectID] = useState("");
   const [activeProcessID, setActiveProcessID] = useState("");
   const [processRecords, setProcessRecords] = useState([]);
@@ -1324,6 +1326,7 @@ function App() {
       setProjectProgress(null);
       stopProjectLogFollow();
     }
+    setSidebarOpen(false);
     setView(item.id);
   }
 
@@ -1344,7 +1347,8 @@ function App() {
 
   return (
     <div className="app-shell">
-      <aside className="sidebar">
+      <div className={sidebarOpen ? "sidebar-overlay active" : "sidebar-overlay"} onClick={() => setSidebarOpen(false)} />
+      <aside className={sidebarOpen ? "sidebar open" : "sidebar"}>
         <div className="sidebar-product">
           <span className="brand-orb"><Coffee size={16} /></span>
           <b>BeanCS</b>
@@ -1372,6 +1376,12 @@ function App() {
         </div>
       </aside>
       <main className="workspace">
+        <div className="mobile-topbar">
+          <button className="icon-button ghost" type="button" aria-label="Open navigation" onClick={() => setSidebarOpen(true)}>
+            <Menu size={18} />
+          </button>
+          <span className="mobile-brand">BeanCS</span>
+        </div>
         <PageHeading title={titleFor(view)} subtitle={subtitleFor(view, runtime, projects)} actions={<button onClick={loadWorkspace} disabled={loading}><RefreshCw size={15} /> Refresh</button>} />
         {notice && <div className="notice">{notice}</div>}
         {error && <div className="alert">{error}</div>}
