@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/zeturn/beancs-controller/internal/basaltpass"
+	"github.com/zeturn/beancs-controller/internal/config"
 	cryptoutil "github.com/zeturn/beancs-controller/internal/crypto"
 	"github.com/zeturn/beancs-controller/internal/dto"
 	"github.com/zeturn/beancs-controller/internal/k8s"
@@ -33,10 +34,11 @@ type ProjectService struct {
 	k8s         *k8s.Manager
 	registry    *basaltpass.ClientRegistry
 	cipher      cryptoutil.Cipher
+	cfg         *config.Config
 }
 
-func NewProjectService(db *gorm.DB, credentials *CredentialService, quota *QuotaService, dns *DNSService, gitops *GitOpsService, build *GitHubBuildService, k8sManager *k8s.Manager, registry *basaltpass.ClientRegistry, cipher cryptoutil.Cipher) *ProjectService {
-	return &ProjectService{db: db, credentials: credentials, quota: quota, dns: dns, gitops: gitops, build: build, k8s: k8sManager, registry: registry, cipher: cipher}
+func NewProjectService(db *gorm.DB, credentials *CredentialService, quota *QuotaService, dns *DNSService, gitops *GitOpsService, build *GitHubBuildService, k8sManager *k8s.Manager, registry *basaltpass.ClientRegistry, cipher cryptoutil.Cipher, cfg *config.Config) *ProjectService {
+	return &ProjectService{db: db, credentials: credentials, quota: quota, dns: dns, gitops: gitops, build: build, k8s: k8sManager, registry: registry, cipher: cipher, cfg: cfg}
 }
 
 func (s *ProjectService) AnalyzeRepository(ctx context.Context, userID string, req dto.AnalyzeProjectRepositoryRequest) (*dto.AnalyzeProjectRepositoryResponse, error) {
@@ -186,6 +188,7 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 
 	var ghCred model.GitHubCredential
 	var ghToken string
+	var ghRepoMeta githubRepositoryMeta
 	if req.GitHubCredentialID != 0 {
 		if err := s.db.WithContext(ctx).First(&ghCred, req.GitHubCredentialID).Error; err != nil {
 			rollback()
@@ -204,6 +207,19 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 				return nil, err
 			}
 			req.DockerfilePath = dockerfilePath
+			owner, repo, ok := splitRepo(req.GitHubRepo)
+			if !ok {
+				rollback()
+				return nil, fmt.Errorf("github_repo must be in owner/repo format")
+			}
+			ghRepoMeta, err = fetchGitHubRepositoryMeta(ctx, ghToken, owner, repo)
+			if err != nil {
+				rollback()
+				return nil, err
+			}
+			if req.GitHubBranch == "" && ghRepoMeta.DefaultBranch != "" {
+				req.GitHubBranch = ghRepoMeta.DefaultBranch
+			}
 		}
 	}
 
@@ -235,6 +251,9 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 		GitHubCredentialID:     req.GitHubCredentialID,
 		GitHubRepo:             req.GitHubRepo,
 		GitHubBranch:           req.GitHubBranch,
+		GitHubInstallationID:   ghCred.InstallationID,
+		GitHubRepoID:           ghRepoMeta.ID,
+		GitHubRepoFullName:     coalesce(ghRepoMeta.FullName, req.GitHubRepo),
 		DockerfilePath:         req.DockerfilePath,
 		AutoDeploy:             req.AutoDeploy == nil || *req.AutoDeploy,
 		BasaltPassInstanceID:   req.BasaltPassInstanceID,
@@ -249,6 +268,13 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 		Status:                 "active",
 	}
 	project.Domain = firstRoutableDomain(project.Ports)
+	if project.BuildSource == model.BuildSourceGitHub {
+		configureBeanCSRegistry(project, s.cfg)
+		if err := ensureHarborProject(ctx, s.cfg, project.RegistryProject); err != nil {
+			rollback()
+			return nil, err
+		}
+	}
 
 	var secret string
 	if req.BasaltPassInstanceID != nil {
@@ -289,6 +315,12 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 
 	if project.BasaltClientID != "" {
 		if err := s.k8s.UpsertSecret(ctx, project.Namespace, "basaltpass-keys", project.Name, map[string]string{"client_id": project.BasaltClientID, "client_secret": secret}); err != nil {
+			rollback()
+			return nil, err
+		}
+	}
+	if project.BuildSource == model.BuildSourceGitHub && project.RegistryImageReference != "" {
+		if err := s.k8s.UpsertRegistryPullSecret(ctx, project.Namespace, project.Name, project.RegistryPullSecretName); err != nil {
 			rollback()
 			return nil, err
 		}

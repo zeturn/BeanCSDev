@@ -235,6 +235,12 @@ func (r *processRun) validate() error {
 			return r.svc.failJob(r.ctx, job, err.Error())
 		}
 		r.svc.appendJobLog(r.ctx, job, "namespace exists or was created")
+		if r.project.BuildSource == model.BuildSourceGitHub && r.project.RegistryImageReference != "" {
+			if err := r.svc.k8s.UpsertRegistryPullSecret(r.ctx, r.project.Namespace, r.project.Name, r.project.RegistryPullSecretName); err != nil {
+				return r.svc.failJob(r.ctx, job, err.Error())
+			}
+			r.svc.appendJobLog(r.ctx, job, "registry pull secret reconciled")
+		}
 	}
 	r.image = strings.TrimSpace(r.deployment.ImageRef)
 	if r.image == "" {
@@ -456,7 +462,7 @@ func (r *processRun) rollout() error {
 		resources = model.ResourcePresets["small"]
 	}
 	if r.svc.k8s != nil {
-		if err := r.svc.k8s.ApplyDeploymentPorts(r.ctx, r.project.Namespace, r.project.Name, r.image, r.project.Ports, int32(r.project.Replicas), resources.CPURequest, resources.CPULimit, resources.MemRequest, resources.MemLimit); err != nil {
+		if err := r.svc.k8s.ApplyDeploymentPortsWithPullSecret(r.ctx, r.project.Namespace, r.project.Name, r.image, r.project.Ports, int32(r.project.Replicas), resources.CPURequest, resources.CPULimit, resources.MemRequest, resources.MemLimit, r.project.RegistryPullSecretName); err != nil {
 			return r.svc.failJob(r.ctx, job, err.Error())
 		}
 		r.svc.appendJobLog(r.ctx, job, fmt.Sprintf("deployment applied %s/%s image=%s", r.project.Namespace, r.project.Name, r.image))

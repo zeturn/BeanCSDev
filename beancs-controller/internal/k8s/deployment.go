@@ -19,6 +19,10 @@ func (m *Manager) ApplyDeployment(ctx context.Context, namespace, projectName, i
 }
 
 func (m *Manager) ApplyDeploymentPorts(ctx context.Context, namespace, projectName, image string, ports model.ProjectPorts, replicas int32, cpuReq, cpuLimit, memReq, memLimit string) error {
+	return m.ApplyDeploymentPortsWithPullSecret(ctx, namespace, projectName, image, ports, replicas, cpuReq, cpuLimit, memReq, memLimit, "")
+}
+
+func (m *Manager) ApplyDeploymentPortsWithPullSecret(ctx context.Context, namespace, projectName, image string, ports model.ProjectPorts, replicas int32, cpuReq, cpuLimit, memReq, memLimit, pullSecret string) error {
 	if err := m.ensure(); err != nil {
 		return err
 	}
@@ -28,6 +32,34 @@ func (m *Manager) ApplyDeploymentPorts(ctx context.Context, namespace, projectNa
 	}
 	probePort := int32(ports[0].Port)
 	labels := Labels(projectName)
+	podSpec := corev1.PodSpec{
+		Tolerations: []corev1.Toleration{
+			{Key: "node.kubernetes.io/not-ready", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoExecute, TolerationSeconds: int64Ptr(30)},
+			{Key: "node.kubernetes.io/unreachable", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoExecute, TolerationSeconds: int64Ptr(30)},
+		},
+		Affinity: &corev1.Affinity{PodAntiAffinity: &corev1.PodAntiAffinity{PreferredDuringSchedulingIgnoredDuringExecution: []corev1.WeightedPodAffinityTerm{{
+			Weight: 100,
+			PodAffinityTerm: corev1.PodAffinityTerm{
+				LabelSelector: &metav1.LabelSelector{MatchLabels: labels},
+				TopologyKey:   "kubernetes.io/hostname",
+			},
+		}}}},
+		Containers: []corev1.Container{{
+			Name:    "app",
+			Image:   image,
+			Ports:   containerPorts,
+			EnvFrom: []corev1.EnvFromSource{{SecretRef: &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: "app-env-vars"}}}},
+			Resources: corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(cpuReq), corev1.ResourceMemory: resource.MustParse(memReq)},
+				Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(cpuLimit), corev1.ResourceMemory: resource.MustParse(memLimit)},
+			},
+			LivenessProbe:  httpProbe(probePort, 10, 10),
+			ReadinessProbe: httpProbe(probePort, 5, 5),
+		}},
+	}
+	if pullSecret != "" {
+		podSpec.ImagePullSecrets = []corev1.LocalObjectReference{{Name: pullSecret}}
+	}
 	dep := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: namespace, Labels: labels},
 		Spec: appsv1.DeploymentSpec{
@@ -36,31 +68,7 @@ func (m *Manager) ApplyDeploymentPorts(ctx context.Context, namespace, projectNa
 			Strategy: appsv1.DeploymentStrategy{Type: appsv1.RollingUpdateDeploymentStrategyType},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
-				Spec: corev1.PodSpec{
-					Tolerations: []corev1.Toleration{
-						{Key: "node.kubernetes.io/not-ready", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoExecute, TolerationSeconds: int64Ptr(30)},
-						{Key: "node.kubernetes.io/unreachable", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoExecute, TolerationSeconds: int64Ptr(30)},
-					},
-					Affinity: &corev1.Affinity{PodAntiAffinity: &corev1.PodAntiAffinity{PreferredDuringSchedulingIgnoredDuringExecution: []corev1.WeightedPodAffinityTerm{{
-						Weight: 100,
-						PodAffinityTerm: corev1.PodAffinityTerm{
-							LabelSelector: &metav1.LabelSelector{MatchLabels: labels},
-							TopologyKey:   "kubernetes.io/hostname",
-						},
-					}}}},
-					Containers: []corev1.Container{{
-						Name:    "app",
-						Image:   image,
-						Ports:   containerPorts,
-						EnvFrom: []corev1.EnvFromSource{{SecretRef: &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: "app-env-vars"}}}},
-						Resources: corev1.ResourceRequirements{
-							Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(cpuReq), corev1.ResourceMemory: resource.MustParse(memReq)},
-							Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(cpuLimit), corev1.ResourceMemory: resource.MustParse(memLimit)},
-						},
-						LivenessProbe:  httpProbe(probePort, 10, 10),
-						ReadinessProbe: httpProbe(probePort, 5, 5),
-					}},
-				},
+				Spec:       podSpec,
 			},
 		},
 	}

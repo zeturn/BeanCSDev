@@ -2,6 +2,9 @@ package k8s
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -28,6 +31,51 @@ func (m *Manager) UpsertSecret(ctx context.Context, namespace, name, projectName
 			return getErr
 		}
 		current.StringData = stringData
+		current.Labels = Labels(projectName)
+		_, err = m.Clientset.CoreV1().Secrets(namespace).Update(ctx, current, metav1.UpdateOptions{})
+	}
+	return err
+}
+
+func (m *Manager) UpsertRegistryPullSecret(ctx context.Context, namespace, projectName, secretName string) error {
+	if err := m.ensure(); err != nil {
+		return err
+	}
+	if secretName == "" {
+		secretName = m.RegistryPullSecret
+	}
+	if secretName == "" {
+		return fmt.Errorf("registry pull secret name is required")
+	}
+	if m.RegistryHost == "" || m.RegistryPullUsername == "" || m.RegistryPullToken == "" {
+		return fmt.Errorf("registry pull credentials are not configured")
+	}
+	auth := base64.StdEncoding.EncodeToString([]byte(m.RegistryPullUsername + ":" + m.RegistryPullToken))
+	payload, err := json.Marshal(map[string]any{
+		"auths": map[string]any{
+			m.RegistryHost: map[string]string{
+				"username": m.RegistryPullUsername,
+				"password": m.RegistryPullToken,
+				"auth":     auth,
+			},
+		},
+	})
+	if err != nil {
+		return err
+	}
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: namespace, Labels: Labels(projectName)},
+		Type:       corev1.SecretTypeDockerConfigJson,
+		StringData: map[string]string{corev1.DockerConfigJsonKey: string(payload)},
+	}
+	_, err = m.Clientset.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{})
+	if apierrors.IsAlreadyExists(err) {
+		current, getErr := m.Clientset.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
+		if getErr != nil {
+			return getErr
+		}
+		current.Type = corev1.SecretTypeDockerConfigJson
+		current.StringData = secret.StringData
 		current.Labels = Labels(projectName)
 		_, err = m.Clientset.CoreV1().Secrets(namespace).Update(ctx, current, metav1.UpdateOptions{})
 	}
