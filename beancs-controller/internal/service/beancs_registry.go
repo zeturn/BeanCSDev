@@ -33,7 +33,7 @@ func fetchGitHubRepositoryMeta(ctx context.Context, token, owner, repo string) (
 	return out, nil
 }
 
-func configureBeanCSRegistry(project *model.Project, cfg *config.Config) {
+func configureBeanCSRegistry(project *model.Project, cfg *config.Config, tenantCode string) {
 	if project == nil || cfg == nil || strings.TrimSpace(cfg.RegistryHost) == "" || project.GitHubRepo == "" {
 		return
 	}
@@ -42,8 +42,11 @@ func configureBeanCSRegistry(project *model.Project, cfg *config.Config) {
 		return
 	}
 	host := normalizeRegistryHost(cfg.RegistryHost)
-	registryProject := strings.ToLower(owner)
-	registryRepo := strings.ToLower(repo)
+	registryProject := harborName(coalesce(tenantCode, project.TenantID))
+	registryRepo := harborName(repo)
+	if registryProject == "" {
+		registryProject = harborName(owner)
+	}
 	project.RegistryHost = host
 	project.RegistryProject = registryProject
 	project.RegistryRepository = registryRepo
@@ -53,6 +56,26 @@ func configureBeanCSRegistry(project *model.Project, cfg *config.Config) {
 	}
 	project.RegistryImageReference = host + "/" + registryProject + "/" + registryRepo
 	project.ImageReference = project.RegistryImageReference
+}
+
+func harborName(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.ReplaceAll(value, "_", "-")
+	var b strings.Builder
+	lastDash := false
+	for _, r := range value {
+		allowed := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '.'
+		if !allowed {
+			if !lastDash {
+				b.WriteByte('-')
+				lastDash = true
+			}
+			continue
+		}
+		b.WriteRune(r)
+		lastDash = r == '-'
+	}
+	return strings.Trim(b.String(), "-.")
 }
 
 func ghcrImageBase(project *model.Project) string {

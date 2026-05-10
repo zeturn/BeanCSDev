@@ -88,6 +88,7 @@ func authToken(c *fiber.Ctx) string {
 func setAuthLocals(c *fiber.Ctx, info *basaltpass.IntrospectionResult) {
 	c.Locals("user_id", info.Sub)
 	c.Locals("tenant_id", info.TenantID)
+	c.Locals("tenant_code", info.TenantCode)
 	c.Locals("scopes", strings.Fields(info.Scope))
 	c.Locals("auth_method", "basaltpass")
 	if info.Act != nil {
@@ -98,6 +99,7 @@ func setAuthLocals(c *fiber.Ctx, info *basaltpass.IntrospectionResult) {
 func setAPIKeyLocals(c *fiber.Ctx, identity *service.APIKeyIdentity) {
 	c.Locals("user_id", identity.UserID)
 	c.Locals("tenant_id", identity.TenantID)
+	c.Locals("tenant_code", identity.TenantID)
 	c.Locals("scopes", identity.Scopes)
 	c.Locals("auth_method", "api_key")
 	c.Locals("api_key_id", identity.KeyID)
@@ -116,6 +118,13 @@ func TenantID(c *fiber.Ctx) string {
 		return v
 	}
 	return ""
+}
+
+func TenantCode(c *fiber.Ctx) string {
+	if v, ok := c.Locals("tenant_code").(string); ok && strings.TrimSpace(v) != "" {
+		return v
+	}
+	return TenantID(c)
 }
 
 func Scopes(c *fiber.Ctx) []string {

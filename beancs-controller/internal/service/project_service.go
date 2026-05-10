@@ -125,7 +125,7 @@ func (s *ProjectService) AnalyzeRepository(ctx context.Context, userID string, r
 	return out, nil
 }
 
-func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID string, req dto.CreateProjectRequest) (*model.Project, error) {
+func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID, tenantCode string, req dto.CreateProjectRequest) (*model.Project, error) {
 	normalizeProjectRequest(&req)
 	if err := validateProjectPorts(req.Name, req.Ports); err != nil {
 		return nil, err
@@ -269,7 +269,7 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 	}
 	project.Domain = firstRoutableDomain(project.Ports)
 	if project.BuildSource == model.BuildSourceGitHub {
-		configureBeanCSRegistry(project, s.cfg)
+		configureBeanCSRegistry(project, s.cfg, tenantCode)
 		if err := ensureHarborProject(ctx, s.cfg, project.RegistryProject); err != nil {
 			rollback()
 			return nil, err

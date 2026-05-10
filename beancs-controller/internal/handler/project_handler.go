@@ -55,7 +55,7 @@ func (h *ProjectHandler) create(c *fiber.Ctx) error {
 	if req.TeamID != "" && !middleware.HasScope(c, "beancs.admin") {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "team_id requires beancs.admin until team membership checks are enabled"})
 	}
-	out, err := h.service.CreateProject(c.UserContext(), middleware.UserID(c), middleware.TenantID(c), req)
+	out, err := h.service.CreateProject(c.UserContext(), middleware.UserID(c), middleware.TenantID(c), middleware.TenantCode(c), req)
 	if err != nil {
 		return fail(c, 400, err)
 	}

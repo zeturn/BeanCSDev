@@ -22,24 +22,26 @@ type Actor struct {
 }
 
 type IntrospectionResult struct {
-	Active   bool   `json:"active"`
-	Sub      string `json:"sub"`
-	ClientID string `json:"client_id"`
-	Scope    string `json:"scope"`
-	TenantID string `json:"tenant_id"`
-	Exp      int64  `json:"exp"`
-	Act      *Actor `json:"act,omitempty"`
+	Active     bool   `json:"active"`
+	Sub        string `json:"sub"`
+	ClientID   string `json:"client_id"`
+	Scope      string `json:"scope"`
+	TenantID   string `json:"tenant_id"`
+	TenantCode string `json:"tenant_code"`
+	Exp        int64  `json:"exp"`
+	Act        *Actor `json:"act,omitempty"`
 }
 
 func (r *IntrospectionResult) UnmarshalJSON(data []byte) error {
 	var raw struct {
-		Active   bool            `json:"active"`
-		Sub      any             `json:"sub"`
-		ClientID any             `json:"client_id"`
-		Scope    any             `json:"scope"`
-		TenantID any             `json:"tenant_id"`
-		Exp      any             `json:"exp"`
-		Act      json.RawMessage `json:"act"`
+		Active     bool            `json:"active"`
+		Sub        any             `json:"sub"`
+		ClientID   any             `json:"client_id"`
+		Scope      any             `json:"scope"`
+		TenantID   any             `json:"tenant_id"`
+		TenantCode any             `json:"tenant_code"`
+		Exp        any             `json:"exp"`
+		Act        json.RawMessage `json:"act"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
@@ -49,6 +51,7 @@ func (r *IntrospectionResult) UnmarshalJSON(data []byte) error {
 	r.ClientID = stringifyJSONValue(raw.ClientID)
 	r.Scope = scopeString(raw.Scope)
 	r.TenantID = stringifyJSONValue(raw.TenantID)
+	r.TenantCode = stringifyJSONValue(raw.TenantCode)
 	r.Exp = int64JSONValue(raw.Exp)
 	r.Act = nil
 	if len(raw.Act) > 0 && string(raw.Act) != "null" {
