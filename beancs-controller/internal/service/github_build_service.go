@@ -559,7 +559,7 @@ func beancsBuildWorkflow(project *model.Project, callbackEnabled bool) string {
           if [ "$BEANCS_STATUS" = "success" ]; then STATUS="success"; fi
           BODY=$(jq -nc --arg project "$BEANCS_PROJECT" --arg tag "$BEANCS_IMAGE" --arg commit "$GITHUB_SHA" --arg status "$STATUS" '{project:$project, tag:$tag, commit:$commit, status:$status}')
           SIG="sha256=$(printf '%%s' "$BODY" | openssl dgst -sha256 -hmac "$BEANCS_WEBHOOK_SECRET" -binary | xxd -p -c 256)"
-          curl -fsS -X POST "$BEANCS_WEBHOOK_URL" -H "Content-Type: application/json" -H "X-Hub-Signature-256: $SIG" --data "$BODY"
+          curl -fsS -X POST "$BEANCS_WEBHOOK_URL" -H "Content-Type: application/json" -H "X-Hub-Signature-256: $SIG" --data "$BODY" || echo "BeanCS webhook notification failed; build result remains valid."
 `, project.Name)
 	}
 	return fmt.Sprintf(`name: BeanCS Build
