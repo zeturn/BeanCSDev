@@ -27,6 +27,7 @@ type Project struct {
 	OwnerID     string `gorm:"size:128;not null;index" json:"owner_id"`
 	TeamID      string `gorm:"size:128;index" json:"team_id"`
 	TenantID    string `gorm:"size:128;index" json:"tenant_id"`
+	TenantCode  string `gorm:"size:128;index" json:"tenant_code,omitempty"`
 
 	BuildSource       string `gorm:"size:32;default:'github'" json:"build_source"`
 	ImageReference    string `gorm:"size:512" json:"image_reference"`

@@ -223,6 +223,22 @@ func (r *processRun) validate() error {
 		if err := r.prepareGitHub(job); err != nil {
 			return r.svc.failJob(r.ctx, job, err.Error())
 		}
+		if err := configureBeanCSRegistry(r.project, r.svc.build.cfg, r.project.TenantCode); err != nil {
+			return r.svc.failJob(r.ctx, job, err.Error())
+		}
+		if err := ensureHarborProject(r.ctx, r.svc.build.cfg, r.project.RegistryProject); err != nil {
+			return r.svc.failJob(r.ctx, job, err.Error())
+		}
+		if err := r.svc.db.WithContext(r.ctx).Model(r.project).Updates(map[string]any{
+			"image_reference":           r.project.ImageReference,
+			"registry_host":             r.project.RegistryHost,
+			"registry_project":          r.project.RegistryProject,
+			"registry_repository":       r.project.RegistryRepository,
+			"registry_image_reference":  r.project.RegistryImageReference,
+			"registry_pull_secret_name": r.project.RegistryPullSecretName,
+		}).Error; err != nil {
+			return r.svc.failJob(r.ctx, job, err.Error())
+		}
 		path, err := r.resolveDockerfilePath(job)
 		if err != nil {
 			return r.svc.failJob(r.ctx, job, err.Error())
@@ -246,7 +262,7 @@ func (r *processRun) validate() error {
 	if r.image == "" {
 		r.image = strings.TrimSpace(r.deployment.Tag)
 	}
-	if r.image == "" && r.project.BuildSource == model.BuildSourceGitHub {
+	if r.project.BuildSource == model.BuildSourceGitHub {
 		r.image = buildImageReference(r.project)
 	}
 	if r.project.BuildSource != model.BuildSourceGitHub && r.image == "" {

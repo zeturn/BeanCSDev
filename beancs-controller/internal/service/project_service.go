@@ -245,6 +245,7 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID, te
 		OwnerID:                userID,
 		TeamID:                 req.TeamID,
 		TenantID:               tenantID,
+		TenantCode:             tenantCode,
 		BuildSource:            req.BuildSource,
 		ImageReference:         req.ImageReference,
 		SourceArchiveName:      req.SourceArchiveName,
@@ -269,7 +270,10 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID, te
 	}
 	project.Domain = firstRoutableDomain(project.Ports)
 	if project.BuildSource == model.BuildSourceGitHub {
-		configureBeanCSRegistry(project, s.cfg, tenantCode)
+		if err := configureBeanCSRegistry(project, s.cfg, tenantCode); err != nil {
+			rollback()
+			return nil, err
+		}
 		if err := ensureHarborProject(ctx, s.cfg, project.RegistryProject); err != nil {
 			rollback()
 			return nil, err

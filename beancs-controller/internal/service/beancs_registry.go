@@ -33,19 +33,19 @@ func fetchGitHubRepositoryMeta(ctx context.Context, token, owner, repo string) (
 	return out, nil
 }
 
-func configureBeanCSRegistry(project *model.Project, cfg *config.Config, tenantCode string) {
+func configureBeanCSRegistry(project *model.Project, cfg *config.Config, tenantCode string) error {
 	if project == nil || cfg == nil || strings.TrimSpace(cfg.RegistryHost) == "" || project.GitHubRepo == "" {
-		return
+		return nil
 	}
-	owner, repo, ok := splitRepo(project.GitHubRepo)
+	_, repo, ok := splitRepo(project.GitHubRepo)
 	if !ok {
-		return
+		return fmt.Errorf("github_repo must be in owner/repo format")
 	}
 	host := normalizeRegistryHost(cfg.RegistryHost)
-	registryProject := harborName(coalesce(tenantCode, project.TenantID))
+	registryProject := harborName(coalesce(tenantCode, project.TenantCode))
 	registryRepo := harborName(repo)
 	if registryProject == "" {
-		registryProject = harborName(owner)
+		return fmt.Errorf("BasaltPass tenant_code is required to create BeanCS registry projects")
 	}
 	project.RegistryHost = host
 	project.RegistryProject = registryProject
@@ -56,6 +56,7 @@ func configureBeanCSRegistry(project *model.Project, cfg *config.Config, tenantC
 	}
 	project.RegistryImageReference = host + "/" + registryProject + "/" + registryRepo
 	project.ImageReference = project.RegistryImageReference
+	return nil
 }
 
 func harborName(value string) string {
