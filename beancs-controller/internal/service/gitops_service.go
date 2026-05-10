@@ -42,6 +42,12 @@ func (s *GitOpsService) RenderManifests(project *model.Project) map[string]strin
 	if image == "" {
 		image = "ghcr.io/" + strings.ToLower(project.GitHubRepo) + ":latest"
 	}
+	pullSecrets := ""
+	if project.RegistryPullSecretName != "" {
+		pullSecrets = fmt.Sprintf(`      imagePullSecrets:
+        - name: %s
+`, project.RegistryPullSecretName)
+	}
 	ports := project.Ports
 	if len(ports) == 0 {
 		ports = model.ProjectPorts{{Name: "http", Port: project.Port, Exposure: project.ExposureMode, Domain: project.Domain}}
@@ -72,6 +78,7 @@ spec:
         app: %s
         managed-by: beancs
     spec:
+%s
       tolerations:
         - key: node.kubernetes.io/not-ready
           operator: Exists
@@ -89,7 +96,7 @@ spec:
           envFrom:
             - secretRef:
                 name: app-env-vars
-`, project.Name, project.Namespace, project.Name, project.Replicas, project.Name, project.Name, image, renderContainerPorts(ports)),
+`, project.Name, project.Namespace, project.Name, project.Replicas, project.Name, project.Name, pullSecrets, image, renderContainerPorts(ports)),
 		path.Join(base, "base", "service.yaml"): fmt.Sprintf(`apiVersion: v1
 kind: Service
 metadata:

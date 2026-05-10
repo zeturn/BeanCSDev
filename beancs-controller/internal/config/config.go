@@ -53,6 +53,13 @@ type Config struct {
 	GitHubAppID         int64  `env:"BEANCS_GITHUB_APP_ID"`
 	GitHubAppSlug       string `env:"BEANCS_GITHUB_APP_SLUG"`
 	GitHubAppPrivateKey string `env:"BEANCS_GITHUB_APP_PRIVATE_KEY"`
+
+	RegistryHost         string `env:"BEANCS_REGISTRY_HOST" envDefault:"registry.beancs.hollowdata.com"`
+	RegistryUsername     string `env:"BEANCS_REGISTRY_USERNAME"`
+	RegistryToken        string `env:"BEANCS_REGISTRY_TOKEN"`
+	RegistryPullUsername string `env:"BEANCS_REGISTRY_PULL_USERNAME"`
+	RegistryPullToken    string `env:"BEANCS_REGISTRY_PULL_TOKEN"`
+	RegistryPullSecret   string `env:"BEANCS_REGISTRY_PULL_SECRET" envDefault:"beancs-registry-pull"`
 }
 
 func Load() (*Config, error) {

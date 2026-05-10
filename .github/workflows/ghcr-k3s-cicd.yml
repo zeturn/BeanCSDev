@@ -220,6 +220,12 @@ jobs:
             --from-literal=BEANCS_GITHUB_APP_ID="${{ vars.BEANCS_GITHUB_APP_ID }}" \
             --from-literal=BEANCS_GITHUB_APP_SLUG="${{ vars.BEANCS_GITHUB_APP_SLUG }}" \
             --from-literal=BEANCS_GITHUB_APP_PRIVATE_KEY="${{ secrets.BEANCS_GITHUB_APP_PRIVATE_KEY }}" \
+            --from-literal=BEANCS_REGISTRY_HOST="${{ secrets.BEANCS_REGISTRY_HOST }}" \
+            --from-literal=BEANCS_REGISTRY_USERNAME="${{ secrets.BEANCS_REGISTRY_USERNAME }}" \
+            --from-literal=BEANCS_REGISTRY_TOKEN="${{ secrets.BEANCS_REGISTRY_TOKEN }}" \
+            --from-literal=BEANCS_REGISTRY_PULL_USERNAME="${{ secrets.BEANCS_REGISTRY_PULL_USERNAME }}" \
+            --from-literal=BEANCS_REGISTRY_PULL_TOKEN="${{ secrets.BEANCS_REGISTRY_PULL_TOKEN }}" \
+            --from-literal=BEANCS_REGISTRY_PULL_SECRET="${{ vars.BEANCS_REGISTRY_PULL_SECRET || 'beancs-registry-pull' }}" \
             --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Deploy controller manifests

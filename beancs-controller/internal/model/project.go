@@ -32,11 +32,20 @@ type Project struct {
 	ImageReference    string `gorm:"size:512" json:"image_reference"`
 	SourceArchiveName string `gorm:"size:256" json:"source_archive_name"`
 
-	GitHubCredentialID uint   `gorm:"index" json:"github_credential_id"`
-	GitHubRepo         string `gorm:"size:256" json:"github_repo"`
-	GitHubBranch       string `gorm:"size:128;default:'main'" json:"github_branch"`
-	DockerfilePath     string `gorm:"size:512;default:'Dockerfile'" json:"dockerfile_path"`
-	AutoDeploy         bool   `gorm:"default:true" json:"auto_deploy"`
+	GitHubCredentialID   uint   `gorm:"index" json:"github_credential_id"`
+	GitHubRepo           string `gorm:"size:256" json:"github_repo"`
+	GitHubBranch         string `gorm:"size:128;default:'main'" json:"github_branch"`
+	GitHubInstallationID int64  `gorm:"index" json:"github_installation_id,omitempty"`
+	GitHubRepoID         int64  `gorm:"index" json:"github_repo_id,omitempty"`
+	GitHubRepoFullName   string `gorm:"size:256" json:"github_repo_full_name,omitempty"`
+	DockerfilePath       string `gorm:"size:512;default:'Dockerfile'" json:"dockerfile_path"`
+	AutoDeploy           bool   `gorm:"default:true" json:"auto_deploy"`
+
+	RegistryHost           string `gorm:"size:256" json:"registry_host,omitempty"`
+	RegistryProject        string `gorm:"size:128" json:"registry_project,omitempty"`
+	RegistryRepository     string `gorm:"size:256" json:"registry_repository,omitempty"`
+	RegistryImageReference string `gorm:"size:512" json:"registry_image_reference,omitempty"`
+	RegistryPullSecretName string `gorm:"size:253" json:"registry_pull_secret_name,omitempty"`
 
 	BasaltPassInstanceID *uint  `gorm:"index" json:"basaltpass_instance_id,omitempty"`
 	BasaltAppID          uint   `json:"basalt_app_id"`
