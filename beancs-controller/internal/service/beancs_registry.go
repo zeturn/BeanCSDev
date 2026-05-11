@@ -172,21 +172,25 @@ func ensureHarborPullRobot(ctx context.Context, cfg *config.Config, project *mod
 	payload, _ := json.Marshal(map[string]any{
 		"name":        robotName,
 		"description": "BeanCS pull-only robot for " + project.Name,
-		"expires_at":  -1,
-		"access": []map[string]string{{
-			"resource": "repository",
-			"action":   "pull",
-			"effect":   "allow",
+		"level":       "system",
+		"duration":    -1,
+		"disable":     false,
+		"permissions": []map[string]any{{
+			"kind":      "project",
+			"namespace": project.RegistryProject,
+			"access": []map[string]string{{
+				"resource": "repository",
+				"action":   "pull",
+			}},
 		}},
 	})
-	endpoint := fmt.Sprintf("%s/api/v2.0/projects/%s/robots", base, url.PathEscape(project.RegistryProject))
+	endpoint := base + "/api/v2.0/robots"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	if err != nil {
 		return creds, err
 	}
 	req.SetBasicAuth(cfg.RegistryUsername, cfg.RegistryToken)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Is-Resource-Name", "true")
 	resp, err := client.Do(req)
 	if err != nil {
 		return creds, err
@@ -213,13 +217,12 @@ func ensureHarborPullRobot(ctx context.Context, cfg *config.Config, project *mod
 }
 
 func deleteHarborProjectRobots(ctx context.Context, client *http.Client, base string, cfg *config.Config, projectName, robotName string) error {
-	listURL := fmt.Sprintf("%s/api/v2.0/projects/%s/robots?page_size=100", base, url.PathEscape(projectName))
+	listURL := base + "/api/v2.0/robots?page_size=100"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, listURL, nil)
 	if err != nil {
 		return err
 	}
 	req.SetBasicAuth(cfg.RegistryUsername, cfg.RegistryToken)
-	req.Header.Set("X-Is-Resource-Name", "true")
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
@@ -230,8 +233,9 @@ func deleteHarborProjectRobots(ctx context.Context, client *http.Client, base st
 		return fmt.Errorf("Harbor pull robot list failed: %s", strings.TrimSpace(string(body)))
 	}
 	var robots []struct {
-		ID   int64  `json:"id"`
-		Name string `json:"name"`
+		ID    int64  `json:"id"`
+		Name  string `json:"name"`
+		Level string `json:"level"`
 	}
 	if err := json.Unmarshal(body, &robots); err != nil {
 		return err
@@ -241,13 +245,12 @@ func deleteHarborProjectRobots(ctx context.Context, client *http.Client, base st
 		if robot.ID == 0 || (name != robotName && !strings.HasSuffix(name, "+"+robotName)) {
 			continue
 		}
-		deleteURL := fmt.Sprintf("%s/api/v2.0/projects/%s/robots/%d", base, url.PathEscape(projectName), robot.ID)
+		deleteURL := fmt.Sprintf("%s/api/v2.0/robots/%d", base, robot.ID)
 		deleteReq, err := http.NewRequestWithContext(ctx, http.MethodDelete, deleteURL, nil)
 		if err != nil {
 			return err
 		}
 		deleteReq.SetBasicAuth(cfg.RegistryUsername, cfg.RegistryToken)
-		deleteReq.Header.Set("X-Is-Resource-Name", "true")
 		deleteResp, err := client.Do(deleteReq)
 		if err != nil {
 			return err
