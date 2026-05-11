@@ -332,6 +332,23 @@ func (r *processRun) network() error {
 			r.svc.appendJobLog(r.ctx, job, "cloudflare_dns_record="+record.Name)
 		} else {
 			r.svc.appendJobLog(r.ctx, job, "cloudflare_dns_record already exists: "+existing.Name)
+			if existing.Proxied {
+				var cred model.CloudflareCredential
+				if err := r.svc.db.WithContext(r.ctx).First(&cred, *r.project.CloudflareCredentialID).Error; err != nil {
+					return r.svc.failJob(r.ctx, job, err.Error())
+				}
+				token, err := r.svc.credentials.DecryptCloudflareToken(cred)
+				if err != nil {
+					return r.svc.failJob(r.ctx, job, err.Error())
+				}
+				if err := r.svc.dns.EnsureRecordDNSOnly(r.ctx, token, cred, existing); err != nil {
+					return r.svc.failJob(r.ctx, job, "cloudflare_dns_record dns-only update failed: "+err.Error())
+				}
+				if err := r.svc.db.WithContext(r.ctx).Model(&existing).Update("proxied", false).Error; err != nil {
+					return r.svc.failJob(r.ctx, job, err.Error())
+				}
+				r.svc.appendJobLog(r.ctx, job, "cloudflare_dns_record set to DNS only: "+existing.Name)
+			}
 		}
 	}
 	r.svc.appendJobLog(r.ctx, job, "service, ingress, and network policies reconciled")

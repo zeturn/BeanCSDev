@@ -10,6 +10,6 @@ type DNSRecord struct {
 	Name                   string    `gorm:"size:256;not null" json:"name"`
 	Type                   string    `gorm:"size:16;default:'A'" json:"type"`
 	Content                string    `gorm:"size:256;not null" json:"content"`
-	Proxied                bool      `gorm:"default:true" json:"proxied"`
+	Proxied                bool      `gorm:"default:false" json:"proxied"`
 	CreatedAt              time.Time `json:"created_at"`
 }
