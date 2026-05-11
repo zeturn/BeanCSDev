@@ -21,6 +21,12 @@ type githubRepositoryMeta struct {
 	DefaultBranch string `json:"default_branch"`
 }
 
+type registryPullCredentials struct {
+	Host     string
+	Username string
+	Token    string
+}
+
 func fetchGitHubRepositoryMeta(ctx context.Context, token, owner, repo string) (githubRepositoryMeta, error) {
 	endpoint := fmt.Sprintf("https://api.github.com/repos/%s/%s", url.PathEscape(owner), url.PathEscape(repo))
 	var out githubRepositoryMeta
@@ -139,4 +145,119 @@ func ensureHarborProject(ctx context.Context, cfg *config.Config, projectName st
 		return nil
 	}
 	return fmt.Errorf("Harbor project create failed: %s", strings.TrimSpace(string(createBody)))
+}
+
+func ensureHarborPullRobot(ctx context.Context, cfg *config.Config, project *model.Project) (registryPullCredentials, error) {
+	var creds registryPullCredentials
+	if cfg == nil || project == nil || strings.TrimSpace(project.RegistryProject) == "" {
+		return creds, nil
+	}
+	host := normalizeRegistryHost(coalesce(project.RegistryHost, cfg.RegistryHost))
+	creds.Host = host
+	if strings.TrimSpace(cfg.RegistryHost) == "" || strings.TrimSpace(cfg.RegistryUsername) == "" || strings.TrimSpace(cfg.RegistryToken) == "" {
+		return creds, fmt.Errorf("registry management credentials are not configured")
+	}
+	robotName := harborName("beancs-" + project.Name)
+	if robotName == "" {
+		robotName = harborName("beancs-" + project.RegistryRepository)
+	}
+	if robotName == "" {
+		return creds, fmt.Errorf("registry robot name could not be resolved")
+	}
+	base := "https://" + normalizeRegistryHost(cfg.RegistryHost)
+	client := &http.Client{Timeout: 20 * time.Second}
+	if err := deleteHarborProjectRobots(ctx, client, base, cfg, project.RegistryProject, robotName); err != nil {
+		return creds, err
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"name":        robotName,
+		"description": "BeanCS pull-only robot for " + project.Name,
+		"expires_at":  -1,
+		"access": []map[string]string{{
+			"resource": "repository",
+			"action":   "pull",
+			"effect":   "allow",
+		}},
+	})
+	endpoint := fmt.Sprintf("%s/api/v2.0/projects/%s/robots", base, url.PathEscape(project.RegistryProject))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return creds, err
+	}
+	req.SetBasicAuth(cfg.RegistryUsername, cfg.RegistryToken)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Is-Resource-Name", "true")
+	resp, err := client.Do(req)
+	if err != nil {
+		return creds, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return creds, fmt.Errorf("Harbor pull robot create failed: %s", strings.TrimSpace(string(body)))
+	}
+	var created struct {
+		Name   string `json:"name"`
+		Token  string `json:"token"`
+		Secret string `json:"secret"`
+	}
+	if err := json.Unmarshal(body, &created); err != nil {
+		return creds, err
+	}
+	creds.Username = strings.TrimSpace(created.Name)
+	creds.Token = coalesce(created.Token, created.Secret)
+	if creds.Username == "" || creds.Token == "" {
+		return creds, fmt.Errorf("Harbor pull robot create response did not include credentials")
+	}
+	return creds, nil
+}
+
+func deleteHarborProjectRobots(ctx context.Context, client *http.Client, base string, cfg *config.Config, projectName, robotName string) error {
+	listURL := fmt.Sprintf("%s/api/v2.0/projects/%s/robots?page_size=100", base, url.PathEscape(projectName))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, listURL, nil)
+	if err != nil {
+		return err
+	}
+	req.SetBasicAuth(cfg.RegistryUsername, cfg.RegistryToken)
+	req.Header.Set("X-Is-Resource-Name", "true")
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	_ = resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("Harbor pull robot list failed: %s", strings.TrimSpace(string(body)))
+	}
+	var robots []struct {
+		ID   int64  `json:"id"`
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(body, &robots); err != nil {
+		return err
+	}
+	for _, robot := range robots {
+		name := strings.TrimSpace(robot.Name)
+		if robot.ID == 0 || (name != robotName && !strings.HasSuffix(name, "+"+robotName)) {
+			continue
+		}
+		deleteURL := fmt.Sprintf("%s/api/v2.0/projects/%s/robots/%d", base, url.PathEscape(projectName), robot.ID)
+		deleteReq, err := http.NewRequestWithContext(ctx, http.MethodDelete, deleteURL, nil)
+		if err != nil {
+			return err
+		}
+		deleteReq.SetBasicAuth(cfg.RegistryUsername, cfg.RegistryToken)
+		deleteReq.Header.Set("X-Is-Resource-Name", "true")
+		deleteResp, err := client.Do(deleteReq)
+		if err != nil {
+			return err
+		}
+		deleteBody, _ := io.ReadAll(io.LimitReader(deleteResp.Body, 1<<20))
+		_ = deleteResp.Body.Close()
+		if deleteResp.StatusCode == http.StatusNotFound || deleteResp.StatusCode == http.StatusNoContent || (deleteResp.StatusCode >= 200 && deleteResp.StatusCode < 300) {
+			continue
+		}
+		return fmt.Errorf("Harbor pull robot delete failed: %s", strings.TrimSpace(string(deleteBody)))
+	}
+	return nil
 }

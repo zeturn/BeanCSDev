@@ -252,7 +252,11 @@ func (r *processRun) validate() error {
 		}
 		r.svc.appendJobLog(r.ctx, job, "namespace exists or was created")
 		if r.project.BuildSource == model.BuildSourceGitHub && r.project.RegistryImageReference != "" {
-			if err := r.svc.k8s.UpsertRegistryPullSecret(r.ctx, r.project.Namespace, r.project.Name, r.project.RegistryPullSecretName); err != nil {
+			creds, err := ensureHarborPullRobot(r.ctx, r.svc.build.cfg, r.project)
+			if err != nil {
+				return r.svc.failJob(r.ctx, job, err.Error())
+			}
+			if err := r.svc.k8s.UpsertRegistryPullSecretWithCredentials(r.ctx, r.project.Namespace, r.project.Name, r.project.RegistryPullSecretName, creds.Host, creds.Username, creds.Token); err != nil {
 				return r.svc.failJob(r.ctx, job, err.Error())
 			}
 			r.svc.appendJobLog(r.ctx, job, "registry pull secret reconciled")

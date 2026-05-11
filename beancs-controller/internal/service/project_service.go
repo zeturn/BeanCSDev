@@ -324,7 +324,12 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID, te
 		}
 	}
 	if project.BuildSource == model.BuildSourceGitHub && project.RegistryImageReference != "" {
-		if err := s.k8s.UpsertRegistryPullSecret(ctx, project.Namespace, project.Name, project.RegistryPullSecretName); err != nil {
+		creds, err := ensureHarborPullRobot(ctx, s.cfg, project)
+		if err != nil {
+			rollback()
+			return nil, err
+		}
+		if err := s.k8s.UpsertRegistryPullSecretWithCredentials(ctx, project.Namespace, project.Name, project.RegistryPullSecretName, creds.Host, creds.Username, creds.Token); err != nil {
 			rollback()
 			return nil, err
 		}
