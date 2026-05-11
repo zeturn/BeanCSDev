@@ -699,7 +699,8 @@ button.ghost:hover,
 }
 
 .wizard-actions button {
-  min-height: 36px;
+  height: 36px;
+  margin-top: 0;
 }
 
 .readiness-card {
@@ -772,6 +773,12 @@ textarea {
 .deploy-form .primary {
   margin-top: 14px;
   width: 100%;
+}
+
+.wizard-actions .primary {
+  width: auto;
+  margin-top: 0;
+  flex: 1;
 }
 
 .computed-host {
