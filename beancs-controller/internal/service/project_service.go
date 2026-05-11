@@ -516,11 +516,6 @@ func (s *ProjectService) DeleteProject(ctx context.Context, project *model.Proje
 	if err := s.k8s.DeleteProjectResources(ctx, project.Namespace, project.Name); err != nil {
 		cleanupErrs = append(cleanupErrs, fmt.Errorf("delete Kubernetes resources for %s/%s: %w", project.Namespace, project.Name, err))
 	}
-	if !k8s.IsSystemNamespace(project.Namespace) {
-		if err := s.k8s.DeleteNamespace(ctx, project.Namespace); err != nil {
-			cleanupErrs = append(cleanupErrs, fmt.Errorf("delete namespace %s: %w", project.Namespace, err))
-		}
-	}
 	if project.BasaltPassInstanceID != nil && project.BasaltAppID != 0 {
 		if client, err := s.registry.GetClientForInstance(*project.BasaltPassInstanceID); err == nil {
 			if err := client.DeleteApp(ctx, project.BasaltAppID); err != nil {
@@ -541,6 +536,13 @@ func (s *ProjectService) DeleteProject(ctx context.Context, project *model.Proje
 		quotaKey = project.OwnerID
 	}
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		projectProcesses := tx.Model(&model.Process{}).Select("id").Where("project_id = ?", project.ID)
+		if err := tx.Where("process_id IN (?)", projectProcesses).Delete(&model.ProcessJob{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("project_id = ?", project.ID).Delete(&model.Process{}).Error; err != nil {
+			return err
+		}
 		if err := tx.Where("project_id = ?", project.ID).Delete(&model.DNSRecord{}).Error; err != nil {
 			return err
 		}
