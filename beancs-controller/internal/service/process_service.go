@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"time"
 
@@ -48,6 +50,7 @@ func (s *ProcessService) CreateDeploymentProcess(ctx context.Context, deployment
 		{Name: "github_dispatch", DisplayName: "Trigger GitHub workflow"},
 		{Name: "argocd", DisplayName: "Start Argo CD sync"},
 		{Name: "rollout", DisplayName: "Pull image and deploy"},
+		{Name: "connectivity", DisplayName: "Verify connectivity"},
 	}
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(process).Error; err != nil {
@@ -207,7 +210,10 @@ func (r *processRun) run() error {
 	if err := r.argocd(); err != nil {
 		return err
 	}
-	return r.rollout()
+	if err := r.rollout(); err != nil {
+		return err
+	}
+	return r.connectivity()
 }
 
 func (r *processRun) validate() error {
@@ -285,6 +291,11 @@ func (r *processRun) network() error {
 		return err
 	}
 	if r.svc.k8s != nil {
+		result, err := r.svc.k8s.EnsureTraefikPodNetwork(r.ctx)
+		if err != nil {
+			return r.svc.failJob(r.ctx, job, "traefik reconcile failed: "+err.Error())
+		}
+		r.svc.appendJobLog(r.ctx, job, fmt.Sprintf("traefik=%s/%s updated=%t: %s", result.Namespace, result.Name, result.Updated, result.Message))
 		if err := r.svc.k8s.ApplyNetworkPoliciesForPorts(r.ctx, r.project.Namespace, r.project.Name, r.project.Ports); err != nil {
 			return r.svc.failJob(r.ctx, job, err.Error())
 		}
@@ -489,4 +500,86 @@ func (r *processRun) rollout() error {
 	}
 	_ = r.svc.db.WithContext(r.ctx).Model(r.deployment).Updates(map[string]any{"status": "running", "image_ref": r.image, "failure_reason": ""}).Error
 	return r.svc.finishJob(r.ctx, job, model.ProcessStatusSucceeded, "")
+}
+
+func (r *processRun) connectivity() error {
+	job, err := r.svc.startJob(r.ctx, r.processID, "connectivity")
+	if err != nil {
+		return err
+	}
+	if r.svc.k8s != nil {
+		checks, err := r.svc.k8s.WaitForProjectConnectivity(r.ctx, r.project.Namespace, r.project.Name, r.project.Ports, 2*time.Minute)
+		for _, check := range checks {
+			r.svc.appendJobLog(r.ctx, job, fmt.Sprintf("%s %s %s: %s", check.Status, check.Name, check.Target, check.Message))
+		}
+		if err != nil {
+			_ = r.svc.db.WithContext(r.ctx).Model(r.deployment).Updates(map[string]any{"status": "failed", "failure_reason": truncateFailure(err.Error())}).Error
+			return r.svc.failJob(r.ctx, job, err.Error())
+		}
+	}
+	publicURL := r.publicRouteURL()
+	if publicURL != "" {
+		status, err := waitForPublicRoute(r.ctx, publicURL, 2*time.Minute)
+		r.svc.appendJobLog(r.ctx, job, fmt.Sprintf("public-route %s: %s", publicURL, status))
+		if err != nil {
+			_ = r.svc.db.WithContext(r.ctx).Model(r.deployment).Updates(map[string]any{"status": "failed", "failure_reason": truncateFailure(err.Error())}).Error
+			return r.svc.failJob(r.ctx, job, err.Error())
+		}
+	}
+	_ = r.svc.db.WithContext(r.ctx).Model(r.deployment).Updates(map[string]any{"status": "running", "failure_reason": ""}).Error
+	return r.svc.finishJob(r.ctx, job, model.ProcessStatusSucceeded, "")
+}
+
+func (r *processRun) publicRouteURL() string {
+	for _, port := range r.project.Ports {
+		if port.Exposure == model.ExposurePublic && strings.TrimSpace(port.Domain) != "" {
+			return "https://" + strings.TrimSpace(port.Domain) + "/"
+		}
+	}
+	return ""
+}
+
+func waitForPublicRoute(ctx context.Context, url string, timeout time.Duration) (string, error) {
+	deadline := time.Now().Add(timeout)
+	var lastStatus string
+	var lastErr error
+	for {
+		status, err := checkPublicRoute(ctx, url)
+		if err == nil {
+			return status, nil
+		}
+		lastStatus = status
+		lastErr = err
+		if time.Now().After(deadline) {
+			if lastStatus != "" {
+				return lastStatus, lastErr
+			}
+			return "", lastErr
+		}
+		select {
+		case <-ctx.Done():
+			return lastStatus, ctx.Err()
+		case <-time.After(5 * time.Second):
+		}
+	}
+}
+
+func checkPublicRoute(ctx context.Context, url string) (string, error) {
+	reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 BeanCS connectivity check")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
+		return resp.Status, fmt.Errorf("public route returned %s", resp.Status)
+	}
+	return resp.Status, nil
 }

@@ -114,6 +114,16 @@ func main() {
 			log.Info("self access reconciled")
 		}()
 	}
+	go func() {
+		reconcileCtx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		defer cancel()
+		result, err := k8sManager.EnsureTraefikPodNetwork(reconcileCtx)
+		if err != nil {
+			log.Warn("traefik pod network reconcile failed", zap.Error(err))
+			return
+		}
+		log.Info("traefik pod network reconciled", zap.String("namespace", result.Namespace), zap.String("name", result.Name), zap.Bool("updated", result.Updated))
+	}()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
