@@ -169,6 +169,32 @@ func ensureHarborPullRobot(ctx context.Context, cfg *config.Config, project *mod
 	if err := deleteHarborProjectRobots(ctx, client, base, cfg, project.RegistryProject, robotName); err != nil {
 		return creds, err
 	}
+	created, err := createHarborPullRobot(ctx, client, base, cfg, project, robotName)
+	if err != nil && strings.Contains(err.Error(), "CONFLICT") {
+		if deleteErr := deleteHarborProjectRobots(ctx, client, base, cfg, project.RegistryProject, robotName); deleteErr != nil {
+			return creds, deleteErr
+		}
+		created, err = createHarborPullRobot(ctx, client, base, cfg, project, robotName)
+	}
+	if err != nil {
+		return creds, err
+	}
+	creds.Username = strings.TrimSpace(created.Name)
+	creds.Token = coalesce(created.Token, created.Secret)
+	if creds.Username == "" || creds.Token == "" {
+		return creds, fmt.Errorf("Harbor pull robot create response did not include credentials")
+	}
+	return creds, nil
+}
+
+type harborRobotCreateResponse struct {
+	Name   string `json:"name"`
+	Token  string `json:"token"`
+	Secret string `json:"secret"`
+}
+
+func createHarborPullRobot(ctx context.Context, client *http.Client, base string, cfg *config.Config, project *model.Project, robotName string) (harborRobotCreateResponse, error) {
+	var created harborRobotCreateResponse
 	payload, _ := json.Marshal(map[string]any{
 		"name":        robotName,
 		"description": "BeanCS pull-only robot for " + project.Name,
@@ -187,33 +213,23 @@ func ensureHarborPullRobot(ctx context.Context, cfg *config.Config, project *mod
 	endpoint := base + "/api/v2.0/robots"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	if err != nil {
-		return creds, err
+		return created, err
 	}
 	req.SetBasicAuth(cfg.RegistryUsername, cfg.RegistryToken)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
-		return creds, err
+		return created, err
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return creds, fmt.Errorf("Harbor pull robot create failed: %s", strings.TrimSpace(string(body)))
-	}
-	var created struct {
-		Name   string `json:"name"`
-		Token  string `json:"token"`
-		Secret string `json:"secret"`
+		return created, fmt.Errorf("Harbor pull robot create failed: %s", strings.TrimSpace(string(body)))
 	}
 	if err := json.Unmarshal(body, &created); err != nil {
-		return creds, err
+		return created, err
 	}
-	creds.Username = strings.TrimSpace(created.Name)
-	creds.Token = coalesce(created.Token, created.Secret)
-	if creds.Username == "" || creds.Token == "" {
-		return creds, fmt.Errorf("Harbor pull robot create response did not include credentials")
-	}
-	return creds, nil
+	return created, nil
 }
 
 func deleteHarborProjectRobots(ctx context.Context, client *http.Client, base string, cfg *config.Config, projectName, robotName string) error {
@@ -242,7 +258,7 @@ func deleteHarborProjectRobots(ctx context.Context, client *http.Client, base st
 	}
 	for _, robot := range robots {
 		name := strings.TrimSpace(robot.Name)
-		if robot.ID == 0 || (name != robotName && !strings.HasSuffix(name, "+"+robotName)) {
+		if robot.ID == 0 || !harborRobotNameMatches(name, robotName) {
 			continue
 		}
 		deleteURL := fmt.Sprintf("%s/api/v2.0/robots/%d", base, robot.ID)
@@ -263,4 +279,21 @@ func deleteHarborProjectRobots(ctx context.Context, client *http.Client, base st
 		return fmt.Errorf("Harbor pull robot delete failed: %s", strings.TrimSpace(string(deleteBody)))
 	}
 	return nil
+}
+
+func harborRobotNameMatches(name, robotName string) bool {
+	name = strings.TrimSpace(name)
+	robotName = strings.TrimSpace(robotName)
+	if name == "" || robotName == "" {
+		return false
+	}
+	if name == robotName {
+		return true
+	}
+	for _, sep := range []string{":", "+", "$"} {
+		if strings.HasSuffix(name, sep+robotName) {
+			return true
+		}
+	}
+	return false
 }
