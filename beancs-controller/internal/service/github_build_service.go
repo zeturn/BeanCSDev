@@ -595,6 +595,7 @@ jobs:
           fi
           echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
           echo "ghcr_image=$GHCR_IMAGE" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
@@ -610,6 +611,7 @@ jobs:
         with:
           context: ${{ github.event_name == 'workflow_dispatch' && inputs.context || '.' }}
           file: ${{ github.event_name == 'workflow_dispatch' && inputs.dockerfile_path || '%s' }}
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: |
             ${{ steps.meta.outputs.image }}
