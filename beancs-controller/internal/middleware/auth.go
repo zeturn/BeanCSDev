@@ -1,6 +1,9 @@
 package middleware
 
 import (
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -39,7 +42,7 @@ func Auth(registry *basaltpass.ClientRegistry, apiKeys *service.APIKeyService) f
 		mu.RLock()
 		if entry, ok := cache[token]; ok && time.Now().Before(entry.expiresAt) {
 			mu.RUnlock()
-			setAuthLocals(c, entry.info)
+			setAuthLocals(c, entry.info, token)
 			return c.Next()
 		}
 		mu.RUnlock()
@@ -65,7 +68,7 @@ func Auth(registry *basaltpass.ClientRegistry, apiKeys *service.APIKeyService) f
 		mu.Lock()
 		cache[token] = tokenCacheEntry{info: info, expiresAt: expiresAt}
 		mu.Unlock()
-		setAuthLocals(c, info)
+		setAuthLocals(c, info, token)
 		return c.Next()
 	}
 }
@@ -85,10 +88,10 @@ func authToken(c *fiber.Ctx) string {
 	return strings.TrimSpace(c.Get("X-API-Key"))
 }
 
-func setAuthLocals(c *fiber.Ctx, info *basaltpass.IntrospectionResult) {
+func setAuthLocals(c *fiber.Ctx, info *basaltpass.IntrospectionResult, token string) {
 	c.Locals("user_id", info.Sub)
 	c.Locals("tenant_id", info.TenantID)
-	c.Locals("tenant_code", info.TenantCode)
+	c.Locals("tenant_code", firstNonEmpty(info.TenantCode, tenantCodeFromJWT(token)))
 	c.Locals("scopes", strings.Fields(info.Scope))
 	c.Locals("auth_method", "basaltpass")
 	if info.Act != nil {
@@ -125,6 +128,61 @@ func TenantCode(c *fiber.Ctx) string {
 		return v
 	}
 	return TenantID(c)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func tenantCodeFromJWT(token string) string {
+	parts := strings.Split(token, ".")
+	if len(parts) < 2 {
+		return ""
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return ""
+	}
+	var claims map[string]any
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return ""
+	}
+	if code := firstNonEmpty(
+		claimString(claims["tenant_code"]),
+		claimString(claims["tenantCode"]),
+		claimString(claims["tenant_slug"]),
+		claimString(claims["tenantSlug"]),
+		claimString(claims["tenant_name"]),
+		claimString(claims["tenantName"]),
+	); code != "" {
+		return code
+	}
+	if tenant, ok := claims["tenant"].(map[string]any); ok {
+		return firstNonEmpty(
+			claimString(tenant["code"]),
+			claimString(tenant["tenant_code"]),
+			claimString(tenant["tenantCode"]),
+			claimString(tenant["slug"]),
+			claimString(tenant["name"]),
+		)
+	}
+	return ""
+}
+
+func claimString(value any) string {
+	switch v := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return v
+	default:
+		return fmt.Sprint(v)
+	}
 }
 
 func Scopes(c *fiber.Ctx) []string {

@@ -40,6 +40,7 @@ func (r *IntrospectionResult) UnmarshalJSON(data []byte) error {
 		Scope      any             `json:"scope"`
 		TenantID   any             `json:"tenant_id"`
 		TenantCode any             `json:"tenant_code"`
+		Tenant     any             `json:"tenant"`
 		Exp        any             `json:"exp"`
 		Act        json.RawMessage `json:"act"`
 	}
@@ -51,7 +52,7 @@ func (r *IntrospectionResult) UnmarshalJSON(data []byte) error {
 	r.ClientID = stringifyJSONValue(raw.ClientID)
 	r.Scope = scopeString(raw.Scope)
 	r.TenantID = stringifyJSONValue(raw.TenantID)
-	r.TenantCode = stringifyJSONValue(raw.TenantCode)
+	r.TenantCode = coalesceString(stringifyJSONValue(raw.TenantCode), tenantCodeFromValue(raw.Tenant))
 	r.Exp = int64JSONValue(raw.Exp)
 	r.Act = nil
 	if len(raw.Act) > 0 && string(raw.Act) != "null" {
@@ -65,6 +66,34 @@ func (r *IntrospectionResult) UnmarshalJSON(data []byte) error {
 		r.Act = &Actor{Sub: stringifyJSONValue(actRaw.Sub), ClientID: stringifyJSONValue(actRaw.ClientID)}
 	}
 	return nil
+}
+
+func coalesceString(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func tenantCodeFromValue(v any) string {
+	switch t := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return t
+	case map[string]any:
+		return coalesceString(
+			stringifyJSONValue(t["code"]),
+			stringifyJSONValue(t["tenant_code"]),
+			stringifyJSONValue(t["tenantCode"]),
+			stringifyJSONValue(t["slug"]),
+			stringifyJSONValue(t["name"]),
+		)
+	default:
+		return stringifyJSONValue(t)
+	}
 }
 
 func stringifyJSONValue(v any) string {
