@@ -227,7 +227,8 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID, te
 	var cfToken string
 	var err error
 	if req.CloudflareCredentialID != nil {
-		if err := s.db.WithContext(ctx).First(&cfCred, *req.CloudflareCredentialID).Error; err != nil {
+		cfCred, err = s.credentials.CloudflareCredentialForDomain(ctx, *req.CloudflareCredentialID, req.CloudflareZoneID, firstRoutableDomain(req.Ports))
+		if err != nil {
 			rollback()
 			return nil, err
 		}
@@ -364,6 +365,7 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID, te
 			return nil, err
 		}
 		dnsRecords = append(dnsRecords, *dnsRecord)
+		dnsRecords[len(dnsRecords)-1].CloudflareZoneID = cfCred.ZoneID
 		recordID := dnsRecord.CloudflareRecordID
 		rollbacks = append(rollbacks, func() {
 			_ = s.dns.DeleteRecord(context.Background(), cfToken, cfCred.ZoneID, recordID)
@@ -508,7 +510,11 @@ func (s *ProjectService) DeleteProject(ctx context.Context, project *model.Proje
 	_ = s.db.WithContext(ctx).Where("project_id = ?", project.ID).Find(&dnsRecords).Error
 	for _, rec := range dnsRecords {
 		if cfToken != "" {
-			if err := s.dns.DeleteRecord(ctx, cfToken, cfCred.ZoneID, rec.CloudflareRecordID); err != nil {
+			zoneID := rec.CloudflareZoneID
+			if zoneID == "" {
+				zoneID = cfCred.ZoneID
+			}
+			if err := s.dns.DeleteRecord(ctx, cfToken, zoneID, rec.CloudflareRecordID); err != nil {
 				cleanupErrs = append(cleanupErrs, fmt.Errorf("delete DNS record %s: %w", rec.Name, err))
 			}
 		}

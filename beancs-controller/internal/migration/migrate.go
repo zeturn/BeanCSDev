@@ -8,6 +8,7 @@ import (
 func AutoMigrate(db *gorm.DB) error {
 	if err := db.AutoMigrate(
 		&model.CloudflareCredential{},
+		&model.CloudflareDomainCache{},
 		&model.GitHubCredential{},
 		&model.BasaltPassInstance{},
 		&model.UserCredential{},
@@ -34,6 +35,9 @@ func AutoMigrate(db *gorm.DB) error {
 		return err
 	}
 	if err := db.Exec("ALTER TABLE cloudflare_credentials ALTER COLUMN domain DROP NOT NULL").Error; err != nil {
+		return err
+	}
+	if err := db.Exec("ALTER TABLE dns_records ALTER COLUMN cloudflare_zone_id DROP NOT NULL").Error; err != nil {
 		return err
 	}
 	if err := db.Exec("ALTER TABLE projects ALTER COLUMN basalt_pass_instance_id DROP NOT NULL").Error; err != nil {
