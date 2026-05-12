@@ -1535,7 +1535,7 @@ function App() {
               <GitHubView credentials={credentials.github} onConnect={connectGitHubApp} onRepos={loadRepos} onDelete={(id) => deleteCredential("github", id)} reposByCredential={reposByCredential} repoFilters={repoFilters} setRepoFilters={setRepoFilters} />
             )}
             {view === "domains" && <DomainsView domains={domains} />}
-            {view === "networking" && <NetworkingView network={network} refresh={loadNetwork} onSaveService={saveService} onDeleteService={deleteService} onSaveIngress={saveIngress} onDeleteIngress={deleteIngress} onSaveNetworkPolicy={saveNetworkPolicy} onDeleteNetworkPolicy={deleteNetworkPolicy} />}
+            {view === "networking" && <NetworkingView network={network} refresh={loadNetwork} onSaveService={saveService} onDeleteService={deleteService} onSaveIngress={saveIngress} onDeleteIngress={deleteIngress} onSaveNetworkPolicy={saveNetworkPolicy} onDeleteNetworkPolicy={deleteNetworkPolicy} onDetail={setRuntimeDetail} />}
             {view === "cloudflare" && <CloudflareView credentials={credentials.cloudflare} domains={domains} selectedID={selectedCloudflareID} selectedZoneID={selectedCloudflareZoneID} setSelectedID={setSelectedCloudflareID} setSelectedZoneID={setSelectedCloudflareZoneID} dnsRecords={dnsRecords} editingRecord={editingDNSRecord} setEditingRecord={setEditingDNSRecord} onCreate={createCredential} onDelete={(id) => deleteCredential("cloudflare", id)} onLoadDNS={loadDNSRecords} onSaveDNS={saveDNSRecord} onDeleteDNS={deleteDNSRecord} />}
             {view === "accessControl" && <CredentialManager kind="basaltpass" rows={credentials.basaltpass} onCreate={createCredential} onDelete={deleteCredential} />}
             {["namespaces", "pods", "nodes", "ingresses", "services"].includes(view) && <RuntimeTable kind={view} rows={runtime[view] || []} nodeJoinCommand={nodeJoinCommand} onLoadNodeJoinCommand={loadNodeJoinCommand} onCreateNamespace={createNamespace} onPatchNamespace={patchNamespaceLabels} onNamespaceDetail={loadNamespaceDetail} onDeleteNamespace={deleteNamespace} onDeletePod={deletePod} onNodeDetail={loadNodeDetail} onPodLogs={loadPodLogs} onSaveService={saveService} onDeleteService={deleteService} onDetail={setRuntimeDetail} />}
@@ -1544,7 +1544,7 @@ function App() {
       </main>
       {editingProject && <ProjectModal project={editingProject} onClose={() => setEditingProject(null)} onSubmit={updateProject} />}
       {deletingProject && <DeleteProjectModal project={deletingProject} busy={loading} onClose={() => setDeletingProject(null)} onDelete={confirmDeleteProject} />}
-      {runtimeDetail && <RuntimeDetailModal detail={runtimeDetail} logs={runtimeLogs} logFollow={runtimeLogFollow} logStatus={runtimeLogStatus} selectedLogContainer={runtimeLogContainer} logTail={runtimeLogTail} logLoaded={runtimeLogLoaded} nodeHealth={nodeHealth} onLoadNodeHealth={loadNodeHealth} onSaveNodeLabels={saveNodeLabels} onSaveNodeTaints={saveNodeTaints} onCordonNode={cordonNode} onDrainNode={drainNode} onDeleteNode={deleteNode} onSaveResourceQuota={saveResourceQuota} onDeleteResourceQuota={deleteResourceQuota} onSaveLimitRange={saveLimitRange} onDeleteLimitRange={deleteLimitRange} onSaveNamespacePermission={saveNamespacePermission} onDeleteNamespacePermission={deleteNamespacePermission} onSaveNamespaceIsolation={saveNamespaceIsolation} onSelectLogContainer={setRuntimeLogContainer} onSetLogTail={setRuntimeLogTail} onLoadContainerLogs={loadRuntimeContainerLogs} onFollowPodLogs={startRuntimeLogFollow} onStopPodLogs={stopRuntimeLogFollow} onClose={() => { stopRuntimeLogFollow(); setRuntimeDetail(null); setRuntimeLogs(""); setRuntimeLogContainer(""); setRuntimeLogLoaded(false); setRuntimeLogStatus(""); setNodeHealth(null); }} onSaveService={saveService} onPatchNamespace={patchNamespaceLabels} />}
+      {runtimeDetail && <RuntimeDetailDrawer detail={runtimeDetail} logs={runtimeLogs} logFollow={runtimeLogFollow} logStatus={runtimeLogStatus} selectedLogContainer={runtimeLogContainer} logTail={runtimeLogTail} logLoaded={runtimeLogLoaded} nodeHealth={nodeHealth} onLoadNodeHealth={loadNodeHealth} onSaveNodeLabels={saveNodeLabels} onSaveNodeTaints={saveNodeTaints} onCordonNode={cordonNode} onDrainNode={drainNode} onDeleteNode={deleteNode} onSaveResourceQuota={saveResourceQuota} onDeleteResourceQuota={deleteResourceQuota} onSaveLimitRange={saveLimitRange} onDeleteLimitRange={deleteLimitRange} onSaveNamespacePermission={saveNamespacePermission} onDeleteNamespacePermission={deleteNamespacePermission} onSaveNamespaceIsolation={saveNamespaceIsolation} onSelectLogContainer={setRuntimeLogContainer} onSetLogTail={setRuntimeLogTail} onLoadContainerLogs={loadRuntimeContainerLogs} onFollowPodLogs={startRuntimeLogFollow} onStopPodLogs={stopRuntimeLogFollow} onClose={() => { stopRuntimeLogFollow(); setRuntimeDetail(null); setRuntimeLogs(""); setRuntimeLogContainer(""); setRuntimeLogLoaded(false); setRuntimeLogStatus(""); setNodeHealth(null); }} onSaveService={saveService} onPatchNamespace={patchNamespaceLabels} />}
     </div>
   );
 }
@@ -3294,9 +3294,17 @@ function DomainsView({domains}) {
   );
 }
 
-function NetworkingView({network, refresh, onSaveService, onDeleteService, onSaveIngress, onDeleteIngress, onSaveNetworkPolicy, onDeleteNetworkPolicy}) {
+function NetworkingView({network, refresh, onSaveService, onDeleteService, onSaveIngress, onDeleteIngress, onSaveNetworkPolicy, onDeleteNetworkPolicy, onDetail}) {
+  const [activeTab, setActiveTab] = useState("services");
   const data = network || {services: [], ingresses: [], endpoints: [], network_policies: [], access: [], controllers: {}};
   const controllers = data.controllers || {};
+  const tabs = [
+    {id: "services", label: "Services", icon: Database, count: data.services.length},
+    {id: "ingress", label: "Ingress & TLS", icon: Network, count: data.ingresses.length},
+    {id: "policies", label: "NetworkPolicy", icon: Lock, count: data.network_policies.length},
+    {id: "access", label: "Access addresses", icon: Globe2, count: data.access.length},
+    {id: "endpoints", label: "Endpoints", icon: Layers3, count: data.endpoints.length},
+  ];
   return (
     <div className="stack network-page">
       <section className="panel network-overview">
@@ -3322,41 +3330,76 @@ function NetworkingView({network, refresh, onSaveService, onDeleteService, onSav
         </div>
       </section>
 
-      <section className="panel">
-        <h2><Database size={18} /> Service, LoadBalancer and NodePort</h2>
-        <ServiceForm onSubmit={(event) => onSaveService(event)} />
-        <SimpleTable rows={data.services} columns={["namespace", "name", "type", "cluster_ip", "external_ip", "ports"]} actions={(row) => <button className="danger-button" onClick={() => onDeleteService(row)}><Trash2 size={15} /></button>} />
-      </section>
+      <section className="panel network-tabs-panel">
+        <div className="network-tabs" role="tablist" aria-label="Networking resources">
+          {tabs.map((tab) => {
+            const Icon = tab.icon;
+            return (
+              <button key={tab.id} type="button" role="tab" aria-selected={activeTab === tab.id} className={activeTab === tab.id ? "network-tab active" : "network-tab"} onClick={() => setActiveTab(tab.id)}>
+                <Icon size={15} />
+                <span>{tab.label}</span>
+                <b>{tab.count}</b>
+              </button>
+            );
+          })}
+        </div>
 
-      <section className="panel">
-        <h2><Network size={18} /> Ingress, domain and TLS binding</h2>
-        <IngressForm onSubmit={(event) => onSaveIngress(event)} />
-        <SimpleTable rows={data.ingresses} columns={["namespace", "name", "class", "hosts", "services", "tls", "address"]} actions={(row) => <button className="danger-button" onClick={() => onDeleteIngress(row)}><Trash2 size={15} /></button>} />
-      </section>
-
-      <section className="panel">
-        <h2><Lock size={18} /> NetworkPolicy</h2>
-        <NetworkPolicyForm onSubmit={(event) => onSaveNetworkPolicy(event)} />
-        <SimpleTable rows={data.network_policies} columns={["namespace", "name", "pod_selector", "policy_types", "ingress_rules", "egress_rules"]} actions={(row) => <button className="danger-button" onClick={() => onDeleteNetworkPolicy(row)}><Trash2 size={15} /></button>} />
-      </section>
-
-      <section className="dashboard-grid">
-        <div className="panel dashboard-panel">
-          <h2><Globe2 size={18} /> Service access addresses</h2>
-          <div className="mini-table">
-            {(data.access || []).map((item) => (
-              <div key={`${item.namespace}/${item.service}/${item.ingress || item.type}`}>
-                <span>{item.namespace}/{item.service}<small>{[item.type, item.class, item.tls ? "TLS" : "", item.load_balancer].filter(Boolean).join(" · ")}</small></span>
-                <b>{[...(item.urls || []), ...(item.node_ports || []).map((port) => `NodePort ${port}`)].join(" · ") || "-"}</b>
-              </div>
-            ))}
-            {(data.access || []).length === 0 && <div className="empty">No service access addresses reported.</div>}
+        {activeTab === "services" && (
+          <div className="network-tab-panel">
+            <h2><Database size={18} /> Service, LoadBalancer and NodePort</h2>
+            <ServiceForm onSubmit={(event) => onSaveService(event)} />
+            <SimpleTable rows={data.services} columns={["namespace", "name", "type", "cluster_ip", "external_ip", "ports"]} actions={(row) => (
+              <>
+                <button onClick={() => onDetail({kind: "services", row})}>Details</button>
+                <button className="danger-button" onClick={() => onDeleteService(row)}><Trash2 size={15} /></button>
+              </>
+            )} />
           </div>
-        </div>
-        <div className="panel dashboard-panel">
-          <h2><Layers3 size={18} /> Endpoints</h2>
-          <SimpleTable rows={data.endpoints || []} columns={["namespace", "name", "addresses", "ports"]} compact />
-        </div>
+        )}
+
+        {activeTab === "ingress" && (
+          <div className="network-tab-panel">
+            <h2><Network size={18} /> Ingress, domain and TLS binding</h2>
+            <IngressForm onSubmit={(event) => onSaveIngress(event)} />
+            <SimpleTable rows={data.ingresses} columns={["namespace", "name", "class", "hosts", "services", "tls", "address"]} actions={(row) => (
+              <>
+                <button onClick={() => onDetail({kind: "ingresses", row})}>Details</button>
+                <button className="danger-button" onClick={() => onDeleteIngress(row)}><Trash2 size={15} /></button>
+              </>
+            )} />
+          </div>
+        )}
+
+        {activeTab === "policies" && (
+          <div className="network-tab-panel">
+            <h2><Lock size={18} /> NetworkPolicy</h2>
+            <NetworkPolicyForm onSubmit={(event) => onSaveNetworkPolicy(event)} />
+            <SimpleTable rows={data.network_policies} columns={["namespace", "name", "pod_selector", "policy_types", "ingress_rules", "egress_rules"]} actions={(row) => (
+              <>
+                <button onClick={() => onDetail({kind: "network-policy", row})}>Details</button>
+                <button className="danger-button" onClick={() => onDeleteNetworkPolicy(row)}><Trash2 size={15} /></button>
+              </>
+            )} />
+          </div>
+        )}
+
+        {activeTab === "access" && (
+          <div className="network-tab-panel">
+          <h2><Globe2 size={18} /> Service access addresses</h2>
+          <SimpleTable
+            rows={data.access || []}
+            columns={["namespace", "service", "type", "class", "urls", "node_ports", "load_balancer"]}
+            actions={(row) => <button onClick={() => onDetail({kind: "service-access", row})}>Details</button>}
+          />
+          </div>
+        )}
+
+        {activeTab === "endpoints" && (
+          <div className="network-tab-panel">
+            <h2><Layers3 size={18} /> Endpoints</h2>
+            <SimpleTable rows={data.endpoints || []} columns={["namespace", "name", "addresses", "ports"]} actions={(row) => <button onClick={() => onDetail({kind: "endpoints", row})}>Details</button>} compact />
+          </div>
+        )}
       </section>
     </div>
   );
@@ -3493,12 +3536,19 @@ function NodeJoinPanel({command, onLoad}) {
   );
 }
 
-function RuntimeDetailModal({detail, logs, logFollow, logStatus, selectedLogContainer, logTail, logLoaded, nodeHealth, onLoadNodeHealth, onSaveNodeLabels, onSaveNodeTaints, onCordonNode, onDrainNode, onDeleteNode, onSaveResourceQuota, onDeleteResourceQuota, onSaveLimitRange, onDeleteLimitRange, onSaveNamespacePermission, onDeleteNamespacePermission, onSaveNamespaceIsolation, onSelectLogContainer, onSetLogTail, onLoadContainerLogs, onFollowPodLogs, onStopPodLogs, onClose, onSaveService, onPatchNamespace}) {
+function RuntimeDetailDrawer({detail, logs, logFollow, logStatus, selectedLogContainer, logTail, logLoaded, nodeHealth, onLoadNodeHealth, onSaveNodeLabels, onSaveNodeTaints, onCordonNode, onDrainNode, onDeleteNode, onSaveResourceQuota, onDeleteResourceQuota, onSaveLimitRange, onDeleteLimitRange, onSaveNamespacePermission, onDeleteNamespacePermission, onSaveNamespaceIsolation, onSelectLogContainer, onSetLogTail, onLoadContainerLogs, onFollowPodLogs, onStopPodLogs, onClose, onSaveService, onPatchNamespace}) {
   const row = detail.row || {};
+  const title = `${detailTitle(detail.kind)} · ${row.namespace ? `${row.namespace}/` : ""}${row.name || row.summary?.name || ""}`;
   return (
-    <div className="modal-backdrop">
-      <div className="modal wide-modal">
-        <h2>{detail.kind} · {row.namespace ? `${row.namespace}/` : ""}{row.name}</h2>
+    <div className="side-drawer-backdrop" onClick={onClose}>
+      <aside className="side-drawer runtime-detail-drawer" onClick={(event) => event.stopPropagation()}>
+        <div className="side-drawer-head">
+          <div>
+            <h2>{title}</h2>
+            <p>{detail.loading ? "Loading live details..." : detail.error || "Live Kubernetes resource detail"}</p>
+          </div>
+          <button type="button" className="icon-button" aria-label="Close" onClick={onClose}><X size={16} /></button>
+        </div>
         {detail.kind === "service-edit" ? (
           <ServiceForm existing={row} onSubmit={(event) => onSaveService(event, row)} />
         ) : detail.kind === "namespaces" ? (
@@ -3531,10 +3581,24 @@ function RuntimeDetailModal({detail, logs, logFollow, logStatus, selectedLogCont
         ) : (
           <div className="detail-list">{Object.entries(row).map(([key, value]) => <span key={key}>{key.replaceAll("_", " ")} <b>{formatCell(value)}</b></span>)}</div>
         )}
-        <div className="modal-actions"><button type="button" onClick={onClose}>Close</button></div>
-      </div>
+      </aside>
     </div>
   );
+}
+
+function detailTitle(kind) {
+  return ({
+    pod: "Pod",
+    node: "Node",
+    services: "Service",
+    ingresses: "Ingress",
+    endpoints: "Endpoints",
+    namespaces: "Namespace",
+    "namespace-detail": "Namespace",
+    "network-policy": "NetworkPolicy",
+    "service-access": "Service access",
+    "service-edit": "Service",
+  }[kind] || kind);
 }
 
 function ContainerLogViewer({pod, logs, logFollow, logStatus, selectedContainer, tail, loaded, onSelectContainer, onSetTail, onLoad, onFollow, onStop}) {
