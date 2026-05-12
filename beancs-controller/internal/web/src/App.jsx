@@ -45,6 +45,7 @@ import {
   ShieldCheck,
   Trash2,
   Upload,
+  X,
 } from "lucide-react";
 import "./style.css";
 
@@ -126,6 +127,7 @@ const navSections = [
 function App() {
   const [config, setConfig] = useState(null);
   const [token, setToken] = useState(localStorage.getItem(tokenKey) || "");
+  const [basaltProfile, setBasaltProfile] = useState(null);
   const [view, setView] = useState("dashboard");
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
@@ -185,7 +187,7 @@ function App() {
   const registriesLoadingRef = useRef(false);
 
   const api = useMemo(() => makeAPI(token, logout), [token]);
-  const userProfile = useMemo(() => profileFromToken(token), [token]);
+  const userProfile = useMemo(() => profileFromBasalt(basaltProfile, token), [basaltProfile, token]);
   const filteredNavSections = useMemo(() => filterNavSections(navSections, sidebarQuery), [sidebarQuery]);
   const filteredOverview = useMemo(() => filterNavItems([navOverview], sidebarQuery), [sidebarQuery]);
 
@@ -194,7 +196,10 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (token) loadWorkspace();
+    if (token) {
+      loadWorkspace();
+      loadUserProfile();
+    }
   }, [token]);
 
   useEffect(() => {
@@ -336,6 +341,15 @@ function App() {
     }
   }
 
+  async function loadUserProfile() {
+    try {
+      const data = await api.get("/me");
+      setBasaltProfile(data || null);
+    } catch {
+      setBasaltProfile(null);
+    }
+  }
+
   async function loadDashboard() {
     if (dashboardLoadingRef.current) return;
     dashboardLoadingRef.current = true;
@@ -384,6 +398,7 @@ function App() {
   function logout() {
     localStorage.removeItem(tokenKey);
     setToken("");
+    setBasaltProfile(null);
     setRuntime(emptyRuntime);
     setProjects([]);
   }
@@ -406,8 +421,10 @@ function App() {
       await api.post(`/credentials/${kind}/`, body);
       event.currentTarget.reset();
       await loadWorkspace();
+      return true;
     } catch (err) {
       setError(err.message);
+      return false;
     }
   }
 
@@ -3115,28 +3132,73 @@ function GitHubView({credentials, onConnect, onRepos, onDelete, reposByCredentia
 }
 
 function CloudflareView({credentials, domains, selectedID, selectedZoneID, setSelectedID, setSelectedZoneID, dnsRecords, editingRecord, setEditingRecord, onCreate, onDelete, onLoadDNS, onSaveDNS, onDeleteDNS}) {
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const selected = credentials.find((cred) => String(cred.id) === String(selectedID));
   const selectedDomain = domains.find((domain) => String(domain.credential_id) === String(selectedID) && String(domain.zone_id) === String(selectedZoneID));
+  const accountDomains = selected ? domains.filter((domain) => String(domain.credential_id) === String(selected.id)) : [];
+  const selectAccount = (cred) => {
+    setSelectedID(String(cred.id));
+    setSelectedZoneID("");
+    setEditingRecord(null);
+  };
+  const selectDomain = (domain) => {
+    setSelectedID(String(domain.credential_id));
+    setSelectedZoneID(String(domain.zone_id));
+    setEditingRecord(null);
+    onLoadDNS(domain.credential_id, domain.zone_id);
+  };
   return (
-    <div className="stack">
-      <CredentialManager kind="cloudflare" rows={credentials} onCreate={onCreate} onDelete={(_, id) => onDelete(id)} />
+    <div className="stack cloudflare-page">
+      <section className="panel action-panel">
+        <div>
+          <h2><Cloud size={18} /> Cloudflare accounts</h2>
+          <p>Link a Cloudflare account once, then choose cached zones from that account.</p>
+        </div>
+        <button type="button" className="primary" onClick={() => setDrawerOpen(true)}><Plus size={15} /> Add account</button>
+      </section>
+
       <section className="panel">
-        <h2><Globe2 size={18} /> Zones and DNS tools</h2>
+        <div className="account-header">
+          <h2><KeyRound size={18} /> Existing accounts</h2>
+          <button type="button" className="danger-button" disabled={!selected} onClick={() => selected && onDelete(selected.id)}><Trash2 size={15} /> Delete selected</button>
+        </div>
+        <div className="cloudflare-account-grid">
+          {credentials.map((cred) => {
+            const count = domains.filter((domain) => String(domain.credential_id) === String(cred.id)).length;
+            return (
+              <button type="button" className={String(selectedID) === String(cred.id) ? "cloudflare-account-card active" : "cloudflare-account-card"} key={cred.id} onClick={() => selectAccount(cred)}>
+                <span className="account-mark"><Cloud size={18} /></span>
+                <div>
+                  <b>{cred.name}</b>
+                  <small>{cred.account_id || "No account id"} · {count} domain{count === 1 ? "" : "s"}</small>
+                </div>
+                <em>{cred.is_active ? "Active" : "Inactive"}</em>
+              </button>
+            );
+          })}
+          {credentials.length === 0 && <div className="empty">No Cloudflare accounts linked yet.</div>}
+        </div>
+      </section>
+
+      <section className="panel">
+        <h2><Globe2 size={18} /> {selected ? `${selected.name} domains` : "Account domains"}</h2>
         <div className="domain-grid">
-          {domains.map((domain) => (
-            <button type="button" className={String(selectedID) === String(domain.credential_id) && String(selectedZoneID) === String(domain.zone_id) ? "domain-tile active" : "domain-tile"} key={`${domain.credential_id}-${domain.zone_id}`} onClick={() => { setSelectedID(String(domain.credential_id)); setSelectedZoneID(String(domain.zone_id)); onLoadDNS(domain.credential_id, domain.zone_id); }}>
+          {accountDomains.map((domain) => (
+            <button type="button" className={String(selectedZoneID) === String(domain.zone_id) ? "domain-tile active" : "domain-tile"} key={`${domain.credential_id}-${domain.zone_id}`} onClick={() => selectDomain(domain)}>
               <Globe2 size={20} />
               <div>
                 <b>{domain.domain}</b>
-                <span>{domain.credential}</span>
+                <span>{domain.status || "cached zone"}</span>
                 <small>{domain.zone_id}</small>
               </div>
               <em>{domain.active ? "Active" : "Inactive"}</em>
             </button>
           ))}
-          {domains.length === 0 && <div className="empty">No Cloudflare domains linked yet.</div>}
+          {!selected && <div className="empty">Choose a Cloudflare account to view its domains.</div>}
+          {selected && accountDomains.length === 0 && <div className="empty">No cached domains for this account.</div>}
         </div>
       </section>
+
       <section className="panel">
         <div className="account-header">
           <h2><Network size={18} /> DNS records {selectedDomain ? `for ${selectedDomain.domain}` : selected ? `for ${selected.name}` : ""}</h2>
@@ -3163,6 +3225,49 @@ function CloudflareView({credentials, domains, selectedID, selectedZoneID, setSe
           {dnsRecords.length === 0 && <div className="empty">{selectedID && selectedZoneID ? "No DNS records loaded." : "Choose a zone to view DNS records."}</div>}
         </div>
       </section>
+      {drawerOpen && (
+        <CloudflareAccountDrawer
+          onClose={() => setDrawerOpen(false)}
+          onCreate={async (event) => {
+            const ok = await onCreate("cloudflare", event);
+            if (ok) setDrawerOpen(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function CloudflareAccountDrawer({onClose, onCreate}) {
+  return (
+    <div className="side-drawer-backdrop" onClick={onClose}>
+      <aside className="side-drawer" onClick={(event) => event.stopPropagation()}>
+        <div className="side-drawer-head">
+          <div>
+            <h2><Cloud size={18} /> Add Cloudflare account</h2>
+            <p>Use an API token with zone read access so BeanCS can cache available domains.</p>
+          </div>
+          <button type="button" className="icon-button" aria-label="Close" onClick={onClose}><X size={16} /></button>
+        </div>
+        <form className="drawer-form" onSubmit={onCreate}>
+          <label>
+            Account name
+            <input name="name" placeholder="Production Cloudflare" required autoFocus />
+          </label>
+          <label>
+            Account ID
+            <input name="account_id" placeholder="Optional, limits zone discovery to this account" />
+          </label>
+          <label>
+            API token
+            <input name="api_token" type="password" placeholder="Cloudflare API token" required autoComplete="new-password" />
+          </label>
+          <div className="drawer-actions">
+            <button type="button" onClick={onClose}>Cancel</button>
+            <button className="primary" type="submit"><KeyRound size={15} /> Create link</button>
+          </div>
+        </form>
+      </aside>
     </div>
   );
 }
@@ -3931,6 +4036,40 @@ function profileFromToken(token) {
   } catch {
     return fallback;
   }
+}
+
+function profileFromBasalt(profile, token) {
+  const fallback = profileFromToken(token);
+  if (!profile) return fallback;
+  const pick = (values) => values.map((value) => String(value || "").trim()).find(Boolean) || "";
+  const name = pick([
+    profile.name,
+    profile.nickname,
+    profile.preferred_username,
+    profile.username,
+    profile.email,
+    profile.sub,
+  ]) || fallback.name;
+  const detail = pick([
+    profile.email,
+    profile.phone_number,
+    profile.tenant_code,
+    profile.tenant_id,
+  ].filter((value) => String(value || "").trim() && String(value || "").trim() !== name)) || fallback.detail;
+  const avatar = pick([
+    profile.picture,
+    profile.avatar_url,
+    profile.avatar,
+    profile.image,
+    profile.image_url,
+  ]) || fallback.avatar;
+  return {
+    ...fallback,
+    name,
+    detail,
+    avatar,
+    initial: String(name).trim().slice(0, 1).toUpperCase() || fallback.initial,
+  };
 }
 
 function base64URLDecode(value) {

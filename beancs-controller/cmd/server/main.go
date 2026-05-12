@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"mime"
@@ -197,6 +198,9 @@ func registerAPI(api fiber.Router, cfg *config.Config, db *gorm.DB, registry *ba
 	handler.NewDeploymentHandler(db, deploymentSvc, v).Register(secured)
 	handler.NewProcessHandler(db, processSvc).Register(secured)
 	handler.NewRuntimeHandler(db, k8sManager, v).Register(secured)
+	secured.Get("/me", func(c *fiber.Ctx) error {
+		return browserUserInfo(c, cfg)
+	})
 	secured.Use("/admin", middleware.RequireScope("beancs.admin"))
 	handler.NewAdminHandler(db, k8sManager, v).Register(secured)
 }
@@ -330,4 +334,44 @@ func exchangeBrowserToken(c *fiber.Ctx, cfg *config.Config) error {
 	}
 	c.Set("Content-Type", contentType)
 	return c.Status(resp.StatusCode).Send(body)
+}
+
+func browserUserInfo(c *fiber.Ctx, cfg *config.Config) error {
+	token := bearerToken(c.Get("Authorization"))
+	if token == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "missing token"})
+	}
+	httpReq, err := http.NewRequestWithContext(c.UserContext(), http.MethodGet, strings.TrimRight(cfg.BPBrowserAuthURL, "/")+"/oauth/userinfo", nil)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid auth configuration"})
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "auth userinfo request failed"})
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "auth userinfo response failed"})
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return c.Status(resp.StatusCode).Send(body)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(body, &out); err != nil {
+		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "auth userinfo returned invalid JSON"})
+	}
+	out["tenant_id"] = middleware.TenantID(c)
+	out["tenant_code"] = middleware.TenantCode(c)
+	out["auth_method"] = "basaltpass"
+	return c.JSON(out)
+}
+
+func bearerToken(header string) string {
+	parts := strings.Fields(header)
+	if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
+		return parts[1]
+	}
+	return ""
 }
