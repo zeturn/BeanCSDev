@@ -7,6 +7,8 @@ import {
   Boxes,
   Box,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   Cloud,
   Coffee,
   Code2,
@@ -238,7 +240,7 @@ function App() {
         loadProcesses();
         if (activeProgressProjectID) loadProjectProgress();
       }
-    }, 10000);
+    }, 5000);
     return () => clearInterval(timer);
   }, [token, view, activeProgressProjectID, activeProcessID, projects.length, projectLogFollow]);
 
@@ -897,7 +899,6 @@ function App() {
   }
 
   async function deleteNode(nodeName) {
-    if (!confirm(`Delete node ${nodeName}? Make sure it has been drained and removed from the K3s host first.`)) return;
     try {
       await api.delete(`/runtime/nodes/${encodeURIComponent(nodeName)}`);
       setRuntimeDetail(null);
@@ -2027,6 +2028,7 @@ function DeployView({credentials, domains, namespaces, selectedCredential, setSe
 
 function ProgressView({projects, processes, activeProcessID, setActiveProcessID, activeProjectID, setActiveProjectID, progress, installProgress, refresh, refreshList, logFollow, liveLogs, logStatus, onStartLogFollow, onStopLogFollow}) {
   const [activeJob, setActiveJob] = useState("runtime");
+  const [expandedSteps, setExpandedSteps] = useState({});
   const [logQuery, setLogQuery] = useState("");
   const selectedProcess = (processes || []).find((process) => String(process.id) === String(activeProcessID));
   const pods = progress?.pods || [];
@@ -2039,9 +2041,20 @@ function ProgressView({projects, processes, activeProcessID, setActiveProcessID,
   const readyReplicas = progress?.deployment?.ready_replicas ?? 0;
   const logs = logFollow ? liveLogs : progress?.logs;
   const jobs = selectedProcess ? processJobsFromRecord(selectedProcess) : progressJobs(progress, scopedInstallProgress, readyPods, pods, deployments, events);
-  const selectedJob = jobs.find((job) => job.id === activeJob) || jobs[0];
+  const detailTabID = activeJob.startsWith("detail:") ? activeJob.replace("detail:", "") : "";
+  const selectedJob = detailTabID ? null : jobs.find((job) => job.id === activeJob) || jobs[0];
   const selectedJobLogs = selectedProcess && selectedJob ? selectedJob.steps.map((step) => step.log || "").join("\n") : "";
-  const visibleLogs = filterLogLines(selectedJobLogs || logs || "", logQuery);
+  const visibleLogs = filterLogLines(selectedJobLogs || "", logQuery);
+  const visibleRuntimeLogs = filterLogLines(logs || "", logQuery);
+  const detailTabs = [
+    {id: "run", label: "Run details", icon: Activity},
+    {id: "install", label: "Install log", icon: ScrollText},
+    {id: "deployments", label: "Deployment records", icon: Rocket},
+    {id: "events", label: "Kubernetes events", icon: AlertTriangle},
+    {id: "runtime", label: "Runtime logs", icon: FileText},
+  ];
+  const selectedDetailTab = detailTabs.find((tab) => tab.id === detailTabID);
+  const toggleStep = (key) => setExpandedSteps((current) => ({...current, [key]: !current[key]}));
   if (!activeProcessID && !activeProjectID && !scopedInstallProgress) {
     return <ProgressListView processes={processes || []} projects={projects} onSelectProcess={(process) => {
       setActiveProcessID(String(process.id));
@@ -2083,9 +2096,11 @@ function ProgressView({projects, processes, activeProcessID, setActiveProcessID,
             </button>
           ))}
           <div className="process-nav-heading">Run details</div>
-          <div className="process-run-detail"><span>Status</span><b>{selectedProcess?.status || "-"}</b></div>
-          <div className="process-run-detail"><span>Jobs</span><b>{jobs.length}</b></div>
-          <div className="process-run-detail"><span>Events</span><b>{events.length}</b></div>
+          {detailTabs.map(({id, label, icon: Icon}) => (
+            <button key={id} type="button" className={detailTabID === id ? "process-nav active" : "process-nav"} onClick={() => setActiveJob(`detail:${id}`)}>
+              <Icon size={15} /> {label}
+            </button>
+          ))}
         </aside>
 
         <section className="process-main">
@@ -2099,6 +2114,36 @@ function ProgressView({projects, processes, activeProcessID, setActiveProcessID,
               </div>
               {progress?.error && <p className="error-inline">{progress.error}</p>}
             </div>
+          ) : detailTabID ? (
+            <>
+              <div className="process-job-header">
+                <div>
+                  <h2>{selectedDetailTab?.label || "Run details"}</h2>
+                  <p>Process evidence and runtime signals for this run.</p>
+                </div>
+                <div className="process-log-tools">
+                  {(detailTabID === "runtime" || detailTabID === "install" || detailTabID === "events" || detailTabID === "deployments") && (
+                    <div className="process-search"><Search size={15} /> <input value={logQuery} onChange={(event) => setLogQuery(event.target.value)} placeholder="Search details" /></div>
+                  )}
+                </div>
+              </div>
+              <ProgressEvidence
+                activeTab={detailTabID}
+                detailQuery={logQuery}
+                progress={progress}
+                installProgress={scopedInstallProgress}
+                selectedProcess={selectedProcess}
+                jobs={jobs}
+                deployments={deployments}
+                events={events}
+                logs={visibleRuntimeLogs}
+                logFollow={logFollow}
+                logStatus={logStatus}
+                onRefresh={() => activeProjectID ? refresh() : refreshList()}
+                onStartLogFollow={() => progress?.project?.id && onStartLogFollow(progress.project.id)}
+                onStopLogFollow={onStopLogFollow}
+              />
+            </>
           ) : (
             <>
               <div className="process-job-header">
@@ -2113,15 +2158,20 @@ function ProgressView({projects, processes, activeProcessID, setActiveProcessID,
               </div>
 
               <div className="process-step-list">
-                {(selectedJob?.steps || []).map((step) => (
-                  <div className={step.expanded ? "process-step expanded" : "process-step"} key={step.label}>
+                {(selectedJob?.steps || []).map((step, index) => {
+                  const stepKey = `${selectedJob?.id || "job"}:${step.label}:${index}`;
+                  const isExpanded = expandedSteps[stepKey] ?? Boolean(step.expanded);
+                  return (
+                  <div className={isExpanded ? "process-step expanded" : "process-step"} key={stepKey}>
                     <div className="process-step-row">
-                      <span className="process-chevron">{step.expanded ? "⌄" : "›"}</span>
+                      <button type="button" className="process-step-toggle" aria-label={isExpanded ? "Collapse step" : "Expand step"} onClick={() => toggleStep(stepKey)}>
+                        {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                      </button>
                       <ProgressStatusIcon status={step.status} />
                       <span>{step.label}</span>
                       <small>{step.duration || ""}</small>
                     </div>
-                    {step.expanded && (
+                    {isExpanded && (
                       <div className="process-log-block">
                         {step.kind === "logs" && (
                           <div className="row-actions process-log-actions">
@@ -2134,20 +2184,8 @@ function ProgressView({projects, processes, activeProcessID, setActiveProcessID,
                       </div>
                     )}
                   </div>
-                ))}
+                );})}
               </div>
-              <ProgressEvidence
-                progress={progress}
-                installProgress={scopedInstallProgress}
-                deployments={deployments}
-                events={events}
-                logs={visibleLogs}
-                logFollow={logFollow}
-                logStatus={logStatus}
-                onRefresh={() => activeProjectID ? refresh() : refreshList()}
-                onStartLogFollow={() => progress?.project?.id && onStartLogFollow(progress.project.id)}
-                onStopLogFollow={onStopLogFollow}
-              />
             </>
           )}
         </section>
@@ -2180,7 +2218,7 @@ function ProgressListView({processes, projects, onSelectProcess, refresh}) {
   );
 }
 
-function ProgressEvidence({progress, installProgress, deployments, events, logs, logFollow, logStatus, onRefresh, onStartLogFollow, onStopLogFollow}) {
+function ProgressEvidence({activeTab, detailQuery, progress, installProgress, selectedProcess, jobs, deployments, events, logs, logFollow, logStatus, onRefresh, onStartLogFollow, onStopLogFollow}) {
   const installLogs = (installProgress?.logs || []).join("\n");
   const deploymentText = deployments.length
     ? deployments.slice(0, 12).map((deployment) => [
@@ -2200,21 +2238,50 @@ function ProgressEvidence({progress, installProgress, deployments, events, logs,
         event.message || "",
       ].filter(Boolean).join("\n")).join("\n\n")
     : "No Kubernetes events reported for this project.";
+  const runText = [
+    `process=${selectedProcess?.id ? `#${selectedProcess.id}` : "-"}`,
+    `title=${selectedProcess?.title || progress?.project?.display_name || progress?.project?.name || "-"}`,
+    `status=${selectedProcess?.status || progress?.deployment?.status || "-"}`,
+    `project=${selectedProcess?.project?.name || progress?.project?.name || "-"}`,
+    `namespace=${selectedProcess?.project?.namespace || progress?.project?.namespace || "-"}`,
+    `jobs=${jobs?.length || 0}`,
+    `deployments=${deployments.length}`,
+    `events=${events.length}`,
+    selectedProcess?.created_at ? `created=${formatTime(selectedProcess.created_at)}` : "",
+    selectedProcess?.updated_at ? `updated=${formatTime(selectedProcess.updated_at)}` : progress?.checked_at ? `checked=${formatTime(progress.checked_at)}` : "",
+  ].filter(Boolean).join("\n");
+  const filteredRunText = filterLogLines(runText, detailQuery);
+  const filteredInstallLogs = filterLogLines(installLogs || progress?.error || "", detailQuery);
+  const filteredDeploymentText = filterLogLines(deploymentText, detailQuery);
+  const filteredEventText = filterLogLines(eventText, detailQuery);
   return (
-    <div className="process-evidence-grid">
+    <div className="process-detail-panel">
+      {activeTab === "run" && (
+      <section className="process-evidence-card">
+        <h3>Run details</h3>
+        <pre>{filteredRunText || "No run details matched the search."}</pre>
+      </section>
+      )}
+      {activeTab === "install" && (
       <section className="process-evidence-card">
         <h3>Install log</h3>
-        <pre>{installLogs || progress?.error || "No active install log for this project."}</pre>
+        <pre>{filteredInstallLogs || "No active install log for this project."}</pre>
       </section>
+      )}
+      {activeTab === "deployments" && (
       <section className="process-evidence-card">
         <h3>Deployment records</h3>
-        <pre>{deploymentText}</pre>
+        <pre>{filteredDeploymentText || "No deployment records matched the search."}</pre>
       </section>
+      )}
+      {activeTab === "events" && (
       <section className="process-evidence-card">
         <h3>Kubernetes events</h3>
-        <pre>{eventText}</pre>
+        <pre>{filteredEventText || "No Kubernetes events matched the search."}</pre>
       </section>
-      <section className="process-evidence-card span-2">
+      )}
+      {activeTab === "runtime" && (
+      <section className="process-evidence-card">
         <div className="process-evidence-head">
           <h3>Runtime logs</h3>
           <div className="row-actions process-log-actions">
@@ -2225,6 +2292,7 @@ function ProgressEvidence({progress, installProgress, deployments, events, logs,
         {logStatus && <p className="log-status">{logStatus}</p>}
         <pre>{logs || "No container logs yet. If the workload has not created pods, Kubernetes events above are the source of truth."}</pre>
       </section>
+      )}
     </div>
   );
 }
@@ -2801,10 +2869,10 @@ function ProjectsView({projects, onEdit, onDelete, onScale, onRestart, onBuild, 
         <div className="tr head project-table-row"><span>Name</span><span>Repo</span><span>Route</span><span>Status</span><span>Actions</span></div>
         {visibleProjects.map((project) => (
           <div className="tr project-table-row" key={project.id}>
-            <span className="strong">{project.display_name || project.name}</span>
-            <span>{project.github_repo || project.image_reference || project.source_archive_name || project.build_source}</span>
-            <span>{project.domain || project.exposure_mode}</span>
-            <span>{project.status}</span>
+            <ExpandableCell className="strong" value={project.display_name || project.name} max={32} />
+            <ExpandableCell value={project.github_repo || project.image_reference || project.source_archive_name || project.build_source} max={42} />
+            <ExpandableCell value={project.domain || project.exposure_mode} max={36} />
+            <ExpandableCell value={project.status} max={24} />
             <span className="row-actions">
               <button onClick={() => onProgress(project)} title="Progress"><LoaderCircle size={15} /> Progress</button>
               <button onClick={() => onBuild(project)} title="Rebuild"><Play size={15} /> Rebuild</button>
@@ -2897,10 +2965,10 @@ function ContainerRegistriesView({presets, registries, images, onAddRegistry, on
           <div className="tr head"><span>名称</span><span>类型</span><span>API 根</span><span>鉴权</span><span /></div>
           {(registries || []).map((r) => (
             <div className="tr" key={r.id}>
-              <span className="strong">{r.name}</span>
-              <span>{r.kind}</span>
-              <span className="mono">{r.api_base}</span>
-              <span>{r.has_auth ? "已配置" : "匿名"}</span>
+              <ExpandableCell className="strong" value={r.name} max={30} />
+              <ExpandableCell value={r.kind} max={24} />
+              <ExpandableCell className="mono" value={r.api_base} max={42} />
+              <ExpandableCell value={r.has_auth ? "已配置" : "匿名"} max={24} />
               <span className="row-actions">
                 <button type="button" className="danger-button" onClick={() => onDeleteRegistry(r)}><Trash2 size={15} /> 删除</button>
               </span>
@@ -3071,11 +3139,11 @@ function APIKeysView({keys, createdKey, onDismissCreated, onCreate, onRevoke, on
           <div className="tr head"><span>Name</span><span>Prefix</span><span>Scopes</span><span>Last used</span><span>Expires</span><span>Actions</span></div>
           {keys.map((key) => (
             <div className="tr" key={key.id}>
-              <span className="strong">{key.name}</span>
-              <span>{key.prefix}</span>
-              <span>{(key.scopes || []).join(", ") || "-"}</span>
-              <span>{formatTime(key.last_used_at)}</span>
-              <span>{key.revoked_at ? `Revoked ${formatTime(key.revoked_at)}` : formatTime(key.expires_at)}</span>
+              <ExpandableCell className="strong" value={key.name} max={32} />
+              <ExpandableCell value={key.prefix} max={24} />
+              <ExpandableCell value={(key.scopes || []).join(", ") || "-"} max={38} />
+              <ExpandableCell value={formatTime(key.last_used_at)} max={28} />
+              <ExpandableCell value={key.revoked_at ? `Revoked ${formatTime(key.revoked_at)}` : formatTime(key.expires_at)} max={32} />
               <span className="row-actions">
                 <button className="danger-button" disabled={Boolean(key.revoked_at)} onClick={() => onRevoke(key)}><Trash2 size={15} /> Revoke</button>
               </span>
@@ -3218,7 +3286,7 @@ function CloudflareView({credentials, domains, selectedID, selectedZoneID, setSe
           <div className="tr head"><span>Type</span><span>Name</span><span>Content</span><span>TTL</span><span>Proxy</span><span>Actions</span></div>
           {dnsRecords.map((record) => (
             <div className="tr" key={record.id}>
-              <span>{record.type}</span><span>{record.name}</span><span>{record.content}</span><span>{record.ttl}</span><span>{record.proxied ? "Yes" : "No"}</span>
+              <ExpandableCell value={record.type} max={12} /><ExpandableCell value={record.name} max={36} /><ExpandableCell value={record.content} max={42} /><ExpandableCell value={record.ttl} max={12} /><ExpandableCell value={record.proxied ? "Yes" : "No"} max={12} />
               <span className="row-actions"><button onClick={() => setEditingRecord(record)}>Edit</button><button className="danger-button" onClick={() => onDeleteDNS(record)}><Trash2 size={15} /></button></span>
             </div>
           ))}
@@ -3443,6 +3511,20 @@ function NetworkPolicyForm({onSubmit}) {
   );
 }
 
+function ExpandableCell({value, className = "", max = 36}) {
+  const [expanded, setExpanded] = useState(false);
+  const text = formatCell(value);
+  const isLong = text.length > max;
+  if (!isLong) {
+    return <span className={className}>{text}</span>;
+  }
+  return (
+    <button type="button" className={`expandable-cell ${expanded ? "expanded" : ""} ${className}`.trim()} title={expanded ? "Collapse value" : text} onClick={() => setExpanded((current) => !current)}>
+      {expanded ? text : truncateMiddle(text, max)}
+    </button>
+  );
+}
+
 function SimpleTable({rows, columns, actions, compact = false}) {
   return (
     <div className={compact ? "table compact-table" : "table network-table"}>
@@ -3452,9 +3534,7 @@ function SimpleTable({rows, columns, actions, compact = false}) {
           {columns.map((column) => {
             const value = formatCell(row[column]);
             return (
-              <span key={column} className="cell-truncate" title={value}>
-                {value}
-              </span>
+              <ExpandableCell key={column} value={value} max={36} />
             );
           })}
           {actions && <span className="row-actions">{actions(row)}</span>}
@@ -3494,9 +3574,7 @@ function RuntimeTable({kind, rows, nodeJoinCommand, onLoadNodeJoinCommand, onCre
               {keys.map((key) => {
                 const value = formatCell(row[key]);
                 return (
-                  <span key={key} className="cell-truncate" title={value}>
-                    {value}
-                  </span>
+                  <ExpandableCell key={key} value={value} max={36} />
                 );
               })}
               <span className="row-actions">
@@ -3652,6 +3730,8 @@ function podContainers(pod) {
 }
 
 function NodeDetailView({detail, health, onLoadHealth, onSaveLabels, onSaveTaints, onCordon, onDrain, onDelete}) {
+  const [deleteStep, setDeleteStep] = useState("idle");
+  const [deleteName, setDeleteName] = useState("");
   const row = detail.row || {};
   const summary = row.summary || row;
   const usage = row.usage || {};
@@ -3660,6 +3740,7 @@ function NodeDetailView({detail, health, onLoadHealth, onSaveLabels, onSaveTaint
   const pods = row.pods || [];
   const conditions = row.conditions || [];
   const nodeName = summary.name || row.name;
+  const canConfirmDelete = Boolean(nodeName) && deleteName.trim() === nodeName;
   return (
     <div className="node-detail">
       {detail.loading && <p className="muted">Loading live node status...</p>}
@@ -3670,7 +3751,7 @@ function NodeDetailView({detail, health, onLoadHealth, onSaveLabels, onSaveTaint
           <button onClick={() => onCordon(nodeName, false)}>Cordon</button>
           <button onClick={() => onCordon(nodeName, true)}>Uncordon</button>
           <button onClick={() => onDrain(nodeName, {force: false, ignore_daemonsets: true, delete_emptydir_data: false, grace_period_seconds: 30})}>Drain safe</button>
-          <button className="danger-button" onClick={() => onDelete(nodeName)}><Trash2 size={15} /> Delete node</button>
+          <button className="danger-button" disabled={!nodeName} onClick={() => { setDeleteStep("warning"); setDeleteName(""); }}><Trash2 size={15} /> Delete node</button>
         </div>
         {health && (
           <div className={health.healthy ? "health-card good" : "health-card warning"}>
@@ -3680,6 +3761,39 @@ function NodeDetailView({detail, health, onLoadHealth, onSaveLabels, onSaveTaint
           </div>
         )}
       </section>
+      {deleteStep !== "idle" && (
+        <section className="node-section destructive-flow">
+          <h3><AlertTriangle size={15} /> Dangerous node deletion</h3>
+          {deleteStep === "warning" && (
+            <>
+              <p>Deleting a node removes it from Kubernetes cluster state. Make sure workloads are drained and the machine is intentionally removed or ready to rejoin.</p>
+              <div className="row-actions">
+                <button type="button" onClick={() => setDeleteStep("name")}>Continue</button>
+                <button type="button" onClick={() => setDeleteStep("idle")}>Cancel</button>
+              </div>
+            </>
+          )}
+          {deleteStep === "name" && (
+            <>
+              <p>Type the exact machine name to continue.</p>
+              <input value={deleteName} onChange={(event) => setDeleteName(event.target.value)} placeholder={nodeName} />
+              <div className="row-actions">
+                <button type="button" disabled={!canConfirmDelete} onClick={() => setDeleteStep("final")}>Continue</button>
+                <button type="button" onClick={() => setDeleteStep("idle")}>Cancel</button>
+              </div>
+            </>
+          )}
+          {deleteStep === "final" && (
+            <>
+              <p><b>Final warning.</b> This action deletes node <span className="mono">{nodeName}</span> from the cluster API. This is the last confirmation step.</p>
+              <div className="row-actions">
+                <button type="button" className="danger-button filled" onClick={() => onDelete(nodeName)}><Trash2 size={15} /> Delete {nodeName}</button>
+                <button type="button" onClick={() => setDeleteStep("idle")}>Cancel</button>
+              </div>
+            </>
+          )}
+        </section>
+      )}
       <div className="node-status-grid">
         <div className="runtime-summary">
           <strong>{summary.status || "-"}</strong>
@@ -3904,7 +4018,7 @@ function CredentialManager({kind, rows, onCreate, onDelete}) {
           <div className="tr head">{columns.map((column) => <span key={column}>{column.replaceAll("_", " ")}</span>)}<span>Actions</span></div>
           {rows.map((row) => (
             <div className="tr" key={row.id}>
-              {columns.map((column) => <span key={column}>{row[column] || "-"}</span>)}
+              {columns.map((column) => <ExpandableCell key={column} value={row[column] || "-"} max={34} />)}
               <span><button onClick={() => onDelete(kind, row.id)}><Trash2 size={15} /></button></span>
             </div>
           ))}
@@ -4337,7 +4451,9 @@ function deploymentShortID(name, fallback) {
 function truncateMiddle(value, max = 28) {
   const text = String(value || "-");
   if (text.length <= max) return text;
-  return `${text.slice(0, Math.max(8, max - 12))}...`;
+  const head = Math.max(8, Math.ceil((max - 3) * 0.58));
+  const tail = Math.max(6, max - 3 - head);
+  return `${text.slice(0, head)}...${text.slice(-tail)}`;
 }
 
 function formatBytes(value) {

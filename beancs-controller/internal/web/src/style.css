@@ -79,6 +79,12 @@ button:disabled {
   color: #ffffff;
 }
 
+.danger-button.filled:hover {
+  background: #991b1b;
+  border-color: #991b1b;
+  color: #ffffff;
+}
+
 button.ghost,
 .ghost {
   background: transparent;
@@ -1028,9 +1034,12 @@ button.domain-tile {
   display: grid;
   gap: 1px;
   overflow-x: auto;
+  overflow-y: hidden;
+  max-width: 100%;
 }
 
-.table .tr span {
+.table .tr span,
+.table .tr button.expandable-cell {
   min-width: 0;
 }
 
@@ -1050,6 +1059,33 @@ button.domain-tile {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.expandable-cell {
+  min-height: 0;
+  justify-content: flex-start;
+  border: 0;
+  border-radius: 4px;
+  padding: 2px 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.expandable-cell:hover {
+  background: #eef2f7;
+  color: #0f172a;
+}
+
+.expandable-cell.expanded {
+  align-items: flex-start;
+  overflow: visible;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .compact .tr {
@@ -1534,12 +1570,26 @@ button.domain-tile {
   border-radius: 7px;
 }
 
+.process-step-toggle {
+  min-height: 24px;
+  width: 24px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: #475569;
+}
+
+.process-step-toggle:hover {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+  color: #0f172a;
+}
+
 .process-step.expanded .process-step-row {
   background: #e2e8f0;
 }
 
-.process-step-row small,
-.process-chevron {
+.process-step-row small {
   color: #475569;
 }
 
@@ -1567,11 +1617,8 @@ button.domain-tile {
   padding: 24px;
 }
 
-.process-evidence-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  padding: 0 16px 24px;
+.process-detail-panel {
+  padding: 16px;
 }
 
 .process-evidence-card {
@@ -1579,10 +1626,6 @@ button.domain-tile {
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   background: #ffffff;
-}
-
-.process-evidence-card.span-2 {
-  grid-column: span 2;
 }
 
 .process-evidence-card h3 {
@@ -1611,7 +1654,7 @@ button.domain-tile {
 }
 
 .process-evidence-card pre {
-  max-height: 320px;
+  max-height: 560px;
   overflow: auto;
   margin: 0;
   padding: 12px 14px;
@@ -2131,6 +2174,30 @@ button.domain-tile {
   margin: 0;
   font-size: 14px;
   color: #334155;
+}
+
+.destructive-flow {
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  background: #fff7f7;
+  padding: 12px;
+}
+
+.destructive-flow h3 {
+  color: #991b1b;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.destructive-flow p {
+  color: #7f1d1d;
+  margin: 0;
+}
+
+.destructive-flow input {
+  max-width: 420px;
+  border-color: #fca5a5;
 }
 
 .resource-meter,
@@ -2907,7 +2974,9 @@ textarea {
 }
 
 .table {
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
+  max-width: 100%;
   border: 1px solid #e7e7e7;
   border-radius: 8px;
 }
@@ -3194,14 +3263,6 @@ textarea {
 
   .process-log-block {
     padding: 12px;
-  }
-
-  .process-evidence-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .process-evidence-card.span-2 {
-    grid-column: span 1;
   }
 
   .process-evidence-head {
