@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"time"
 
@@ -48,6 +50,7 @@ func (s *ProcessService) CreateDeploymentProcess(ctx context.Context, deployment
 		{Name: "github_dispatch", DisplayName: "Trigger GitHub workflow"},
 		{Name: "argocd", DisplayName: "Start Argo CD sync"},
 		{Name: "rollout", DisplayName: "Pull image and deploy"},
+		{Name: "connectivity", DisplayName: "Verify connectivity"},
 	}
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(process).Error; err != nil {
@@ -207,7 +210,10 @@ func (r *processRun) run() error {
 	if err := r.argocd(); err != nil {
 		return err
 	}
-	return r.rollout()
+	if err := r.rollout(); err != nil {
+		return err
+	}
+	return r.connectivity()
 }
 
 func (r *processRun) validate() error {
@@ -223,6 +229,22 @@ func (r *processRun) validate() error {
 		if err := r.prepareGitHub(job); err != nil {
 			return r.svc.failJob(r.ctx, job, err.Error())
 		}
+		if err := configureBeanCSRegistry(r.project, r.svc.build.cfg, r.project.TenantCode); err != nil {
+			return r.svc.failJob(r.ctx, job, err.Error())
+		}
+		if err := ensureHarborProject(r.ctx, r.svc.build.cfg, r.project.RegistryProject); err != nil {
+			return r.svc.failJob(r.ctx, job, err.Error())
+		}
+		if err := r.svc.db.WithContext(r.ctx).Model(r.project).Updates(map[string]any{
+			"image_reference":           r.project.ImageReference,
+			"registry_host":             r.project.RegistryHost,
+			"registry_project":          r.project.RegistryProject,
+			"registry_repository":       r.project.RegistryRepository,
+			"registry_image_reference":  r.project.RegistryImageReference,
+			"registry_pull_secret_name": r.project.RegistryPullSecretName,
+		}).Error; err != nil {
+			return r.svc.failJob(r.ctx, job, err.Error())
+		}
 		path, err := r.resolveDockerfilePath(job)
 		if err != nil {
 			return r.svc.failJob(r.ctx, job, err.Error())
@@ -235,12 +257,22 @@ func (r *processRun) validate() error {
 			return r.svc.failJob(r.ctx, job, err.Error())
 		}
 		r.svc.appendJobLog(r.ctx, job, "namespace exists or was created")
+		if r.project.BuildSource == model.BuildSourceGitHub && r.project.RegistryImageReference != "" {
+			creds, err := ensureHarborPullRobot(r.ctx, r.svc.build.cfg, r.project)
+			if err != nil {
+				return r.svc.failJob(r.ctx, job, err.Error())
+			}
+			if err := r.svc.k8s.UpsertRegistryPullSecretWithCredentials(r.ctx, r.project.Namespace, r.project.Name, r.project.RegistryPullSecretName, creds.Host, creds.Username, creds.Token); err != nil {
+				return r.svc.failJob(r.ctx, job, err.Error())
+			}
+			r.svc.appendJobLog(r.ctx, job, "registry pull secret reconciled")
+		}
 	}
 	r.image = strings.TrimSpace(r.deployment.ImageRef)
 	if r.image == "" {
 		r.image = strings.TrimSpace(r.deployment.Tag)
 	}
-	if r.image == "" && r.project.BuildSource == model.BuildSourceGitHub {
+	if r.project.BuildSource == model.BuildSourceGitHub {
 		r.image = buildImageReference(r.project)
 	}
 	if r.project.BuildSource != model.BuildSourceGitHub && r.image == "" {
@@ -259,6 +291,11 @@ func (r *processRun) network() error {
 		return err
 	}
 	if r.svc.k8s != nil {
+		result, err := r.svc.k8s.EnsureTraefikPodNetwork(r.ctx)
+		if err != nil {
+			return r.svc.failJob(r.ctx, job, "traefik reconcile failed: "+err.Error())
+		}
+		r.svc.appendJobLog(r.ctx, job, fmt.Sprintf("traefik=%s/%s updated=%t: %s", result.Namespace, result.Name, result.Updated, result.Message))
 		if err := r.svc.k8s.ApplyNetworkPoliciesForPorts(r.ctx, r.project.Namespace, r.project.Name, r.project.Ports); err != nil {
 			return r.svc.failJob(r.ctx, job, err.Error())
 		}
@@ -295,6 +332,23 @@ func (r *processRun) network() error {
 			r.svc.appendJobLog(r.ctx, job, "cloudflare_dns_record="+record.Name)
 		} else {
 			r.svc.appendJobLog(r.ctx, job, "cloudflare_dns_record already exists: "+existing.Name)
+			if existing.Proxied {
+				var cred model.CloudflareCredential
+				if err := r.svc.db.WithContext(r.ctx).First(&cred, *r.project.CloudflareCredentialID).Error; err != nil {
+					return r.svc.failJob(r.ctx, job, err.Error())
+				}
+				token, err := r.svc.credentials.DecryptCloudflareToken(cred)
+				if err != nil {
+					return r.svc.failJob(r.ctx, job, err.Error())
+				}
+				if err := r.svc.dns.EnsureRecordDNSOnly(r.ctx, token, cred, existing); err != nil {
+					return r.svc.failJob(r.ctx, job, "cloudflare_dns_record dns-only update failed: "+err.Error())
+				}
+				if err := r.svc.db.WithContext(r.ctx).Model(&existing).Update("proxied", false).Error; err != nil {
+					return r.svc.failJob(r.ctx, job, err.Error())
+				}
+				r.svc.appendJobLog(r.ctx, job, "cloudflare_dns_record set to DNS only: "+existing.Name)
+			}
 		}
 	}
 	r.svc.appendJobLog(r.ctx, job, "service, ingress, and network policies reconciled")
@@ -456,11 +510,93 @@ func (r *processRun) rollout() error {
 		resources = model.ResourcePresets["small"]
 	}
 	if r.svc.k8s != nil {
-		if err := r.svc.k8s.ApplyDeploymentPorts(r.ctx, r.project.Namespace, r.project.Name, r.image, r.project.Ports, int32(r.project.Replicas), resources.CPURequest, resources.CPULimit, resources.MemRequest, resources.MemLimit); err != nil {
+		if err := r.svc.k8s.ApplyDeploymentPortsWithPullSecret(r.ctx, r.project.Namespace, r.project.Name, r.image, r.project.Ports, int32(r.project.Replicas), resources.CPURequest, resources.CPULimit, resources.MemRequest, resources.MemLimit, r.project.RegistryPullSecretName); err != nil {
 			return r.svc.failJob(r.ctx, job, err.Error())
 		}
 		r.svc.appendJobLog(r.ctx, job, fmt.Sprintf("deployment applied %s/%s image=%s", r.project.Namespace, r.project.Name, r.image))
 	}
 	_ = r.svc.db.WithContext(r.ctx).Model(r.deployment).Updates(map[string]any{"status": "running", "image_ref": r.image, "failure_reason": ""}).Error
 	return r.svc.finishJob(r.ctx, job, model.ProcessStatusSucceeded, "")
+}
+
+func (r *processRun) connectivity() error {
+	job, err := r.svc.startJob(r.ctx, r.processID, "connectivity")
+	if err != nil {
+		return err
+	}
+	if r.svc.k8s != nil {
+		checks, err := r.svc.k8s.WaitForProjectConnectivity(r.ctx, r.project.Namespace, r.project.Name, r.project.Ports, 2*time.Minute)
+		for _, check := range checks {
+			r.svc.appendJobLog(r.ctx, job, fmt.Sprintf("%s %s %s: %s", check.Status, check.Name, check.Target, check.Message))
+		}
+		if err != nil {
+			_ = r.svc.db.WithContext(r.ctx).Model(r.deployment).Updates(map[string]any{"status": "failed", "failure_reason": truncateFailure(err.Error())}).Error
+			return r.svc.failJob(r.ctx, job, err.Error())
+		}
+	}
+	publicURL := r.publicRouteURL()
+	if publicURL != "" {
+		status, err := waitForPublicRoute(r.ctx, publicURL, 2*time.Minute)
+		r.svc.appendJobLog(r.ctx, job, fmt.Sprintf("public-route %s: %s", publicURL, status))
+		if err != nil {
+			_ = r.svc.db.WithContext(r.ctx).Model(r.deployment).Updates(map[string]any{"status": "failed", "failure_reason": truncateFailure(err.Error())}).Error
+			return r.svc.failJob(r.ctx, job, err.Error())
+		}
+	}
+	_ = r.svc.db.WithContext(r.ctx).Model(r.deployment).Updates(map[string]any{"status": "running", "failure_reason": ""}).Error
+	return r.svc.finishJob(r.ctx, job, model.ProcessStatusSucceeded, "")
+}
+
+func (r *processRun) publicRouteURL() string {
+	for _, port := range r.project.Ports {
+		if port.Exposure == model.ExposurePublic && strings.TrimSpace(port.Domain) != "" {
+			return "https://" + strings.TrimSpace(port.Domain) + "/"
+		}
+	}
+	return ""
+}
+
+func waitForPublicRoute(ctx context.Context, url string, timeout time.Duration) (string, error) {
+	deadline := time.Now().Add(timeout)
+	var lastStatus string
+	var lastErr error
+	for {
+		status, err := checkPublicRoute(ctx, url)
+		if err == nil {
+			return status, nil
+		}
+		lastStatus = status
+		lastErr = err
+		if time.Now().After(deadline) {
+			if lastStatus != "" {
+				return lastStatus, lastErr
+			}
+			return "", lastErr
+		}
+		select {
+		case <-ctx.Done():
+			return lastStatus, ctx.Err()
+		case <-time.After(5 * time.Second):
+		}
+	}
+}
+
+func checkPublicRoute(ctx context.Context, url string) (string, error) {
+	reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 BeanCS connectivity check")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
+		return resp.Status, fmt.Errorf("public route returned %s", resp.Status)
+	}
+	return resp.Status, nil
 }

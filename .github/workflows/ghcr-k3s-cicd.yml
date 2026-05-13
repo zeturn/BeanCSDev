@@ -166,8 +166,13 @@ jobs:
       - name: Deploy bundled Postgres
         shell: bash
         env:
+          BEANCS_DATABASE_URL: ${{ secrets.BEANCS_DATABASE_URL }}
           POSTGRES_PASSWORD: ${{ secrets.BEANCS_POSTGRES_PASSWORD }}
         run: |
+          if [ -n "${BEANCS_DATABASE_URL}" ]; then
+            echo "BEANCS_DATABASE_URL is set; skipping bundled Postgres deployment"
+            exit 0
+          fi
           if [ -z "${POSTGRES_PASSWORD}" ]; then
             echo "BEANCS_POSTGRES_PASSWORD secret is required"
             exit 1
@@ -220,6 +225,12 @@ jobs:
             --from-literal=BEANCS_GITHUB_APP_ID="${{ vars.BEANCS_GITHUB_APP_ID }}" \
             --from-literal=BEANCS_GITHUB_APP_SLUG="${{ vars.BEANCS_GITHUB_APP_SLUG }}" \
             --from-literal=BEANCS_GITHUB_APP_PRIVATE_KEY="${{ secrets.BEANCS_GITHUB_APP_PRIVATE_KEY }}" \
+            --from-literal=BEANCS_REGISTRY_HOST="${{ secrets.BEANCS_REGISTRY_HOST }}" \
+            --from-literal=BEANCS_REGISTRY_USERNAME="${{ secrets.BEANCS_REGISTRY_USERNAME }}" \
+            --from-literal=BEANCS_REGISTRY_TOKEN="${{ secrets.BEANCS_REGISTRY_TOKEN }}" \
+            --from-literal=BEANCS_REGISTRY_PULL_USERNAME="${{ secrets.BEANCS_REGISTRY_PULL_USERNAME }}" \
+            --from-literal=BEANCS_REGISTRY_PULL_TOKEN="${{ secrets.BEANCS_REGISTRY_PULL_TOKEN }}" \
+            --from-literal=BEANCS_REGISTRY_PULL_SECRET="${{ vars.BEANCS_REGISTRY_PULL_SECRET || 'beancs-registry-pull' }}" \
             --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Deploy controller manifests

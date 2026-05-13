@@ -66,7 +66,7 @@ func (s *CredentialService) CreateCloudflare(ctx context.Context, userID string,
 	if name == "" {
 		name = "Cloudflare"
 	}
-	zones, err := s.cloudflareZones(ctx, req.APIToken, req.ZoneID)
+	zones, err := s.cloudflareZones(ctx, req.APIToken, req.ZoneID, req.AccountID)
 	if err != nil {
 		return nil, err
 	}
@@ -76,37 +76,33 @@ func (s *CredentialService) CreateCloudflare(ctx context.Context, userID string,
 	if len(zones) == 0 {
 		return nil, fmt.Errorf("no Cloudflare zones were returned for this token")
 	}
-
-	creds := make([]model.CloudflareCredential, 0, len(zones))
+	accountID := strings.TrimSpace(req.AccountID)
 	for _, zone := range zones {
-		if strings.TrimSpace(zone.ID) == "" || strings.TrimSpace(zone.Name) == "" {
-			continue
-		}
-		accountID := strings.TrimSpace(req.AccountID)
 		if accountID == "" {
 			accountID = strings.TrimSpace(zone.Account.ID)
 		}
-		credName := name
-		if len(zones) > 1 || !strings.Contains(strings.ToLower(name), strings.ToLower(zone.Name)) {
-			credName = fmt.Sprintf("%s - %s", name, zone.Name)
-		}
-		creds = append(creds, model.CloudflareCredential{Name: credName, APITokenEnc: enc, ZoneID: zone.ID, Domain: zone.Name, AccountID: accountID, IsActive: true, CreatedBy: userID})
 	}
-	if len(creds) == 0 {
+	cred := model.CloudflareCredential{Name: name, APITokenEnc: enc, AccountID: accountID, IsActive: true, CreatedBy: userID}
+	caches := cloudflareDomainCaches(0, accountID, zones)
+	if len(caches) == 0 {
 		return nil, fmt.Errorf("no usable Cloudflare zones were returned for this token")
 	}
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		for i := range creds {
-			if err := tx.Create(&creds[i]).Error; err != nil {
-				return err
-			}
-			if err := tx.Create(&model.UserCredential{UserID: userID, CredentialType: model.CredentialTypeCloudflare, CredentialID: creds[i].ID, Role: model.CredentialRoleOwner}).Error; err != nil {
+		if err := tx.Create(&cred).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(&model.UserCredential{UserID: userID, CredentialType: model.CredentialTypeCloudflare, CredentialID: cred.ID, Role: model.CredentialRoleOwner}).Error; err != nil {
+			return err
+		}
+		for i := range caches {
+			caches[i].CloudflareCredentialID = cred.ID
+			if err := upsertCloudflareDomainCache(tx, &caches[i]); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
-	return creds, err
+	return []model.CloudflareCredential{cred}, err
 }
 
 func (s *CredentialService) CreateGitHub(ctx context.Context, userID string, req dto.CreateGitHubCredentialRequest) (*model.GitHubCredential, error) {
@@ -194,18 +190,44 @@ func (s *CredentialService) ListCloudflareDomains(ctx context.Context, userID st
 		return nil, err
 	}
 	out := make([]dto.CloudflareDomainResponse, 0, len(creds))
+	seen := map[string]bool{}
 	for _, cred := range creds {
-		if cred.Domain == "" || cred.ZoneID == "" {
-			continue
+		var cached []model.CloudflareDomainCache
+		_ = s.db.WithContext(ctx).Where("cloudflare_credential_id = ?", cred.ID).Order("domain asc").Find(&cached).Error
+		for _, domain := range cached {
+			if domain.Domain == "" || domain.ZoneID == "" {
+				continue
+			}
+			key := strings.ToLower(domain.AccountID + "|" + domain.ZoneID + "|" + domain.Domain)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			out = append(out, dto.CloudflareDomainResponse{
+				CredentialID: cred.ID,
+				Credential:   cred.Name,
+				ZoneID:       domain.ZoneID,
+				Domain:       domain.Domain,
+				AccountID:    domain.AccountID,
+				Status:       domain.Status,
+				Active:       cred.IsActive,
+			})
 		}
-		out = append(out, dto.CloudflareDomainResponse{
-			CredentialID: cred.ID,
-			Credential:   cred.Name,
-			ZoneID:       cred.ZoneID,
-			Domain:       cred.Domain,
-			AccountID:    cred.AccountID,
-			Active:       cred.IsActive,
-		})
+		if cred.Domain != "" && cred.ZoneID != "" {
+			key := strings.ToLower(cred.AccountID + "|" + cred.ZoneID + "|" + cred.Domain)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			out = append(out, dto.CloudflareDomainResponse{
+				CredentialID: cred.ID,
+				Credential:   cred.Name,
+				ZoneID:       cred.ZoneID,
+				Domain:       cred.Domain,
+				AccountID:    cred.AccountID,
+				Active:       cred.IsActive,
+			})
+		}
 	}
 	return out, nil
 }
@@ -305,16 +327,14 @@ func (s *CredentialService) VerifyCloudflare(ctx context.Context, id uint) (map[
 		return nil, err
 	}
 	if cred.ZoneID == "" {
-		zones, err := s.cloudflareZones(ctx, token, "")
-		if err != nil {
-			return nil, err
-		}
+		var zones int64
+		_ = s.db.WithContext(ctx).Model(&model.CloudflareDomainCache{}).Where("cloudflare_credential_id = ?", cred.ID).Count(&zones).Error
 		return map[string]any{
 			"status":     "ok",
 			"credential": cred.Name,
 			"account_id": cred.AccountID,
 			"token":      verify["result"],
-			"zones":      len(zones),
+			"zones":      zones,
 		}, nil
 	}
 	zoneURL := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/dns_records?per_page=1", url.PathEscape(cred.ZoneID))
@@ -333,8 +353,8 @@ func (s *CredentialService) VerifyCloudflare(ctx context.Context, id uint) (map[
 	}, nil
 }
 
-func (s *CredentialService) ListCloudflareDNSRecords(ctx context.Context, id uint) ([]dto.CloudflareDNSRecordResponse, error) {
-	cred, token, err := s.cloudflareCredentialToken(ctx, id)
+func (s *CredentialService) ListCloudflareDNSRecords(ctx context.Context, id uint, zoneID string) ([]dto.CloudflareDNSRecordResponse, error) {
+	cred, token, err := s.cloudflareCredentialZoneToken(ctx, id, zoneID)
 	if err != nil {
 		return nil, err
 	}
@@ -357,16 +377,16 @@ func (s *CredentialService) ListCloudflareDNSRecords(ctx context.Context, id uin
 	return records, nil
 }
 
-func (s *CredentialService) CreateCloudflareDNSRecord(ctx context.Context, id uint, req dto.CreateCloudflareDNSRecordRequest) (dto.CloudflareDNSRecordResponse, error) {
-	return s.writeCloudflareDNSRecord(ctx, id, "", dto.UpdateCloudflareDNSRecordRequest(req), http.MethodPost)
+func (s *CredentialService) CreateCloudflareDNSRecord(ctx context.Context, id uint, zoneID string, req dto.CreateCloudflareDNSRecordRequest) (dto.CloudflareDNSRecordResponse, error) {
+	return s.writeCloudflareDNSRecord(ctx, id, zoneID, "", dto.UpdateCloudflareDNSRecordRequest(req), http.MethodPost)
 }
 
-func (s *CredentialService) UpdateCloudflareDNSRecord(ctx context.Context, id uint, recordID string, req dto.UpdateCloudflareDNSRecordRequest) (dto.CloudflareDNSRecordResponse, error) {
-	return s.writeCloudflareDNSRecord(ctx, id, recordID, req, http.MethodPut)
+func (s *CredentialService) UpdateCloudflareDNSRecord(ctx context.Context, id uint, zoneID, recordID string, req dto.UpdateCloudflareDNSRecordRequest) (dto.CloudflareDNSRecordResponse, error) {
+	return s.writeCloudflareDNSRecord(ctx, id, zoneID, recordID, req, http.MethodPut)
 }
 
-func (s *CredentialService) DeleteCloudflareDNSRecord(ctx context.Context, id uint, recordID string) error {
-	cred, token, err := s.cloudflareCredentialToken(ctx, id)
+func (s *CredentialService) DeleteCloudflareDNSRecord(ctx context.Context, id uint, zoneID, recordID string) error {
+	cred, token, err := s.cloudflareCredentialZoneToken(ctx, id, zoneID)
 	if err != nil {
 		return err
 	}
@@ -391,8 +411,8 @@ func (s *CredentialService) DeleteCloudflareDNSRecord(ctx context.Context, id ui
 	return nil
 }
 
-func (s *CredentialService) writeCloudflareDNSRecord(ctx context.Context, id uint, recordID string, req dto.UpdateCloudflareDNSRecordRequest, method string) (dto.CloudflareDNSRecordResponse, error) {
-	cred, token, err := s.cloudflareCredentialToken(ctx, id)
+func (s *CredentialService) writeCloudflareDNSRecord(ctx context.Context, id uint, zoneID, recordID string, req dto.UpdateCloudflareDNSRecordRequest, method string) (dto.CloudflareDNSRecordResponse, error) {
+	cred, token, err := s.cloudflareCredentialZoneToken(ctx, id, zoneID)
 	if err != nil {
 		return dto.CloudflareDNSRecordResponse{}, err
 	}
@@ -449,6 +469,117 @@ func (s *CredentialService) cloudflareCredentialToken(ctx context.Context, id ui
 	return cred, token, err
 }
 
+func (s *CredentialService) cloudflareCredentialZoneToken(ctx context.Context, id uint, zoneID string) (model.CloudflareCredential, string, error) {
+	cred, token, err := s.cloudflareCredentialToken(ctx, id)
+	if err != nil {
+		return cred, "", err
+	}
+	zoneID = strings.TrimSpace(zoneID)
+	if zoneID != "" {
+		if cred.ZoneID != "" && cred.ZoneID != zoneID {
+			return cred, "", fmt.Errorf("cloudflare zone does not belong to this credential")
+		}
+		if cred.ZoneID == "" {
+			var cached model.CloudflareDomainCache
+			if err := s.db.WithContext(ctx).Where("cloudflare_credential_id = ? AND zone_id = ?", id, zoneID).First(&cached).Error; err != nil {
+				return cred, "", fmt.Errorf("cloudflare zone is not cached for this credential")
+			}
+			cred.ZoneID = cached.ZoneID
+			cred.Domain = cached.Domain
+			if cred.AccountID == "" {
+				cred.AccountID = cached.AccountID
+			}
+		}
+	}
+	return cred, token, nil
+}
+
+func (s *CredentialService) CloudflareCredentialForDomain(ctx context.Context, credentialID uint, zoneID, fqdn string) (model.CloudflareCredential, error) {
+	var cred model.CloudflareCredential
+	if err := s.db.WithContext(ctx).First(&cred, credentialID).Error; err != nil {
+		return cred, err
+	}
+	if cred.ZoneID != "" {
+		if strings.TrimSpace(zoneID) != "" && cred.ZoneID != strings.TrimSpace(zoneID) {
+			return cred, fmt.Errorf("cloudflare zone does not belong to this credential")
+		}
+		return cred, nil
+	}
+	var cached model.CloudflareDomainCache
+	q := s.db.WithContext(ctx).Where("cloudflare_credential_id = ?", credentialID)
+	if strings.TrimSpace(zoneID) != "" {
+		q = q.Where("zone_id = ?", strings.TrimSpace(zoneID))
+	} else {
+		q = q.Order("length(domain) desc")
+		for _, suffix := range domainSuffixes(fqdn) {
+			var row model.CloudflareDomainCache
+			if err := q.Where("domain = ?", suffix).First(&row).Error; err == nil {
+				cached = row
+				break
+			}
+		}
+		if cached.ID == 0 {
+			return cred, fmt.Errorf("no cached Cloudflare zone matches %q", fqdn)
+		}
+	}
+	if cached.ID == 0 {
+		if err := q.First(&cached).Error; err != nil {
+			return cred, fmt.Errorf("cloudflare zone is not cached for this credential")
+		}
+	}
+	cred.ZoneID = cached.ZoneID
+	cred.Domain = cached.Domain
+	if cred.AccountID == "" {
+		cred.AccountID = cached.AccountID
+	}
+	return cred, nil
+}
+
+func cloudflareDomainCaches(credentialID uint, accountID string, zones []cloudflareZonePayload) []model.CloudflareDomainCache {
+	seen := map[string]bool{}
+	out := make([]model.CloudflareDomainCache, 0, len(zones))
+	for _, zone := range zones {
+		zoneID := strings.TrimSpace(zone.ID)
+		domain := strings.ToLower(strings.TrimSpace(zone.Name))
+		if zoneID == "" || domain == "" {
+			continue
+		}
+		key := zoneID + "|" + domain
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		rowAccountID := strings.TrimSpace(accountID)
+		if rowAccountID == "" {
+			rowAccountID = strings.TrimSpace(zone.Account.ID)
+		}
+		out = append(out, model.CloudflareDomainCache{
+			CloudflareCredentialID: credentialID,
+			ZoneID:                 zoneID,
+			Domain:                 domain,
+			AccountID:              rowAccountID,
+			Status:                 strings.TrimSpace(zone.Status),
+		})
+	}
+	return out
+}
+
+func upsertCloudflareDomainCache(tx *gorm.DB, row *model.CloudflareDomainCache) error {
+	return tx.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "cloudflare_credential_id"}, {Name: "zone_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"domain", "account_id", "status", "updated_at"}),
+	}).Create(row).Error
+}
+
+func domainSuffixes(fqdn string) []string {
+	parts := strings.Split(strings.ToLower(strings.Trim(fqdn, ".")), ".")
+	out := make([]string, 0, len(parts))
+	for i := 0; i < len(parts)-1; i++ {
+		out = append(out, strings.Join(parts[i:], "."))
+	}
+	return out
+}
+
 type cloudflareZoneAccount struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
@@ -461,9 +592,12 @@ type cloudflareZonePayload struct {
 	Account cloudflareZoneAccount `json:"account"`
 }
 
-func (s *CredentialService) cloudflareZones(ctx context.Context, token, zoneID string) ([]cloudflareZonePayload, error) {
+func (s *CredentialService) cloudflareZones(ctx context.Context, token, zoneID, accountID string) ([]cloudflareZonePayload, error) {
 	client := &http.Client{Timeout: 15 * time.Second}
 	endpoint := "https://api.cloudflare.com/client/v4/zones?per_page=100"
+	if strings.TrimSpace(accountID) != "" {
+		endpoint += "&account.id=" + url.QueryEscape(strings.TrimSpace(accountID))
+	}
 	if strings.TrimSpace(zoneID) != "" {
 		endpoint = fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s", url.PathEscape(strings.TrimSpace(zoneID)))
 	}

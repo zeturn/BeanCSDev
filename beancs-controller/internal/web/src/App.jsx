@@ -6,15 +6,16 @@ import {
   Bell,
   Boxes,
   Box,
-  CalendarDays,
   CheckCircle2,
   ChevronDown,
+  ChevronRight,
   Cloud,
   Coffee,
   Code2,
   Container,
   Cpu,
   Database,
+  Edit3,
   FileText,
   GitBranch,
   Github,
@@ -28,6 +29,7 @@ import {
   ListRestart,
   LoaderCircle,
   Lock,
+  Menu,
   MemoryStick,
   MoreHorizontal,
   Network,
@@ -35,6 +37,7 @@ import {
   Play,
   Plus,
   RefreshCw,
+  RotateCcw,
   Rocket,
   ScrollText,
   Search,
@@ -44,6 +47,7 @@ import {
   ShieldCheck,
   Trash2,
   Upload,
+  X,
 } from "lucide-react";
 import "./style.css";
 
@@ -125,6 +129,7 @@ const navSections = [
 function App() {
   const [config, setConfig] = useState(null);
   const [token, setToken] = useState(localStorage.getItem(tokenKey) || "");
+  const [basaltProfile, setBasaltProfile] = useState(null);
   const [view, setView] = useState("dashboard");
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
@@ -146,6 +151,7 @@ function App() {
   const [reposByCredential, setReposByCredential] = useState({});
   const [repoFilters, setRepoFilters] = useState({});
   const [selectedCloudflareID, setSelectedCloudflareID] = useState("");
+  const [selectedCloudflareZoneID, setSelectedCloudflareZoneID] = useState("");
   const [dnsRecords, setDNSRecords] = useState([]);
   const [editingDNSRecord, setEditingDNSRecord] = useState(null);
   const [runtimeDetail, setRuntimeDetail] = useState(null);
@@ -156,6 +162,8 @@ function App() {
   const [deployForm, setDeployForm] = useState(defaultDeployForm());
   const [editingProject, setEditingProject] = useState(null);
   const [deletingProject, setDeletingProject] = useState(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarQuery, setSidebarQuery] = useState("");
   const [activeProgressProjectID, setActiveProgressProjectID] = useState("");
   const [activeProcessID, setActiveProcessID] = useState("");
   const [processRecords, setProcessRecords] = useState([]);
@@ -181,14 +189,19 @@ function App() {
   const registriesLoadingRef = useRef(false);
 
   const api = useMemo(() => makeAPI(token, logout), [token]);
-  const userProfile = useMemo(() => profileFromToken(token), [token]);
+  const userProfile = useMemo(() => profileFromBasalt(basaltProfile, token), [basaltProfile, token]);
+  const filteredNavSections = useMemo(() => filterNavSections(navSections, sidebarQuery), [sidebarQuery]);
+  const filteredOverview = useMemo(() => filterNavItems([navOverview], sidebarQuery), [sidebarQuery]);
 
   useEffect(() => {
     boot();
   }, []);
 
   useEffect(() => {
-    if (token) loadWorkspace();
+    if (token) {
+      loadWorkspace();
+      loadUserProfile();
+    }
   }, [token]);
 
   useEffect(() => {
@@ -227,7 +240,7 @@ function App() {
         loadProcesses();
         if (activeProgressProjectID) loadProjectProgress();
       }
-    }, 10000);
+    }, 5000);
     return () => clearInterval(timer);
   }, [token, view, activeProgressProjectID, activeProcessID, projects.length, projectLogFollow]);
 
@@ -330,6 +343,15 @@ function App() {
     }
   }
 
+  async function loadUserProfile() {
+    try {
+      const data = await api.get("/me");
+      setBasaltProfile(data || null);
+    } catch {
+      setBasaltProfile(null);
+    }
+  }
+
   async function loadDashboard() {
     if (dashboardLoadingRef.current) return;
     dashboardLoadingRef.current = true;
@@ -378,6 +400,7 @@ function App() {
   function logout() {
     localStorage.removeItem(tokenKey);
     setToken("");
+    setBasaltProfile(null);
     setRuntime(emptyRuntime);
     setProjects([]);
   }
@@ -400,8 +423,10 @@ function App() {
       await api.post(`/credentials/${kind}/`, body);
       event.currentTarget.reset();
       await loadWorkspace();
+      return true;
     } catch (err) {
       setError(err.message);
+      return false;
     }
   }
 
@@ -604,13 +629,15 @@ function App() {
     }
   }
 
-  async function loadDNSRecords(credentialID = selectedCloudflareID) {
+  async function loadDNSRecords(credentialID = selectedCloudflareID, zoneID = selectedCloudflareZoneID) {
     if (!credentialID) return;
     setSelectedCloudflareID(String(credentialID));
+    setSelectedCloudflareZoneID(String(zoneID || ""));
     setLoading(true);
     setError("");
     try {
-      const data = await api.get(`/credentials/cloudflare/${credentialID}/dns-records`);
+      const qs = zoneID ? `?zone_id=${encodeURIComponent(zoneID)}` : "";
+      const data = await api.get(`/credentials/cloudflare/${credentialID}/dns-records${qs}`);
       setDNSRecords(data.data || []);
     } catch (err) {
       setError(err.message);
@@ -626,10 +653,11 @@ function App() {
     body.ttl = Number(body.ttl || 1);
     body.proxied = Boolean(body.proxied);
     try {
+      const qs = selectedCloudflareZoneID ? `?zone_id=${encodeURIComponent(selectedCloudflareZoneID)}` : "";
       if (editingDNSRecord?.id) {
-        await api.put(`/credentials/cloudflare/${selectedCloudflareID}/dns-records/${editingDNSRecord.id}`, body);
+        await api.put(`/credentials/cloudflare/${selectedCloudflareID}/dns-records/${editingDNSRecord.id}${qs}`, body);
       } else {
-        await api.post(`/credentials/cloudflare/${selectedCloudflareID}/dns-records`, body);
+        await api.post(`/credentials/cloudflare/${selectedCloudflareID}/dns-records${qs}`, body);
       }
       event.currentTarget.reset();
       setEditingDNSRecord(null);
@@ -642,7 +670,8 @@ function App() {
   async function deleteDNSRecord(record) {
     if (!selectedCloudflareID || !confirm(`Delete DNS record ${record.name}?`)) return;
     try {
-      await api.delete(`/credentials/cloudflare/${selectedCloudflareID}/dns-records/${record.id}`);
+      const qs = selectedCloudflareZoneID ? `?zone_id=${encodeURIComponent(selectedCloudflareZoneID)}` : "";
+      await api.delete(`/credentials/cloudflare/${selectedCloudflareID}/dns-records/${record.id}${qs}`);
       await loadDNSRecords(selectedCloudflareID);
     } catch (err) {
       setError(err.message);
@@ -870,7 +899,6 @@ function App() {
   }
 
   async function deleteNode(nodeName) {
-    if (!confirm(`Delete node ${nodeName}? Make sure it has been drained and removed from the K3s host first.`)) return;
     try {
       await api.delete(`/runtime/nodes/${encodeURIComponent(nodeName)}`);
       setRuntimeDetail(null);
@@ -1105,7 +1133,7 @@ function App() {
   async function deployProject(event) {
     event.preventDefault();
     if (!analysis?.deployable) return;
-    const payload = buildProjectPayload(deployForm, selectedCredential, credentials);
+    const payload = buildProjectPayload(deployForm, selectedCredential, {...credentials, domains});
     setLoading(true);
     setError("");
     setInstallProgress({
@@ -1324,6 +1352,7 @@ function App() {
       setProjectProgress(null);
       stopProjectLogFollow();
     }
+    setSidebarOpen(false);
     setView(item.id);
   }
 
@@ -1344,24 +1373,28 @@ function App() {
 
   return (
     <div className="app-shell">
-      <aside className="sidebar">
+      <div className={sidebarOpen ? "sidebar-overlay active" : "sidebar-overlay"} onClick={() => setSidebarOpen(false)} />
+      <aside className={sidebarOpen ? "sidebar open" : "sidebar"}>
         <div className="sidebar-product">
           <span className="brand-orb"><Coffee size={16} /></span>
           <b>BeanCS</b>
         </div>
-        <button type="button" className="sidebar-search">
+        <label className="sidebar-search">
           <Search size={19} />
-          <span>Find...</span>
+          <input value={sidebarQuery} onChange={(event) => setSidebarQuery(event.target.value)} placeholder="Find..." />
           <kbd>F</kbd>
-        </button>
+        </label>
         <div className="sidebar-nav">
-          <SidebarNavGroup items={[navOverview]} view={view} onSelect={selectNav} />
-          {navSections.map((section) => (
+          {filteredOverview.length > 0 && <SidebarNavGroup items={filteredOverview} view={view} onSelect={selectNav} />}
+          {filteredNavSections.map((section) => (
             <SidebarNavGroup key={section.id} label={section.label} items={section.items} view={view} onSelect={selectNav} />
           ))}
+          {sidebarQuery && filteredOverview.length === 0 && filteredNavSections.length === 0 && <div className="nav-empty">No matches</div>}
         </div>
         <div className="sidebar-user">
-          <div className="user-avatar">{userProfile.initial}</div>
+          <div className="user-avatar">
+            {userProfile.avatar ? <img src={userProfile.avatar} alt={userProfile.name || "User avatar"} /> : userProfile.initial}
+          </div>
           <div className="user-copy">
             <b>{userProfile.name}</b>
             <span>{userProfile.detail}</span>
@@ -1372,7 +1405,24 @@ function App() {
         </div>
       </aside>
       <main className="workspace">
-        <PageHeading title={titleFor(view)} subtitle={subtitleFor(view, runtime, projects)} actions={<button onClick={loadWorkspace} disabled={loading}><RefreshCw size={15} /> Refresh</button>} />
+        <div className="mobile-topbar">
+          <button className="icon-button ghost" type="button" aria-label="Open navigation" onClick={() => setSidebarOpen(true)}>
+            <Menu size={18} />
+          </button>
+          <span className="mobile-brand">BeanCS</span>
+        </div>
+        <PageHeading
+          title={view === "dashboard" ? (dashboard?.cluster_name || "Overview") : titleFor(view)}
+          topLabel={view === "dashboard" ? "Overview" : undefined}
+          subtitle={
+            view === "dashboard"
+              ? `Kubernetes ${dashboard?.kubernetes_version || "-"}${dashboard?.k3s_version ? ` · K3s ${dashboard.k3s_version}` : ""}`
+              : subtitleFor(view, runtime, projects)
+          }
+          actions={
+            view === "dashboard" ? null : <button onClick={loadWorkspace} disabled={loading}><RefreshCw size={15} /> Refresh</button>
+          }
+        />
         {notice && <div className="notice">{notice}</div>}
         {error && <div className="alert">{error}</div>}
         {shouldShowSkeleton(view, dashboard, network) ? (
@@ -1383,6 +1433,7 @@ function App() {
             {view === "deploy" && (
               <DeployView
                 credentials={credentials}
+                domains={domains}
                 namespaces={runtime.namespaces || []}
                 selectedCredential={selectedCredential}
                 setSelectedCredential={setSelectedCredential}
@@ -1485,8 +1536,8 @@ function App() {
               <GitHubView credentials={credentials.github} onConnect={connectGitHubApp} onRepos={loadRepos} onDelete={(id) => deleteCredential("github", id)} reposByCredential={reposByCredential} repoFilters={repoFilters} setRepoFilters={setRepoFilters} />
             )}
             {view === "domains" && <DomainsView domains={domains} />}
-            {view === "networking" && <NetworkingView network={network} refresh={loadNetwork} onSaveService={saveService} onDeleteService={deleteService} onSaveIngress={saveIngress} onDeleteIngress={deleteIngress} onSaveNetworkPolicy={saveNetworkPolicy} onDeleteNetworkPolicy={deleteNetworkPolicy} />}
-            {view === "cloudflare" && <CloudflareView credentials={credentials.cloudflare} domains={domains} selectedID={selectedCloudflareID} setSelectedID={setSelectedCloudflareID} dnsRecords={dnsRecords} editingRecord={editingDNSRecord} setEditingRecord={setEditingDNSRecord} onCreate={createCredential} onDelete={(id) => deleteCredential("cloudflare", id)} onLoadDNS={loadDNSRecords} onSaveDNS={saveDNSRecord} onDeleteDNS={deleteDNSRecord} />}
+            {view === "networking" && <NetworkingView network={network} refresh={loadNetwork} onSaveService={saveService} onDeleteService={deleteService} onSaveIngress={saveIngress} onDeleteIngress={deleteIngress} onSaveNetworkPolicy={saveNetworkPolicy} onDeleteNetworkPolicy={deleteNetworkPolicy} onDetail={setRuntimeDetail} />}
+            {view === "cloudflare" && <CloudflareView credentials={credentials.cloudflare} domains={domains} selectedID={selectedCloudflareID} selectedZoneID={selectedCloudflareZoneID} setSelectedID={setSelectedCloudflareID} setSelectedZoneID={setSelectedCloudflareZoneID} dnsRecords={dnsRecords} editingRecord={editingDNSRecord} setEditingRecord={setEditingDNSRecord} onCreate={createCredential} onDelete={(id) => deleteCredential("cloudflare", id)} onLoadDNS={loadDNSRecords} onSaveDNS={saveDNSRecord} onDeleteDNS={deleteDNSRecord} />}
             {view === "accessControl" && <CredentialManager kind="basaltpass" rows={credentials.basaltpass} onCreate={createCredential} onDelete={deleteCredential} />}
             {["namespaces", "pods", "nodes", "ingresses", "services"].includes(view) && <RuntimeTable kind={view} rows={runtime[view] || []} nodeJoinCommand={nodeJoinCommand} onLoadNodeJoinCommand={loadNodeJoinCommand} onCreateNamespace={createNamespace} onPatchNamespace={patchNamespaceLabels} onNamespaceDetail={loadNamespaceDetail} onDeleteNamespace={deleteNamespace} onDeletePod={deletePod} onNodeDetail={loadNodeDetail} onPodLogs={loadPodLogs} onSaveService={saveService} onDeleteService={deleteService} onDetail={setRuntimeDetail} />}
           </>
@@ -1494,12 +1545,13 @@ function App() {
       </main>
       {editingProject && <ProjectModal project={editingProject} onClose={() => setEditingProject(null)} onSubmit={updateProject} />}
       {deletingProject && <DeleteProjectModal project={deletingProject} busy={loading} onClose={() => setDeletingProject(null)} onDelete={confirmDeleteProject} />}
-      {runtimeDetail && <RuntimeDetailModal detail={runtimeDetail} logs={runtimeLogs} logFollow={runtimeLogFollow} logStatus={runtimeLogStatus} selectedLogContainer={runtimeLogContainer} logTail={runtimeLogTail} logLoaded={runtimeLogLoaded} nodeHealth={nodeHealth} onLoadNodeHealth={loadNodeHealth} onSaveNodeLabels={saveNodeLabels} onSaveNodeTaints={saveNodeTaints} onCordonNode={cordonNode} onDrainNode={drainNode} onDeleteNode={deleteNode} onSaveResourceQuota={saveResourceQuota} onDeleteResourceQuota={deleteResourceQuota} onSaveLimitRange={saveLimitRange} onDeleteLimitRange={deleteLimitRange} onSaveNamespacePermission={saveNamespacePermission} onDeleteNamespacePermission={deleteNamespacePermission} onSaveNamespaceIsolation={saveNamespaceIsolation} onSelectLogContainer={setRuntimeLogContainer} onSetLogTail={setRuntimeLogTail} onLoadContainerLogs={loadRuntimeContainerLogs} onFollowPodLogs={startRuntimeLogFollow} onStopPodLogs={stopRuntimeLogFollow} onClose={() => { stopRuntimeLogFollow(); setRuntimeDetail(null); setRuntimeLogs(""); setRuntimeLogContainer(""); setRuntimeLogLoaded(false); setRuntimeLogStatus(""); setNodeHealth(null); }} onSaveService={saveService} onPatchNamespace={patchNamespaceLabels} />}
+      {runtimeDetail && <RuntimeDetailDrawer detail={runtimeDetail} logs={runtimeLogs} logFollow={runtimeLogFollow} logStatus={runtimeLogStatus} selectedLogContainer={runtimeLogContainer} logTail={runtimeLogTail} logLoaded={runtimeLogLoaded} nodeHealth={nodeHealth} onLoadNodeHealth={loadNodeHealth} onSaveNodeLabels={saveNodeLabels} onSaveNodeTaints={saveNodeTaints} onCordonNode={cordonNode} onDrainNode={drainNode} onDeleteNode={deleteNode} onSaveResourceQuota={saveResourceQuota} onDeleteResourceQuota={deleteResourceQuota} onSaveLimitRange={saveLimitRange} onDeleteLimitRange={deleteLimitRange} onSaveNamespacePermission={saveNamespacePermission} onDeleteNamespacePermission={deleteNamespacePermission} onSaveNamespaceIsolation={saveNamespaceIsolation} onSelectLogContainer={setRuntimeLogContainer} onSetLogTail={setRuntimeLogTail} onLoadContainerLogs={loadRuntimeContainerLogs} onFollowPodLogs={startRuntimeLogFollow} onStopPodLogs={stopRuntimeLogFollow} onClose={() => { stopRuntimeLogFollow(); setRuntimeDetail(null); setRuntimeLogs(""); setRuntimeLogContainer(""); setRuntimeLogLoaded(false); setRuntimeLogStatus(""); setNodeHealth(null); }} onSaveService={saveService} onPatchNamespace={patchNamespaceLabels} />}
     </div>
   );
 }
 
 function SidebarNavGroup({label, items, view, onSelect}) {
+  if (!items?.length) return null;
   return (
     <div className="nav-group">
       {label && <div className="nav-group-label">{label}</div>}
@@ -1517,10 +1569,28 @@ function SidebarNavGroup({label, items, view, onSelect}) {
   );
 }
 
-function PageHeading({title, subtitle, actions}) {
+function filterNavItems(items, query) {
+  const needle = String(query || "").trim().toLowerCase();
+  if (!needle) return items;
+  return items.filter((item) => `${item.label} ${item.id}`.toLowerCase().includes(needle));
+}
+
+function filterNavSections(sections, query) {
+  const needle = String(query || "").trim().toLowerCase();
+  if (!needle) return sections;
+  return sections
+    .map((section) => {
+      const sectionMatches = `${section.label} ${section.id}`.toLowerCase().includes(needle);
+      return {...section, items: sectionMatches ? section.items : filterNavItems(section.items, needle)};
+    })
+    .filter((section) => section.items.length > 0);
+}
+
+function PageHeading({title, topLabel, subtitle, actions}) {
   return (
     <section className="page-heading">
       <div>
+        {topLabel && <span className="page-heading-top-label">{topLabel}</span>}
         <h1>{title}</h1>
         {subtitle && <p>{subtitle}</p>}
       </div>
@@ -1586,16 +1656,16 @@ function shouldShowSkeleton(view, dashboard, network) {
   return false;
 }
 
-function DeployView({credentials, namespaces, selectedCredential, setSelectedCredential, repos, selectedRepo, analysis, setAnalysis, form, setForm, loadRepos, analyzeRepo, checkInstallSource, deployProject, containerRegistries, containerImages, createTrackedImageFromDeploy, onConnectGitHub, reposLoading}) {
+function DeployView({credentials, domains, namespaces, selectedCredential, setSelectedCredential, repos, selectedRepo, analysis, setAnalysis, form, setForm, loadRepos, analyzeRepo, checkInstallSource, deployProject, containerRegistries, containerImages, createTrackedImageFromDeploy, onConnectGitHub, reposLoading}) {
   const [stepIndex, setStepIndex] = useState(0);
   const [creatingImage, setCreatingImage] = useState(false);
   const [checkingInstall, setCheckingInstall] = useState(false);
   const [repoSearch, setRepoSearch] = useState("");
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
-  const selectedCloudflare = credentials.cloudflare.find((cred) => String(cred.id) === String(form.cloudflare_credential_id));
+  const selectedCloudflareDomain = (domains || []).find((domain) => String(domain.credential_id) === String(form.cloudflare_credential_id) && String(domain.zone_id) === String(form.cloudflare_zone_id));
   const selectedGitHubCredential = credentials.github.find((cred) => String(cred.id) === String(selectedCredential));
   const visibleRepos = repos.filter((repo) => `${repo.full_name || ""} ${repo.name || ""}`.toLowerCase().includes(repoSearch.toLowerCase()));
-  const publicHost = form.subdomain && selectedCloudflare ? `${form.subdomain}.${selectedCloudflare.domain}` : "";
+  const publicHost = form.subdomain && selectedCloudflareDomain ? `${form.subdomain}.${selectedCloudflareDomain.domain}` : "";
   const step = deploySteps[stepIndex];
   const canContinue = canContinueDeployStep(step.id, form, selectedCredential, analysis);
   const ghcrPreview = form.github_repo ? `ghcr.io/${form.github_repo.toLowerCase()}:beancs-<build>` : "ghcr.io/<owner>/<repo>:beancs-<build>";
@@ -1913,9 +1983,12 @@ function DeployView({credentials, namespaces, selectedCredential, setSelectedCre
             {form.exposure_mode === "public" && (
               <>
                 <label>Cloudflare credential</label>
-                <select value={form.cloudflare_credential_id} onChange={(event) => setForm({...form, cloudflare_credential_id: event.target.value})} required>
+                <select value={form.cloudflare_zone_id ? `${form.cloudflare_credential_id}:${form.cloudflare_zone_id}` : ""} onChange={(event) => {
+                  const [credentialID, zoneID] = event.target.value.split(":");
+                  setForm({...form, cloudflare_credential_id: credentialID || "", cloudflare_zone_id: zoneID || ""});
+                }} required>
                   <option value="">Choose Cloudflare zone</option>
-                  {credentials.cloudflare.map((cred) => <option key={cred.id} value={cred.id}>{cred.name} · {cred.domain}</option>)}
+                  {(domains || []).map((domain) => <option key={`${domain.credential_id}:${domain.zone_id}`} value={`${domain.credential_id}:${domain.zone_id}`}>{domain.credential} · {domain.domain}</option>)}
                 </select>
                 <Field label="Subdomain" value={form.subdomain} onChange={(v) => setForm({...form, subdomain: slugify(v)})} required />
                 <div className="computed-host">{publicHost || "Subdomain preview"}</div>
@@ -1955,6 +2028,7 @@ function DeployView({credentials, namespaces, selectedCredential, setSelectedCre
 
 function ProgressView({projects, processes, activeProcessID, setActiveProcessID, activeProjectID, setActiveProjectID, progress, installProgress, refresh, refreshList, logFollow, liveLogs, logStatus, onStartLogFollow, onStopLogFollow}) {
   const [activeJob, setActiveJob] = useState("runtime");
+  const [expandedSteps, setExpandedSteps] = useState({});
   const [logQuery, setLogQuery] = useState("");
   const selectedProcess = (processes || []).find((process) => String(process.id) === String(activeProcessID));
   const pods = progress?.pods || [];
@@ -1967,9 +2041,20 @@ function ProgressView({projects, processes, activeProcessID, setActiveProcessID,
   const readyReplicas = progress?.deployment?.ready_replicas ?? 0;
   const logs = logFollow ? liveLogs : progress?.logs;
   const jobs = selectedProcess ? processJobsFromRecord(selectedProcess) : progressJobs(progress, scopedInstallProgress, readyPods, pods, deployments, events);
-  const selectedJob = jobs.find((job) => job.id === activeJob) || jobs[0];
+  const detailTabID = activeJob.startsWith("detail:") ? activeJob.replace("detail:", "") : "";
+  const selectedJob = detailTabID ? null : jobs.find((job) => job.id === activeJob) || jobs[0];
   const selectedJobLogs = selectedProcess && selectedJob ? selectedJob.steps.map((step) => step.log || "").join("\n") : "";
-  const visibleLogs = filterLogLines(selectedJobLogs || logs || "", logQuery);
+  const visibleLogs = filterLogLines(selectedJobLogs || "", logQuery);
+  const visibleRuntimeLogs = filterLogLines(logs || "", logQuery);
+  const detailTabs = [
+    {id: "run", label: "Run details", icon: Activity},
+    {id: "install", label: "Install log", icon: ScrollText},
+    {id: "deployments", label: "Deployment records", icon: Rocket},
+    {id: "events", label: "Kubernetes events", icon: AlertTriangle},
+    {id: "runtime", label: "Runtime logs", icon: FileText},
+  ];
+  const selectedDetailTab = detailTabs.find((tab) => tab.id === detailTabID);
+  const toggleStep = (key) => setExpandedSteps((current) => ({...current, [key]: !current[key]}));
   if (!activeProcessID && !activeProjectID && !scopedInstallProgress) {
     return <ProgressListView processes={processes || []} projects={projects} onSelectProcess={(process) => {
       setActiveProcessID(String(process.id));
@@ -2011,9 +2096,11 @@ function ProgressView({projects, processes, activeProcessID, setActiveProcessID,
             </button>
           ))}
           <div className="process-nav-heading">Run details</div>
-          <div className="process-run-detail"><span>Status</span><b>{selectedProcess?.status || "-"}</b></div>
-          <div className="process-run-detail"><span>Jobs</span><b>{jobs.length}</b></div>
-          <div className="process-run-detail"><span>Events</span><b>{events.length}</b></div>
+          {detailTabs.map(({id, label, icon: Icon}) => (
+            <button key={id} type="button" className={detailTabID === id ? "process-nav active" : "process-nav"} onClick={() => setActiveJob(`detail:${id}`)}>
+              <Icon size={15} /> {label}
+            </button>
+          ))}
         </aside>
 
         <section className="process-main">
@@ -2027,6 +2114,36 @@ function ProgressView({projects, processes, activeProcessID, setActiveProcessID,
               </div>
               {progress?.error && <p className="error-inline">{progress.error}</p>}
             </div>
+          ) : detailTabID ? (
+            <>
+              <div className="process-job-header">
+                <div>
+                  <h2>{selectedDetailTab?.label || "Run details"}</h2>
+                  <p>Process evidence and runtime signals for this run.</p>
+                </div>
+                <div className="process-log-tools">
+                  {(detailTabID === "runtime" || detailTabID === "install" || detailTabID === "events" || detailTabID === "deployments") && (
+                    <div className="process-search"><Search size={15} /> <input value={logQuery} onChange={(event) => setLogQuery(event.target.value)} placeholder="Search details" /></div>
+                  )}
+                </div>
+              </div>
+              <ProgressEvidence
+                activeTab={detailTabID}
+                detailQuery={logQuery}
+                progress={progress}
+                installProgress={scopedInstallProgress}
+                selectedProcess={selectedProcess}
+                jobs={jobs}
+                deployments={deployments}
+                events={events}
+                logs={visibleRuntimeLogs}
+                logFollow={logFollow}
+                logStatus={logStatus}
+                onRefresh={() => activeProjectID ? refresh() : refreshList()}
+                onStartLogFollow={() => progress?.project?.id && onStartLogFollow(progress.project.id)}
+                onStopLogFollow={onStopLogFollow}
+              />
+            </>
           ) : (
             <>
               <div className="process-job-header">
@@ -2041,15 +2158,20 @@ function ProgressView({projects, processes, activeProcessID, setActiveProcessID,
               </div>
 
               <div className="process-step-list">
-                {(selectedJob?.steps || []).map((step) => (
-                  <div className={step.expanded ? "process-step expanded" : "process-step"} key={step.label}>
+                {(selectedJob?.steps || []).map((step, index) => {
+                  const stepKey = `${selectedJob?.id || "job"}:${step.label}:${index}`;
+                  const isExpanded = expandedSteps[stepKey] ?? Boolean(step.expanded);
+                  return (
+                  <div className={isExpanded ? "process-step expanded" : "process-step"} key={stepKey}>
                     <div className="process-step-row">
-                      <span className="process-chevron">{step.expanded ? "⌄" : "›"}</span>
+                      <button type="button" className="process-step-toggle" aria-label={isExpanded ? "Collapse step" : "Expand step"} onClick={() => toggleStep(stepKey)}>
+                        {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                      </button>
                       <ProgressStatusIcon status={step.status} />
                       <span>{step.label}</span>
                       <small>{step.duration || ""}</small>
                     </div>
-                    {step.expanded && (
+                    {isExpanded && (
                       <div className="process-log-block">
                         {step.kind === "logs" && (
                           <div className="row-actions process-log-actions">
@@ -2062,20 +2184,8 @@ function ProgressView({projects, processes, activeProcessID, setActiveProcessID,
                       </div>
                     )}
                   </div>
-                ))}
+                );})}
               </div>
-              <ProgressEvidence
-                progress={progress}
-                installProgress={scopedInstallProgress}
-                deployments={deployments}
-                events={events}
-                logs={visibleLogs}
-                logFollow={logFollow}
-                logStatus={logStatus}
-                onRefresh={() => activeProjectID ? refresh() : refreshList()}
-                onStartLogFollow={() => progress?.project?.id && onStartLogFollow(progress.project.id)}
-                onStopLogFollow={onStopLogFollow}
-              />
             </>
           )}
         </section>
@@ -2087,14 +2197,11 @@ function ProgressView({projects, processes, activeProcessID, setActiveProcessID,
 function ProgressListView({processes, projects, onSelectProcess, refresh}) {
   return (
     <div className="stack progress-list-page">
-      <section className="panel action-panel">
-        <div>
-          <h2><LoaderCircle size={18} /> Process list</h2>
-          <p>Deployment processes are stored with their real jobs, job logs, and final status.</p>
-        </div>
+      <div className="progress-list-toolbar">
+        <h2><LoaderCircle size={18} /> Process list</h2>
         <button type="button" onClick={() => refresh()}><RefreshCw size={15} /> Refresh</button>
-      </section>
-      <section className="panel progress-list-panel">
+      </div>
+      <section className="progress-list-panel">
         <div className="progress-list-head"><span>Process</span><span>Project</span><span>Type</span><span>Status</span><span /></div>
         {(processes || []).map((process) => (
           <button type="button" className="progress-list-row" key={process.id} onClick={() => onSelectProcess(process)}>
@@ -2111,7 +2218,7 @@ function ProgressListView({processes, projects, onSelectProcess, refresh}) {
   );
 }
 
-function ProgressEvidence({progress, installProgress, deployments, events, logs, logFollow, logStatus, onRefresh, onStartLogFollow, onStopLogFollow}) {
+function ProgressEvidence({activeTab, detailQuery, progress, installProgress, selectedProcess, jobs, deployments, events, logs, logFollow, logStatus, onRefresh, onStartLogFollow, onStopLogFollow}) {
   const installLogs = (installProgress?.logs || []).join("\n");
   const deploymentText = deployments.length
     ? deployments.slice(0, 12).map((deployment) => [
@@ -2131,21 +2238,50 @@ function ProgressEvidence({progress, installProgress, deployments, events, logs,
         event.message || "",
       ].filter(Boolean).join("\n")).join("\n\n")
     : "No Kubernetes events reported for this project.";
+  const runText = [
+    `process=${selectedProcess?.id ? `#${selectedProcess.id}` : "-"}`,
+    `title=${selectedProcess?.title || progress?.project?.display_name || progress?.project?.name || "-"}`,
+    `status=${selectedProcess?.status || progress?.deployment?.status || "-"}`,
+    `project=${selectedProcess?.project?.name || progress?.project?.name || "-"}`,
+    `namespace=${selectedProcess?.project?.namespace || progress?.project?.namespace || "-"}`,
+    `jobs=${jobs?.length || 0}`,
+    `deployments=${deployments.length}`,
+    `events=${events.length}`,
+    selectedProcess?.created_at ? `created=${formatTime(selectedProcess.created_at)}` : "",
+    selectedProcess?.updated_at ? `updated=${formatTime(selectedProcess.updated_at)}` : progress?.checked_at ? `checked=${formatTime(progress.checked_at)}` : "",
+  ].filter(Boolean).join("\n");
+  const filteredRunText = filterLogLines(runText, detailQuery);
+  const filteredInstallLogs = filterLogLines(installLogs || progress?.error || "", detailQuery);
+  const filteredDeploymentText = filterLogLines(deploymentText, detailQuery);
+  const filteredEventText = filterLogLines(eventText, detailQuery);
   return (
-    <div className="process-evidence-grid">
+    <div className="process-detail-panel">
+      {activeTab === "run" && (
+      <section className="process-evidence-card">
+        <h3>Run details</h3>
+        <pre>{filteredRunText || "No run details matched the search."}</pre>
+      </section>
+      )}
+      {activeTab === "install" && (
       <section className="process-evidence-card">
         <h3>Install log</h3>
-        <pre>{installLogs || progress?.error || "No active install log for this project."}</pre>
+        <pre>{filteredInstallLogs || "No active install log for this project."}</pre>
       </section>
+      )}
+      {activeTab === "deployments" && (
       <section className="process-evidence-card">
         <h3>Deployment records</h3>
-        <pre>{deploymentText}</pre>
+        <pre>{filteredDeploymentText || "No deployment records matched the search."}</pre>
       </section>
+      )}
+      {activeTab === "events" && (
       <section className="process-evidence-card">
         <h3>Kubernetes events</h3>
-        <pre>{eventText}</pre>
+        <pre>{filteredEventText || "No Kubernetes events matched the search."}</pre>
       </section>
-      <section className="process-evidence-card span-2">
+      )}
+      {activeTab === "runtime" && (
+      <section className="process-evidence-card">
         <div className="process-evidence-head">
           <h3>Runtime logs</h3>
           <div className="row-actions process-log-actions">
@@ -2156,6 +2292,7 @@ function ProgressEvidence({progress, installProgress, deployments, events, logs,
         {logStatus && <p className="log-status">{logStatus}</p>}
         <pre>{logs || "No container logs yet. If the workload has not created pods, Kubernetes events above are the source of truth."}</pre>
       </section>
+      )}
     </div>
   );
 }
@@ -2618,7 +2755,7 @@ function canContinueDeployStep(stepID, form, selectedCredential, analysis) {
   if (stepID === "check") return Boolean(analysis?.deployable);
   if (stepID === "params") return Boolean(form.name && Number(form.port || 0) > 0 && Number(form.replicas || 0) > 0);
   if (stepID === "domain") {
-    if (form.exposure_mode === "public") return Boolean(form.cloudflare_credential_id && form.subdomain);
+    if (form.exposure_mode === "public") return Boolean(form.cloudflare_credential_id && form.cloudflare_zone_id && form.subdomain);
     if (form.exposure_mode === "private") return Boolean(form.private_host);
   }
   return true;
@@ -2669,15 +2806,6 @@ function DeploymentsView({projects, processes, runtimeDeployments, refresh, onOp
   const rows = processRows.length ? processRows : fallbackRows;
   return (
     <section className="deployments-page">
-      <div className="deployment-filters">
-        <button type="button" className="filter-control wide"><CalendarDays size={18} /> Select Date Range</button>
-        <button type="button" className="filter-control"><Search size={18} /> All Autho... <ChevronDown size={17} /></button>
-        <button type="button" className="filter-control">All Environments <ChevronDown size={17} /></button>
-        <button type="button" className="filter-control"><Search size={18} /> All Repo... <ChevronDown size={17} /></button>
-        <button type="button" className="filter-control"><Search size={18} /> All Branc... <ChevronDown size={17} /></button>
-        <button type="button" className="filter-control status-filter"><span className="status-dots"><i /><i /><i /><i /><i /></span> Status <b>5/6</b> <ChevronDown size={17} /></button>
-        <button type="button" className="filter-control compact-refresh" onClick={refresh}><RefreshCw size={17} /></button>
-      </div>
       <div className="deployment-list">
         {rows.map((row) => (
           <button type="button" className="deployment-row" key={row.id} onClick={() => row.process && onOpenProcess?.(row.process)}>
@@ -2708,31 +2836,53 @@ function DeploymentsView({projects, processes, runtimeDeployments, refresh, onOp
 }
 
 function ProjectsView({projects, onEdit, onDelete, onScale, onRestart, onBuild, onProgress}) {
+  const [projectSearch, setProjectSearch] = useState("");
+  const visibleProjects = useMemo(() => {
+    const needle = String(projectSearch || "").trim().toLowerCase();
+    if (!needle) return projects;
+    return projects.filter((project) => {
+      const haystack = [
+        project.display_name,
+        project.name,
+        project.github_repo,
+        project.image_reference,
+        project.source_archive_name,
+        project.build_source,
+        project.domain,
+        project.exposure_mode,
+        project.status,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(needle);
+    });
+  }, [projects, projectSearch]);
+
   return (
     <section className="panel">
+      <div className="project-search">
+        <Search size={18} />
+        <input value={projectSearch} onChange={(event) => setProjectSearch(event.target.value)} placeholder="Search projects" />
+      </div>
       <div className="table">
-        <div className="tr head"><span>Name</span><span>Repo</span><span>Route</span><span>Status</span><span>Scale</span><span>Actions</span></div>
-        {projects.map((project) => (
-          <div className="tr" key={project.id}>
-            <span className="strong">{project.display_name || project.name}</span>
-            <span>{project.github_repo || project.image_reference || project.source_archive_name || project.build_source}</span>
-            <span>{project.domain || project.exposure_mode}</span>
-            <span>{project.status}</span>
-            <span>
-              <button onClick={() => onScale(project, Math.max(0, Number(project.replicas || 1) - 1))}>-</button>
-              <b>{project.replicas}</b>
-              <button onClick={() => onScale(project, Number(project.replicas || 1) + 1)}>+</button>
-            </span>
+        <div className="tr head project-table-row"><span>Name</span><span>Repo</span><span>Route</span><span>Status</span><span>Actions</span></div>
+        {visibleProjects.map((project) => (
+          <div className="tr project-table-row" key={project.id}>
+            <ExpandableCell className="strong" value={project.display_name || project.name} max={32} />
+            <ExpandableCell value={project.github_repo || project.image_reference || project.source_archive_name || project.build_source} max={42} />
+            <ExpandableCell value={project.domain || project.exposure_mode} max={36} />
+            <ExpandableCell value={project.status} max={24} />
             <span className="row-actions">
               <button onClick={() => onProgress(project)} title="Progress"><LoaderCircle size={15} /> Progress</button>
-              <button onClick={() => onBuild(project)} title="Build"><Play size={15} /> Build</button>
-              <button onClick={() => onRestart(project)} title="Restart"><ListRestart size={15} /></button>
-              <button onClick={() => onEdit(project)} title="Edit"><Plus size={15} /></button>
+              <button onClick={() => onBuild(project)} title="Rebuild"><Play size={15} /> Rebuild</button>
+              <button onClick={() => onRestart(project)} title="Restart"><RotateCcw size={15} /></button>
+              <button onClick={() => onEdit(project)} title="Edit"><Edit3 size={15} /></button>
               <button className="danger-button" onClick={() => onDelete(project)} title="Delete"><Trash2 size={15} /> Delete</button>
             </span>
           </div>
         ))}
-        {projects.length === 0 && <div className="empty">No projects yet.</div>}
+        {visibleProjects.length === 0 && <div className="empty">{projectSearch ? "No projects match this search." : "No projects yet."}</div>}
       </div>
     </section>
   );
@@ -2815,10 +2965,10 @@ function ContainerRegistriesView({presets, registries, images, onAddRegistry, on
           <div className="tr head"><span>名称</span><span>类型</span><span>API 根</span><span>鉴权</span><span /></div>
           {(registries || []).map((r) => (
             <div className="tr" key={r.id}>
-              <span className="strong">{r.name}</span>
-              <span>{r.kind}</span>
-              <span className="mono">{r.api_base}</span>
-              <span>{r.has_auth ? "已配置" : "匿名"}</span>
+              <ExpandableCell className="strong" value={r.name} max={30} />
+              <ExpandableCell value={r.kind} max={24} />
+              <ExpandableCell className="mono" value={r.api_base} max={42} />
+              <ExpandableCell value={r.has_auth ? "已配置" : "匿名"} max={24} />
               <span className="row-actions">
                 <button type="button" className="danger-button" onClick={() => onDeleteRegistry(r)}><Trash2 size={15} /> 删除</button>
               </span>
@@ -2989,11 +3139,11 @@ function APIKeysView({keys, createdKey, onDismissCreated, onCreate, onRevoke, on
           <div className="tr head"><span>Name</span><span>Prefix</span><span>Scopes</span><span>Last used</span><span>Expires</span><span>Actions</span></div>
           {keys.map((key) => (
             <div className="tr" key={key.id}>
-              <span className="strong">{key.name}</span>
-              <span>{key.prefix}</span>
-              <span>{(key.scopes || []).join(", ") || "-"}</span>
-              <span>{formatTime(key.last_used_at)}</span>
-              <span>{key.revoked_at ? `Revoked ${formatTime(key.revoked_at)}` : formatTime(key.expires_at)}</span>
+              <ExpandableCell className="strong" value={key.name} max={32} />
+              <ExpandableCell value={key.prefix} max={24} />
+              <ExpandableCell value={(key.scopes || []).join(", ") || "-"} max={38} />
+              <ExpandableCell value={formatTime(key.last_used_at)} max={28} />
+              <ExpandableCell value={key.revoked_at ? `Revoked ${formatTime(key.revoked_at)}` : formatTime(key.expires_at)} max={32} />
               <span className="row-actions">
                 <button className="danger-button" disabled={Boolean(key.revoked_at)} onClick={() => onRevoke(key)}><Trash2 size={15} /> Revoke</button>
               </span>
@@ -3049,32 +3199,78 @@ function GitHubView({credentials, onConnect, onRepos, onDelete, reposByCredentia
   );
 }
 
-function CloudflareView({credentials, domains, selectedID, setSelectedID, dnsRecords, editingRecord, setEditingRecord, onCreate, onDelete, onLoadDNS, onSaveDNS, onDeleteDNS}) {
+function CloudflareView({credentials, domains, selectedID, selectedZoneID, setSelectedID, setSelectedZoneID, dnsRecords, editingRecord, setEditingRecord, onCreate, onDelete, onLoadDNS, onSaveDNS, onDeleteDNS}) {
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const selected = credentials.find((cred) => String(cred.id) === String(selectedID));
+  const selectedDomain = domains.find((domain) => String(domain.credential_id) === String(selectedID) && String(domain.zone_id) === String(selectedZoneID));
+  const accountDomains = selected ? domains.filter((domain) => String(domain.credential_id) === String(selected.id)) : [];
+  const selectAccount = (cred) => {
+    setSelectedID(String(cred.id));
+    setSelectedZoneID("");
+    setEditingRecord(null);
+  };
+  const selectDomain = (domain) => {
+    setSelectedID(String(domain.credential_id));
+    setSelectedZoneID(String(domain.zone_id));
+    setEditingRecord(null);
+    onLoadDNS(domain.credential_id, domain.zone_id);
+  };
   return (
-    <div className="stack">
-      <CredentialManager kind="cloudflare" rows={credentials} onCreate={onCreate} onDelete={(_, id) => onDelete(id)} />
+    <div className="stack cloudflare-page">
+      <section className="panel action-panel">
+        <div>
+          <h2><Cloud size={18} /> Cloudflare accounts</h2>
+          <p>Link a Cloudflare account once, then choose cached zones from that account.</p>
+        </div>
+        <button type="button" className="primary" onClick={() => setDrawerOpen(true)}><Plus size={15} /> Add account</button>
+      </section>
+
       <section className="panel">
-        <h2><Globe2 size={18} /> Zones and DNS tools</h2>
+        <div className="account-header">
+          <h2><KeyRound size={18} /> Existing accounts</h2>
+          <button type="button" className="danger-button" disabled={!selected} onClick={() => selected && onDelete(selected.id)}><Trash2 size={15} /> Delete selected</button>
+        </div>
+        <div className="cloudflare-account-grid">
+          {credentials.map((cred) => {
+            const count = domains.filter((domain) => String(domain.credential_id) === String(cred.id)).length;
+            return (
+              <button type="button" className={String(selectedID) === String(cred.id) ? "cloudflare-account-card active" : "cloudflare-account-card"} key={cred.id} onClick={() => selectAccount(cred)}>
+                <span className="account-mark"><Cloud size={18} /></span>
+                <div>
+                  <b>{cred.name}</b>
+                  <small>{cred.account_id || "No account id"} · {count} domain{count === 1 ? "" : "s"}</small>
+                </div>
+                <em>{cred.is_active ? "Active" : "Inactive"}</em>
+              </button>
+            );
+          })}
+          {credentials.length === 0 && <div className="empty">No Cloudflare accounts linked yet.</div>}
+        </div>
+      </section>
+
+      <section className="panel">
+        <h2><Globe2 size={18} /> {selected ? `${selected.name} domains` : "Account domains"}</h2>
         <div className="domain-grid">
-          {domains.map((domain) => (
-            <button type="button" className={String(selectedID) === String(domain.credential_id) ? "domain-tile active" : "domain-tile"} key={`${domain.credential_id}-${domain.zone_id}`} onClick={() => { setSelectedID(String(domain.credential_id)); onLoadDNS(domain.credential_id); }}>
+          {accountDomains.map((domain) => (
+            <button type="button" className={String(selectedZoneID) === String(domain.zone_id) ? "domain-tile active" : "domain-tile"} key={`${domain.credential_id}-${domain.zone_id}`} onClick={() => selectDomain(domain)}>
               <Globe2 size={20} />
               <div>
                 <b>{domain.domain}</b>
-                <span>{domain.credential}</span>
+                <span>{domain.status || "cached zone"}</span>
                 <small>{domain.zone_id}</small>
               </div>
               <em>{domain.active ? "Active" : "Inactive"}</em>
             </button>
           ))}
-          {domains.length === 0 && <div className="empty">No Cloudflare domains linked yet.</div>}
+          {!selected && <div className="empty">Choose a Cloudflare account to view its domains.</div>}
+          {selected && accountDomains.length === 0 && <div className="empty">No cached domains for this account.</div>}
         </div>
       </section>
+
       <section className="panel">
         <div className="account-header">
-          <h2><Network size={18} /> DNS records {selected ? `for ${selected.domain || selected.name}` : ""}</h2>
-          <button disabled={!selectedID} onClick={() => onLoadDNS(selectedID)}><RefreshCw size={15} /> Refresh DNS</button>
+          <h2><Network size={18} /> DNS records {selectedDomain ? `for ${selectedDomain.domain}` : selected ? `for ${selected.name}` : ""}</h2>
+          <button disabled={!selectedID || !selectedZoneID} onClick={() => onLoadDNS(selectedID, selectedZoneID)}><RefreshCw size={15} /> Refresh DNS</button>
         </div>
         <form className="form-grid dns-form" onSubmit={onSaveDNS} key={editingRecord?.id || "new-dns"}>
           <select name="type" defaultValue={editingRecord?.type || "A"}><option>A</option><option>AAAA</option><option>CNAME</option><option>TXT</option><option>MX</option></select>
@@ -3083,20 +3279,63 @@ function CloudflareView({credentials, domains, selectedID, setSelectedID, dnsRec
           <input name="ttl" type="number" min="1" defaultValue={editingRecord?.ttl || 1} />
           <label className="check-row"><input name="proxied" type="checkbox" defaultChecked={Boolean(editingRecord?.proxied)} /> Proxied</label>
           <input name="comment" placeholder="Comment" defaultValue={editingRecord?.comment || ""} />
-          <button className="primary" disabled={!selectedID} type="submit">{editingRecord ? "Save DNS" : "Add DNS"}</button>
+          <button className="primary" disabled={!selectedID || !selectedZoneID} type="submit">{editingRecord ? "Save DNS" : "Add DNS"}</button>
           {editingRecord && <button type="button" onClick={() => setEditingRecord(null)}>Cancel</button>}
         </form>
         <div className="table dns-table">
           <div className="tr head"><span>Type</span><span>Name</span><span>Content</span><span>TTL</span><span>Proxy</span><span>Actions</span></div>
           {dnsRecords.map((record) => (
             <div className="tr" key={record.id}>
-              <span>{record.type}</span><span>{record.name}</span><span>{record.content}</span><span>{record.ttl}</span><span>{record.proxied ? "Yes" : "No"}</span>
+              <ExpandableCell value={record.type} max={12} /><ExpandableCell value={record.name} max={36} /><ExpandableCell value={record.content} max={42} /><ExpandableCell value={record.ttl} max={12} /><ExpandableCell value={record.proxied ? "Yes" : "No"} max={12} />
               <span className="row-actions"><button onClick={() => setEditingRecord(record)}>Edit</button><button className="danger-button" onClick={() => onDeleteDNS(record)}><Trash2 size={15} /></button></span>
             </div>
           ))}
-          {dnsRecords.length === 0 && <div className="empty">{selectedID ? "No DNS records loaded." : "Choose a zone to view DNS records."}</div>}
+          {dnsRecords.length === 0 && <div className="empty">{selectedID && selectedZoneID ? "No DNS records loaded." : "Choose a zone to view DNS records."}</div>}
         </div>
       </section>
+      {drawerOpen && (
+        <CloudflareAccountDrawer
+          onClose={() => setDrawerOpen(false)}
+          onCreate={async (event) => {
+            const ok = await onCreate("cloudflare", event);
+            if (ok) setDrawerOpen(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function CloudflareAccountDrawer({onClose, onCreate}) {
+  return (
+    <div className="side-drawer-backdrop" onClick={onClose}>
+      <aside className="side-drawer" onClick={(event) => event.stopPropagation()}>
+        <div className="side-drawer-head">
+          <div>
+            <h2><Cloud size={18} /> Add Cloudflare account</h2>
+            <p>Use an API token with zone read access so BeanCS can cache available domains.</p>
+          </div>
+          <button type="button" className="icon-button" aria-label="Close" onClick={onClose}><X size={16} /></button>
+        </div>
+        <form className="drawer-form" onSubmit={onCreate}>
+          <label>
+            Account name
+            <input name="name" placeholder="Production Cloudflare" required autoFocus />
+          </label>
+          <label>
+            Account ID
+            <input name="account_id" placeholder="Optional, limits zone discovery to this account" />
+          </label>
+          <label>
+            API token
+            <input name="api_token" type="password" placeholder="Cloudflare API token" required autoComplete="new-password" />
+          </label>
+          <div className="drawer-actions">
+            <button type="button" onClick={onClose}>Cancel</button>
+            <button className="primary" type="submit"><KeyRound size={15} /> Create link</button>
+          </div>
+        </form>
+      </aside>
     </div>
   );
 }
@@ -3123,9 +3362,17 @@ function DomainsView({domains}) {
   );
 }
 
-function NetworkingView({network, refresh, onSaveService, onDeleteService, onSaveIngress, onDeleteIngress, onSaveNetworkPolicy, onDeleteNetworkPolicy}) {
+function NetworkingView({network, refresh, onSaveService, onDeleteService, onSaveIngress, onDeleteIngress, onSaveNetworkPolicy, onDeleteNetworkPolicy, onDetail}) {
+  const [activeTab, setActiveTab] = useState("services");
   const data = network || {services: [], ingresses: [], endpoints: [], network_policies: [], access: [], controllers: {}};
   const controllers = data.controllers || {};
+  const tabs = [
+    {id: "services", label: "Services", icon: Database, count: data.services.length},
+    {id: "ingress", label: "Ingress & TLS", icon: Network, count: data.ingresses.length},
+    {id: "policies", label: "NetworkPolicy", icon: Lock, count: data.network_policies.length},
+    {id: "access", label: "Access addresses", icon: Globe2, count: data.access.length},
+    {id: "endpoints", label: "Endpoints", icon: Layers3, count: data.endpoints.length},
+  ];
   return (
     <div className="stack network-page">
       <section className="panel network-overview">
@@ -3151,41 +3398,76 @@ function NetworkingView({network, refresh, onSaveService, onDeleteService, onSav
         </div>
       </section>
 
-      <section className="panel">
-        <h2><Database size={18} /> Service, LoadBalancer and NodePort</h2>
-        <ServiceForm onSubmit={(event) => onSaveService(event)} />
-        <SimpleTable rows={data.services} columns={["namespace", "name", "type", "cluster_ip", "external_ip", "ports"]} actions={(row) => <button className="danger-button" onClick={() => onDeleteService(row)}><Trash2 size={15} /></button>} />
-      </section>
+      <section className="panel network-tabs-panel">
+        <div className="network-tabs" role="tablist" aria-label="Networking resources">
+          {tabs.map((tab) => {
+            const Icon = tab.icon;
+            return (
+              <button key={tab.id} type="button" role="tab" aria-selected={activeTab === tab.id} className={activeTab === tab.id ? "network-tab active" : "network-tab"} onClick={() => setActiveTab(tab.id)}>
+                <Icon size={15} />
+                <span>{tab.label}</span>
+                <b>{tab.count}</b>
+              </button>
+            );
+          })}
+        </div>
 
-      <section className="panel">
-        <h2><Network size={18} /> Ingress, domain and TLS binding</h2>
-        <IngressForm onSubmit={(event) => onSaveIngress(event)} />
-        <SimpleTable rows={data.ingresses} columns={["namespace", "name", "class", "hosts", "services", "tls", "address"]} actions={(row) => <button className="danger-button" onClick={() => onDeleteIngress(row)}><Trash2 size={15} /></button>} />
-      </section>
-
-      <section className="panel">
-        <h2><Lock size={18} /> NetworkPolicy</h2>
-        <NetworkPolicyForm onSubmit={(event) => onSaveNetworkPolicy(event)} />
-        <SimpleTable rows={data.network_policies} columns={["namespace", "name", "pod_selector", "policy_types", "ingress_rules", "egress_rules"]} actions={(row) => <button className="danger-button" onClick={() => onDeleteNetworkPolicy(row)}><Trash2 size={15} /></button>} />
-      </section>
-
-      <section className="dashboard-grid">
-        <div className="panel dashboard-panel">
-          <h2><Globe2 size={18} /> Service access addresses</h2>
-          <div className="mini-table">
-            {(data.access || []).map((item) => (
-              <div key={`${item.namespace}/${item.service}/${item.ingress || item.type}`}>
-                <span>{item.namespace}/{item.service}<small>{[item.type, item.class, item.tls ? "TLS" : "", item.load_balancer].filter(Boolean).join(" · ")}</small></span>
-                <b>{[...(item.urls || []), ...(item.node_ports || []).map((port) => `NodePort ${port}`)].join(" · ") || "-"}</b>
-              </div>
-            ))}
-            {(data.access || []).length === 0 && <div className="empty">No service access addresses reported.</div>}
+        {activeTab === "services" && (
+          <div className="network-tab-panel">
+            <h2><Database size={18} /> Service, LoadBalancer and NodePort</h2>
+            <ServiceForm onSubmit={(event) => onSaveService(event)} />
+            <SimpleTable rows={data.services} columns={["namespace", "name", "type", "cluster_ip", "external_ip", "ports"]} actions={(row) => (
+              <>
+                <button onClick={() => onDetail({kind: "services", row})}>Details</button>
+                <button className="danger-button" onClick={() => onDeleteService(row)}><Trash2 size={15} /></button>
+              </>
+            )} />
           </div>
-        </div>
-        <div className="panel dashboard-panel">
-          <h2><Layers3 size={18} /> Endpoints</h2>
-          <SimpleTable rows={data.endpoints || []} columns={["namespace", "name", "addresses", "ports"]} compact />
-        </div>
+        )}
+
+        {activeTab === "ingress" && (
+          <div className="network-tab-panel">
+            <h2><Network size={18} /> Ingress, domain and TLS binding</h2>
+            <IngressForm onSubmit={(event) => onSaveIngress(event)} />
+            <SimpleTable rows={data.ingresses} columns={["namespace", "name", "class", "hosts", "services", "tls", "address"]} actions={(row) => (
+              <>
+                <button onClick={() => onDetail({kind: "ingresses", row})}>Details</button>
+                <button className="danger-button" onClick={() => onDeleteIngress(row)}><Trash2 size={15} /></button>
+              </>
+            )} />
+          </div>
+        )}
+
+        {activeTab === "policies" && (
+          <div className="network-tab-panel">
+            <h2><Lock size={18} /> NetworkPolicy</h2>
+            <NetworkPolicyForm onSubmit={(event) => onSaveNetworkPolicy(event)} />
+            <SimpleTable rows={data.network_policies} columns={["namespace", "name", "pod_selector", "policy_types", "ingress_rules", "egress_rules"]} actions={(row) => (
+              <>
+                <button onClick={() => onDetail({kind: "network-policy", row})}>Details</button>
+                <button className="danger-button" onClick={() => onDeleteNetworkPolicy(row)}><Trash2 size={15} /></button>
+              </>
+            )} />
+          </div>
+        )}
+
+        {activeTab === "access" && (
+          <div className="network-tab-panel">
+          <h2><Globe2 size={18} /> Service access addresses</h2>
+          <SimpleTable
+            rows={data.access || []}
+            columns={["namespace", "service", "type", "class", "urls", "node_ports", "load_balancer"]}
+            actions={(row) => <button onClick={() => onDetail({kind: "service-access", row})}>Details</button>}
+          />
+          </div>
+        )}
+
+        {activeTab === "endpoints" && (
+          <div className="network-tab-panel">
+            <h2><Layers3 size={18} /> Endpoints</h2>
+            <SimpleTable rows={data.endpoints || []} columns={["namespace", "name", "addresses", "ports"]} actions={(row) => <button onClick={() => onDetail({kind: "endpoints", row})}>Details</button>} compact />
+          </div>
+        )}
       </section>
     </div>
   );
@@ -3229,6 +3511,20 @@ function NetworkPolicyForm({onSubmit}) {
   );
 }
 
+function ExpandableCell({value, className = "", max = 36}) {
+  const [expanded, setExpanded] = useState(false);
+  const text = formatCell(value);
+  const isLong = text.length > max;
+  if (!isLong) {
+    return <span className={className}>{text}</span>;
+  }
+  return (
+    <button type="button" className={`expandable-cell ${expanded ? "expanded" : ""} ${className}`.trim()} title={expanded ? "Collapse value" : text} onClick={() => setExpanded((current) => !current)}>
+      {expanded ? text : truncateMiddle(text, max)}
+    </button>
+  );
+}
+
 function SimpleTable({rows, columns, actions, compact = false}) {
   return (
     <div className={compact ? "table compact-table" : "table network-table"}>
@@ -3238,9 +3534,7 @@ function SimpleTable({rows, columns, actions, compact = false}) {
           {columns.map((column) => {
             const value = formatCell(row[column]);
             return (
-              <span key={column} className="cell-truncate" title={value}>
-                {value}
-              </span>
+              <ExpandableCell key={column} value={value} max={36} />
             );
           })}
           {actions && <span className="row-actions">{actions(row)}</span>}
@@ -3280,9 +3574,7 @@ function RuntimeTable({kind, rows, nodeJoinCommand, onLoadNodeJoinCommand, onCre
               {keys.map((key) => {
                 const value = formatCell(row[key]);
                 return (
-                  <span key={key} className="cell-truncate" title={value}>
-                    {value}
-                  </span>
+                  <ExpandableCell key={key} value={value} max={36} />
                 );
               })}
               <span className="row-actions">
@@ -3322,12 +3614,19 @@ function NodeJoinPanel({command, onLoad}) {
   );
 }
 
-function RuntimeDetailModal({detail, logs, logFollow, logStatus, selectedLogContainer, logTail, logLoaded, nodeHealth, onLoadNodeHealth, onSaveNodeLabels, onSaveNodeTaints, onCordonNode, onDrainNode, onDeleteNode, onSaveResourceQuota, onDeleteResourceQuota, onSaveLimitRange, onDeleteLimitRange, onSaveNamespacePermission, onDeleteNamespacePermission, onSaveNamespaceIsolation, onSelectLogContainer, onSetLogTail, onLoadContainerLogs, onFollowPodLogs, onStopPodLogs, onClose, onSaveService, onPatchNamespace}) {
+function RuntimeDetailDrawer({detail, logs, logFollow, logStatus, selectedLogContainer, logTail, logLoaded, nodeHealth, onLoadNodeHealth, onSaveNodeLabels, onSaveNodeTaints, onCordonNode, onDrainNode, onDeleteNode, onSaveResourceQuota, onDeleteResourceQuota, onSaveLimitRange, onDeleteLimitRange, onSaveNamespacePermission, onDeleteNamespacePermission, onSaveNamespaceIsolation, onSelectLogContainer, onSetLogTail, onLoadContainerLogs, onFollowPodLogs, onStopPodLogs, onClose, onSaveService, onPatchNamespace}) {
   const row = detail.row || {};
+  const title = `${detailTitle(detail.kind)} · ${row.namespace ? `${row.namespace}/` : ""}${row.name || row.summary?.name || ""}`;
   return (
-    <div className="modal-backdrop">
-      <div className="modal wide-modal">
-        <h2>{detail.kind} · {row.namespace ? `${row.namespace}/` : ""}{row.name}</h2>
+    <div className="side-drawer-backdrop" onClick={onClose}>
+      <aside className="side-drawer runtime-detail-drawer" onClick={(event) => event.stopPropagation()}>
+        <div className="side-drawer-head">
+          <div>
+            <h2>{title}</h2>
+            <p>{detail.loading ? "Loading live details..." : detail.error || "Live Kubernetes resource detail"}</p>
+          </div>
+          <button type="button" className="icon-button" aria-label="Close" onClick={onClose}><X size={16} /></button>
+        </div>
         {detail.kind === "service-edit" ? (
           <ServiceForm existing={row} onSubmit={(event) => onSaveService(event, row)} />
         ) : detail.kind === "namespaces" ? (
@@ -3360,10 +3659,24 @@ function RuntimeDetailModal({detail, logs, logFollow, logStatus, selectedLogCont
         ) : (
           <div className="detail-list">{Object.entries(row).map(([key, value]) => <span key={key}>{key.replaceAll("_", " ")} <b>{formatCell(value)}</b></span>)}</div>
         )}
-        <div className="modal-actions"><button type="button" onClick={onClose}>Close</button></div>
-      </div>
+      </aside>
     </div>
   );
+}
+
+function detailTitle(kind) {
+  return ({
+    pod: "Pod",
+    node: "Node",
+    services: "Service",
+    ingresses: "Ingress",
+    endpoints: "Endpoints",
+    namespaces: "Namespace",
+    "namespace-detail": "Namespace",
+    "network-policy": "NetworkPolicy",
+    "service-access": "Service access",
+    "service-edit": "Service",
+  }[kind] || kind);
 }
 
 function ContainerLogViewer({pod, logs, logFollow, logStatus, selectedContainer, tail, loaded, onSelectContainer, onSetTail, onLoad, onFollow, onStop}) {
@@ -3417,6 +3730,8 @@ function podContainers(pod) {
 }
 
 function NodeDetailView({detail, health, onLoadHealth, onSaveLabels, onSaveTaints, onCordon, onDrain, onDelete}) {
+  const [deleteStep, setDeleteStep] = useState("idle");
+  const [deleteName, setDeleteName] = useState("");
   const row = detail.row || {};
   const summary = row.summary || row;
   const usage = row.usage || {};
@@ -3425,6 +3740,7 @@ function NodeDetailView({detail, health, onLoadHealth, onSaveLabels, onSaveTaint
   const pods = row.pods || [];
   const conditions = row.conditions || [];
   const nodeName = summary.name || row.name;
+  const canConfirmDelete = Boolean(nodeName) && deleteName.trim() === nodeName;
   return (
     <div className="node-detail">
       {detail.loading && <p className="muted">Loading live node status...</p>}
@@ -3435,7 +3751,7 @@ function NodeDetailView({detail, health, onLoadHealth, onSaveLabels, onSaveTaint
           <button onClick={() => onCordon(nodeName, false)}>Cordon</button>
           <button onClick={() => onCordon(nodeName, true)}>Uncordon</button>
           <button onClick={() => onDrain(nodeName, {force: false, ignore_daemonsets: true, delete_emptydir_data: false, grace_period_seconds: 30})}>Drain safe</button>
-          <button className="danger-button" onClick={() => onDelete(nodeName)}><Trash2 size={15} /> Delete node</button>
+          <button className="danger-button" disabled={!nodeName} onClick={() => { setDeleteStep("warning"); setDeleteName(""); }}><Trash2 size={15} /> Delete node</button>
         </div>
         {health && (
           <div className={health.healthy ? "health-card good" : "health-card warning"}>
@@ -3445,6 +3761,39 @@ function NodeDetailView({detail, health, onLoadHealth, onSaveLabels, onSaveTaint
           </div>
         )}
       </section>
+      {deleteStep !== "idle" && (
+        <section className="node-section destructive-flow">
+          <h3><AlertTriangle size={15} /> Dangerous node deletion</h3>
+          {deleteStep === "warning" && (
+            <>
+              <p>Deleting a node removes it from Kubernetes cluster state. Make sure workloads are drained and the machine is intentionally removed or ready to rejoin.</p>
+              <div className="row-actions">
+                <button type="button" onClick={() => setDeleteStep("name")}>Continue</button>
+                <button type="button" onClick={() => setDeleteStep("idle")}>Cancel</button>
+              </div>
+            </>
+          )}
+          {deleteStep === "name" && (
+            <>
+              <p>Type the exact machine name to continue.</p>
+              <input value={deleteName} onChange={(event) => setDeleteName(event.target.value)} placeholder={nodeName} />
+              <div className="row-actions">
+                <button type="button" disabled={!canConfirmDelete} onClick={() => setDeleteStep("final")}>Continue</button>
+                <button type="button" onClick={() => setDeleteStep("idle")}>Cancel</button>
+              </div>
+            </>
+          )}
+          {deleteStep === "final" && (
+            <>
+              <p><b>Final warning.</b> This action deletes node <span className="mono">{nodeName}</span> from the cluster API. This is the last confirmation step.</p>
+              <div className="row-actions">
+                <button type="button" className="danger-button filled" onClick={() => onDelete(nodeName)}><Trash2 size={15} /> Delete {nodeName}</button>
+                <button type="button" onClick={() => setDeleteStep("idle")}>Cancel</button>
+              </div>
+            </>
+          )}
+        </section>
+      )}
       <div className="node-status-grid">
         <div className="runtime-summary">
           <strong>{summary.status || "-"}</strong>
@@ -3639,12 +3988,12 @@ function ServiceForm({existing, onSubmit}) {
 
 function CredentialManager({kind, rows, onCreate, onDelete}) {
   const isCloudflare = kind === "cloudflare";
-  const title = isCloudflare ? "Cloudflare credentials" : "BasaltPass instances";
-  const columns = isCloudflare ? ["name", "domain", "zone_id", "account_id"] : ["name", "base_url", "client_id"];
+  const title = isCloudflare ? "Cloudflare accounts" : "BasaltPass instances";
+  const columns = isCloudflare ? ["name", "account_id", "is_active"] : ["name", "base_url", "client_id"];
   return (
     <div className="stack">
       <section className="panel">
-        <h2><KeyRound size={18} /> Add {isCloudflare ? "Cloudflare key" : "BasaltPass instance"}</h2>
+        <h2><KeyRound size={18} /> Add {isCloudflare ? "Cloudflare account" : "BasaltPass instance"}</h2>
         <form className="form-grid" onSubmit={(event) => onCreate(kind, event)}>
           <input name="name" placeholder="Name" required />
           {isCloudflare ? (
@@ -3669,7 +4018,7 @@ function CredentialManager({kind, rows, onCreate, onDelete}) {
           <div className="tr head">{columns.map((column) => <span key={column}>{column.replaceAll("_", " ")}</span>)}<span>Actions</span></div>
           {rows.map((row) => (
             <div className="tr" key={row.id}>
-              {columns.map((column) => <span key={column}>{row[column] || "-"}</span>)}
+              {columns.map((column) => <ExpandableCell key={column} value={row[column] || "-"} max={34} />)}
               <span><button onClick={() => onDelete(kind, row.id)}><Trash2 size={15} /></button></span>
             </div>
           ))}
@@ -3742,6 +4091,7 @@ function defaultDeployForm() {
     source_archive_name: "",
     basaltpass_instance_id: "",
     cloudflare_credential_id: "",
+    cloudflare_zone_id: "",
     exposure_mode: "private",
     subdomain: "",
     private_host: "",
@@ -3753,7 +4103,8 @@ function defaultDeployForm() {
 
 function buildProjectPayload(form, githubCredentialID, credentials) {
   const exposure = form.exposure_mode;
-  const selectedCF = credentials.cloudflare.find((cred) => String(cred.id) === String(form.cloudflare_credential_id));
+  const selectedCF = (credentials.domains || []).find((domain) => String(domain.credential_id) === String(form.cloudflare_credential_id) && String(domain.zone_id) === String(form.cloudflare_zone_id))
+    || credentials.cloudflare.find((cred) => String(cred.id) === String(form.cloudflare_credential_id));
   const domain = exposure === "public" && selectedCF ? `${form.subdomain}.${selectedCF.domain}` : exposure === "private" ? form.private_host : "";
   const source = form.deploy_source === "registry" ? "registry" : "github";
   return {
@@ -3769,6 +4120,7 @@ function buildProjectPayload(form, githubCredentialID, credentials) {
     auto_deploy: source === "github" ? form.update_mode === "argocd" : false,
     basaltpass_instance_id: form.basaltpass_instance_id ? Number(form.basaltpass_instance_id) : undefined,
     cloudflare_credential_id: exposure === "public" ? Number(form.cloudflare_credential_id) : undefined,
+    cloudflare_zone_id: exposure === "public" ? form.cloudflare_zone_id : undefined,
     exposure_mode: exposure,
     subdomain: form.subdomain || undefined,
     resource_preset: form.resource_preset || "small",
@@ -3831,17 +4183,71 @@ function ChevronIcon({open}) {
 }
 
 function profileFromToken(token) {
-  const fallback = {name: "Signed in user", detail: "BeanCS session", initial: "U", scopes: []};
+  const fallback = {name: "Signed in user", detail: "BeanCS session", initial: "U", avatar: "", scopes: []};
   if (!token || !token.includes(".")) return fallback;
   try {
     const payload = JSON.parse(base64URLDecode(token.split(".")[1]));
     const pick = (values) => values.map((value) => String(value || "").trim()).find(Boolean) || "";
     const name = pick([payload.name, payload.preferred_username, payload.username, payload.user, payload.login, payload.email, payload.sub]) || fallback.name;
-    const detail = pick([payload.email, payload.preferred_username, payload.username, payload.login, payload.sub].filter((value) => String(value || "").trim() && String(value || "").trim() !== name)) || "BeanCS session";
-    return {name, detail, initial: String(name).trim().slice(0, 1).toUpperCase() || "U", scopes: String(payload.scope || "").split(/\s+/).filter(Boolean)};
+    const detail = pick([
+      payload.email,
+      payload.preferred_username,
+      payload.username,
+      payload.login,
+      payload.sub,
+    ].filter((value) => String(value || "").trim() && String(value || "").trim() !== name)) || "BeanCS session";
+    const avatar = pick([
+      payload.picture,
+      payload.avatar,
+      payload.avatar_url,
+      payload.image,
+      payload.image_url,
+      payload.profile_picture,
+    ]);
+    return {
+      name,
+      detail,
+      avatar,
+      initial: String(name).trim().slice(0, 1).toUpperCase() || "U",
+      scopes: String(payload.scope || "").split(/\s+/).filter(Boolean),
+    };
   } catch {
     return fallback;
   }
+}
+
+function profileFromBasalt(profile, token) {
+  const fallback = profileFromToken(token);
+  if (!profile) return fallback;
+  const pick = (values) => values.map((value) => String(value || "").trim()).find(Boolean) || "";
+  const name = pick([
+    profile.name,
+    profile.nickname,
+    profile.preferred_username,
+    profile.username,
+    profile.email,
+    profile.sub,
+  ]) || fallback.name;
+  const detail = pick([
+    profile.email,
+    profile.phone_number,
+    profile.tenant_code,
+    profile.tenant_id,
+  ].filter((value) => String(value || "").trim() && String(value || "").trim() !== name)) || fallback.detail;
+  const avatar = pick([
+    profile.picture,
+    profile.avatar_url,
+    profile.avatar,
+    profile.image,
+    profile.image_url,
+  ]) || fallback.avatar;
+  return {
+    ...fallback,
+    name,
+    detail,
+    avatar,
+    initial: String(name).trim().slice(0, 1).toUpperCase() || fallback.initial,
+  };
 }
 
 function base64URLDecode(value) {
@@ -4045,7 +4451,9 @@ function deploymentShortID(name, fallback) {
 function truncateMiddle(value, max = 28) {
   const text = String(value || "-");
   if (text.length <= max) return text;
-  return `${text.slice(0, Math.max(8, max - 12))}...`;
+  const head = Math.max(8, Math.ceil((max - 3) * 0.58));
+  const tail = Math.max(6, max - 3 - head);
+  return `${text.slice(0, head)}...${text.slice(-tail)}`;
 }
 
 function formatBytes(value) {

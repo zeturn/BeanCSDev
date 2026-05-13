@@ -14,6 +14,7 @@ type CloudflareDomainResponse struct {
 	ZoneID       string `json:"zone_id"`
 	Domain       string `json:"domain"`
 	AccountID    string `json:"account_id,omitempty"`
+	Status       string `json:"status,omitempty"`
 	Active       bool   `json:"active"`
 }
 

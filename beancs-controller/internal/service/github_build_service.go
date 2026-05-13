@@ -114,8 +114,31 @@ func (s *GitHubBuildService) ensureWorkflow(ctx context.Context, token, owner, r
 			callbackEnabled = false
 		}
 	}
+	if err := s.ensureRegistrySecrets(ctx, token, owner, repo); err != nil {
+		return err
+	}
 	if err := putFile(ctx, client, owner, repo, beancsBuildWorkflowPath, beancsBuildWorkflow(project, callbackEnabled), "beancs: add build workflow"); err != nil {
 		return githubWorkflowFilePermissionError(owner, repo, err)
+	}
+	return nil
+}
+
+func (s *GitHubBuildService) ensureRegistrySecrets(ctx context.Context, token, owner, repo string) error {
+	if s.cfg == nil || strings.TrimSpace(s.cfg.RegistryHost) == "" {
+		return nil
+	}
+	if strings.TrimSpace(s.cfg.RegistryUsername) == "" || strings.TrimSpace(s.cfg.RegistryToken) == "" {
+		return fmt.Errorf("BEANCS_REGISTRY_USERNAME and BEANCS_REGISTRY_TOKEN are required to write the BeanCS registry push secrets")
+	}
+	secrets := map[string]string{
+		"BEANCS_REGISTRY_HOST":     normalizeRegistryHost(s.cfg.RegistryHost),
+		"BEANCS_REGISTRY_USERNAME": strings.TrimSpace(s.cfg.RegistryUsername),
+		"BEANCS_REGISTRY_TOKEN":    s.cfg.RegistryToken,
+	}
+	for name, value := range secrets {
+		if err := s.putRepositorySecret(ctx, token, owner, repo, name, value); err != nil {
+			return githubSecretsPermissionError(owner, repo, err)
+		}
 	}
 	return nil
 }
@@ -135,6 +158,7 @@ func (s *GitHubBuildService) ensureWebhookSecrets(ctx context.Context, token, ow
 func (s *GitHubBuildService) dispatchWorkflow(ctx context.Context, token, owner, repo, branch string, project *model.Project, image string) error {
 	inputs := map[string]any{
 		"image":           image,
+		"ghcr_image":      ghcrDispatchImage(project, image),
 		"dockerfile_path": coalesce(project.DockerfilePath, "Dockerfile"),
 		"context":         ".",
 	}
@@ -246,7 +270,7 @@ func (s *GitHubBuildService) reconcileDeployment(ctx context.Context, deployment
 	if err := s.db.WithContext(ctx).Model(&project).Updates(map[string]any{"image_reference": image}).Error; err != nil {
 		return err
 	}
-	if err := s.gitops.CommitProjectManifests(ctx, token, cred, &project); err != nil {
+	if err := s.gitops.UpdateImageTag(ctx, token, cred, &project, image); err != nil {
 		return err
 	}
 	return s.db.WithContext(ctx).Model(&deployment).Updates(map[string]any{
@@ -325,6 +349,9 @@ func (s *GitHubBuildService) workflowRun(ctx context.Context, token, owner, repo
 func buildImageReference(project *model.Project) string {
 	base := strings.TrimSpace(project.ImageReference)
 	if base == "" {
+		base = strings.TrimSpace(project.RegistryImageReference)
+	}
+	if base == "" {
 		base = "ghcr.io/" + strings.ToLower(project.GitHubRepo)
 	}
 	if strings.Contains(base, "@") {
@@ -336,6 +363,18 @@ func buildImageReference(project *model.Project) string {
 		base = base[:lastColon]
 	}
 	return base + ":beancs-" + time.Now().UTC().Format("20060102150405")
+}
+
+func ghcrDispatchImage(project *model.Project, image string) string {
+	base := ghcrImageBase(project)
+	if base == "" {
+		base = "ghcr.io/" + strings.ToLower(project.GitHubRepo)
+	}
+	tag := "latest"
+	if i := strings.LastIndex(image, ":"); i > strings.LastIndex(image, "/") {
+		tag = image[i+1:]
+	}
+	return base + ":" + tag
 }
 
 func (s *GitHubBuildService) webhookURL() string {
@@ -485,8 +524,11 @@ func beancsBuildWorkflow(project *model.Project, callbackEnabled bool) string {
 	trigger := `  workflow_dispatch:
     inputs:
       image:
-        description: Target GHCR image reference
+        description: Target BeanCS registry image reference
         required: true
+      ghcr_image:
+        description: Target GHCR image reference
+        required: false
       dockerfile_path:
         description: Dockerfile path
         required: false
@@ -500,6 +542,8 @@ func beancsBuildWorkflow(project *model.Project, callbackEnabled bool) string {
 		trigger += fmt.Sprintf(`  push:
     branches:
       - %s
+    tags:
+      - 'v*'
 `, coalesce(project.GitHubBranch, "main"))
 	}
 	callback := ""
@@ -517,7 +561,7 @@ func beancsBuildWorkflow(project *model.Project, callbackEnabled bool) string {
           if [ "$BEANCS_STATUS" = "success" ]; then STATUS="success"; fi
           BODY=$(jq -nc --arg project "$BEANCS_PROJECT" --arg tag "$BEANCS_IMAGE" --arg commit "$GITHUB_SHA" --arg status "$STATUS" '{project:$project, tag:$tag, commit:$commit, status:$status}')
           SIG="sha256=$(printf '%%s' "$BODY" | openssl dgst -sha256 -hmac "$BEANCS_WEBHOOK_SECRET" -binary | xxd -p -c 256)"
-          curl -fsS -X POST "$BEANCS_WEBHOOK_URL" -H "Content-Type: application/json" -H "X-Hub-Signature-256: $SIG" --data "$BODY"
+          curl -fsS -X POST "$BEANCS_WEBHOOK_URL" -H "Content-Type: application/json" -H "X-Hub-Signature-256: $SIG" --data "$BODY" || echo "BeanCS webhook notification failed; build result remains valid."
 `, project.Name)
 	}
 	return fmt.Sprintf(`name: BeanCS Build
@@ -540,22 +584,44 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             IMAGE="${{ inputs.image }}"
+            GHCR_IMAGE="${{ inputs.ghcr_image }}"
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            REPO="${GITHUB_REPOSITORY,,}"
+            TAG="${GITHUB_REF#refs/tags/}"
+            IMAGE="${{ secrets.BEANCS_REGISTRY_HOST }}/${REPO}:${TAG}"
+            GHCR_IMAGE="ghcr.io/${REPO}:${TAG}"
           else
             REPO="${GITHUB_REPOSITORY,,}"
-            IMAGE="ghcr.io/${REPO}:beancs-${GITHUB_SHA::12}"
+            IMAGE="${{ secrets.BEANCS_REGISTRY_HOST }}/${REPO}:beancs-${GITHUB_SHA::12}"
+            GHCR_IMAGE="ghcr.io/${REPO}:beancs-${GITHUB_SHA::12}"
+          fi
+          if [ -z "$GHCR_IMAGE" ]; then
+            REPO="${GITHUB_REPOSITORY,,}"
+            TAG="${IMAGE##*:}"
+            GHCR_IMAGE="ghcr.io/${REPO}:${TAG}"
           fi
           echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+          echo "ghcr_image=$GHCR_IMAGE" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.BEANCS_REGISTRY_HOST }}
+          username: ${{ secrets.BEANCS_REGISTRY_USERNAME }}
+          password: ${{ secrets.BEANCS_REGISTRY_TOKEN }}
       - uses: docker/build-push-action@v6
         with:
           context: ${{ github.event_name == 'workflow_dispatch' && inputs.context || '.' }}
           file: ${{ github.event_name == 'workflow_dispatch' && inputs.dockerfile_path || '%s' }}
+          platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.meta.outputs.image }}
+          tags: |
+            ${{ steps.meta.outputs.image }}
+            ${{ steps.meta.outputs.ghcr_image }}
 %s`, trigger, coalesce(project.DockerfilePath, "Dockerfile"), callback)
 }

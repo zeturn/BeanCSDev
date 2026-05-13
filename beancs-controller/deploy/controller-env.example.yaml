@@ -31,3 +31,9 @@ stringData:
   BEANCS_GITHUB_APP_SLUG: beancs
   # PEM with escaped newlines or base64-encoded PEM.
   BEANCS_GITHUB_APP_PRIVATE_KEY: replace-me
+  BEANCS_REGISTRY_HOST: registry.beancs.hollowdata.com
+  BEANCS_REGISTRY_USERNAME: beancs-system
+  BEANCS_REGISTRY_TOKEN: replace-me
+  BEANCS_REGISTRY_PULL_USERNAME: robot$beancs
+  BEANCS_REGISTRY_PULL_TOKEN: replace-me
+  BEANCS_REGISTRY_PULL_SECRET: beancs-registry-pull

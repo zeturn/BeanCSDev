@@ -154,7 +154,7 @@ func (s *DeploymentService) HandleGitHubWebhook(ctx context.Context, req dto.Git
 		if err != nil {
 			return err
 		}
-		return s.gitops.CommitProjectManifests(ctx, token, cred, &p)
+		return s.gitops.UpdateImageTag(ctx, token, cred, &p, imageRef)
 	}
 	return nil
 }

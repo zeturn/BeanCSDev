@@ -20,6 +20,10 @@ type Manager struct {
 	ClusterName              string
 	K3sServerURL             string
 	K3sJoinToken             string
+	RegistryHost             string
+	RegistryPullUsername     string
+	RegistryPullToken        string
+	RegistryPullSecret       string
 	err                      error
 }
 
@@ -57,6 +61,10 @@ func NewManager(cfg *config.Config) *Manager {
 		ClusterName:              cfg.ClusterName,
 		K3sServerURL:             strings.TrimSpace(cfg.K3sServerURL),
 		K3sJoinToken:             strings.TrimSpace(cfg.K3sJoinToken),
+		RegistryHost:             strings.TrimPrefix(strings.TrimPrefix(strings.TrimRight(strings.TrimSpace(cfg.RegistryHost), "/"), "https://"), "http://"),
+		RegistryPullUsername:     strings.TrimSpace(cfg.RegistryPullUsername),
+		RegistryPullToken:        strings.TrimSpace(cfg.RegistryPullToken),
+		RegistryPullSecret:       strings.TrimSpace(cfg.RegistryPullSecret),
 		PublicIngressNamespaces:  splitNamespaces(cfg.PublicIngressNamespaces, []string{"kube-system", "traefik"}),
 		PrivateIngressNamespaces: splitNamespaces(cfg.PrivateIngressNamespaces, []string{"tailscale", "tailscale-system"}),
 		CertManager: CertManagerOptions{

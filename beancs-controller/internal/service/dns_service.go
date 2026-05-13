@@ -1,9 +1,14 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/url"
 	"strings"
+	"time"
 
 	"github.com/cloudflare/cloudflare-go/v2"
 	"github.com/cloudflare/cloudflare-go/v2/dns"
@@ -35,7 +40,7 @@ func (s *DNSService) CreateRecordForHost(ctx context.Context, token string, cred
 			Type:    cloudflare.F(dns.ARecordTypeA),
 			Name:    cloudflare.F(fqdn),
 			Content: cloudflare.F(s.IngressIP),
-			Proxied: cloudflare.F(true),
+			Proxied: cloudflare.F(false),
 			TTL:     cloudflare.F(dns.TTL1),
 			Comment: cloudflare.F("BeanCS managed - project: " + projectName),
 		},
@@ -51,6 +56,25 @@ func (s *DNSService) CreateRecordForHost(ctx context.Context, token string, cred
 		Content:                fmt.Sprint(result.Content),
 		Proxied:                result.Proxied,
 	}, nil
+}
+
+func (s *DNSService) EnsureRecordDNSOnly(ctx context.Context, token string, cred model.CloudflareCredential, record model.DNSRecord) error {
+	if record.CloudflareRecordID == "" {
+		return fmt.Errorf("cloudflare record id is empty")
+	}
+	body, err := json.Marshal(map[string]any{"proxied": false})
+	if err != nil {
+		return err
+	}
+	endpoint := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/dns_records/%s", url.PathEscape(cred.ZoneID), url.PathEscape(record.CloudflareRecordID))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	_, err = cloudflareDo(ctx, &http.Client{Timeout: 15 * time.Second}, req)
+	return err
 }
 
 func (s *DNSService) DeleteRecord(ctx context.Context, token, zoneID, recordID string) error {
