@@ -270,7 +270,7 @@ func (s *GitHubBuildService) reconcileDeployment(ctx context.Context, deployment
 	if err := s.db.WithContext(ctx).Model(&project).Updates(map[string]any{"image_reference": image}).Error; err != nil {
 		return err
 	}
-	if err := s.gitops.CommitProjectManifests(ctx, token, cred, &project); err != nil {
+	if err := s.gitops.UpdateImageTag(ctx, token, cred, &project, image); err != nil {
 		return err
 	}
 	return s.db.WithContext(ctx).Model(&deployment).Updates(map[string]any{
@@ -542,6 +542,8 @@ func beancsBuildWorkflow(project *model.Project, callbackEnabled bool) string {
 		trigger += fmt.Sprintf(`  push:
     branches:
       - %s
+    tags:
+      - 'v*'
 `, coalesce(project.GitHubBranch, "main"))
 	}
 	callback := ""
@@ -583,6 +585,11 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             IMAGE="${{ inputs.image }}"
             GHCR_IMAGE="${{ inputs.ghcr_image }}"
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            REPO="${GITHUB_REPOSITORY,,}"
+            TAG="${GITHUB_REF#refs/tags/}"
+            IMAGE="${{ secrets.BEANCS_REGISTRY_HOST }}/${REPO}:${TAG}"
+            GHCR_IMAGE="ghcr.io/${REPO}:${TAG}"
           else
             REPO="${GITHUB_REPOSITORY,,}"
             IMAGE="${{ secrets.BEANCS_REGISTRY_HOST }}/${REPO}:beancs-${GITHUB_SHA::12}"

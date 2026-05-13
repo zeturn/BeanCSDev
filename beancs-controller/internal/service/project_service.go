@@ -531,6 +531,21 @@ func (s *ProjectService) DeleteProject(ctx context.Context, project *model.Proje
 			cleanupErrs = append(cleanupErrs, fmt.Errorf("load BasaltPass client: %w", err))
 		}
 	}
+	// Clean up GitOps manifests from the gitops repo
+	if project.GitHubCredentialID != 0 && s.credentials != nil && s.gitops != nil {
+		var ghCred model.GitHubCredential
+		if err := s.db.WithContext(ctx).First(&ghCred, project.GitHubCredentialID).Error; err == nil {
+			if ghToken, err := s.credentials.GitHubToken(ctx, ghCred); err == nil {
+				if err := s.gitops.DeleteProjectManifests(ctx, ghToken, ghCred, project.Name); err != nil {
+					cleanupErrs = append(cleanupErrs, fmt.Errorf("delete GitOps manifests for %s: %w", project.Name, err))
+				}
+			}
+		}
+	}
+	// Delete Argo CD Application CR
+	if err := s.k8s.DeleteArgoCDApplication(ctx, project.Name); err != nil {
+		cleanupErrs = append(cleanupErrs, fmt.Errorf("delete Argo CD Application %s: %w", project.Name, err))
+	}
 	if len(cleanupErrs) > 0 {
 		return fmt.Errorf("project cleanup failed; database record retained for retry: %v", cleanupErrs)
 	}

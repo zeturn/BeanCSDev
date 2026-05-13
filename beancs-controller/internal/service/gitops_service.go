@@ -4,11 +4,14 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"regexp"
 	"strings"
 
 	"github.com/google/go-github/v62/github"
 	"github.com/zeturn/beancs-controller/internal/model"
 )
+
+var newTagPattern = regexp.MustCompile(`(?m)^(\s*newTag:\s*)(.+)$`)
 
 type GitOpsService struct{}
 
@@ -18,12 +21,9 @@ func (s *GitOpsService) CommitProjectManifests(ctx context.Context, token string
 	if token == "" || cred.GitOpsRepo == "" {
 		return nil
 	}
-	owner, repo, ok := splitRepo(cred.GitOpsRepo)
+	owner, repo, ok := resolveGitOpsRepo(cred)
 	if !ok {
-		if cred.Org == "" {
-			return fmt.Errorf("gitops repo must be owner/repo when org is empty")
-		}
-		owner, repo = cred.Org, cred.GitOpsRepo
+		return fmt.Errorf("gitops repo must be owner/repo when org is empty")
 	}
 	client := github.NewClient(nil).WithAuthToken(token)
 	files := s.RenderManifests(project)
@@ -36,11 +36,189 @@ func (s *GitOpsService) CommitProjectManifests(ctx context.Context, token string
 	return nil
 }
 
+// UpdateImageTag updates only the newTag field in the overlay kustomization.yaml.
+// This is much lighter than CommitProjectManifests — it modifies a single line in one file.
+func (s *GitOpsService) UpdateImageTag(ctx context.Context, token string, cred model.GitHubCredential, project *model.Project, newImageRef string) error {
+	if token == "" || cred.GitOpsRepo == "" {
+		return nil
+	}
+	owner, repo, ok := resolveGitOpsRepo(cred)
+	if !ok {
+		return fmt.Errorf("gitops repo must be owner/repo when org is empty")
+	}
+	newTag := extractImageTag(newImageRef)
+	if newTag == "" {
+		newTag = "latest"
+	}
+	filePath := path.Join("apps", project.Name, "overlays", "dev", "kustomization.yaml")
+	client := github.NewClient(nil).WithAuthToken(token)
+
+	// Read current kustomization.yaml
+	current, _, resp, err := client.Repositories.GetContents(ctx, owner, repo, filePath, nil)
+	if err != nil {
+		if resp != nil && resp.Response != nil && resp.Response.StatusCode == 404 {
+			// Overlay doesn't exist yet — fall back to full manifest commit
+			return s.CommitProjectManifests(ctx, token, cred, project)
+		}
+		return fmt.Errorf("read gitops overlay: %w", err)
+	}
+	content, err := current.GetContent()
+	if err != nil {
+		return fmt.Errorf("decode gitops overlay: %w", err)
+	}
+
+	// Also update newName if the image base changed
+	newName := extractImageName(newImageRef)
+	updated := content
+	if newName != "" {
+		newNamePattern := regexp.MustCompile(`(?m)^(\s*newName:\s*)(.+)$`)
+		updated = newNamePattern.ReplaceAllString(updated, "${1}"+newName)
+	}
+
+	// Replace newTag value
+	if !newTagPattern.MatchString(updated) {
+		// No newTag line found — fall back to full manifest commit
+		return s.CommitProjectManifests(ctx, token, cred, project)
+	}
+	updated = newTagPattern.ReplaceAllString(updated, "${1}"+newTag)
+
+	if updated == content {
+		return nil // no change needed
+	}
+
+	msg := fmt.Sprintf("beancs(%s): update image to %s", project.Name, newTag)
+	opts := &github.RepositoryContentFileOptions{
+		Message: github.String(msg),
+		Content: []byte(updated),
+		SHA:     current.SHA,
+	}
+	_, _, err = client.Repositories.UpdateFile(ctx, owner, repo, filePath, opts)
+	return err
+}
+
+// DeleteProjectManifests removes the entire apps/<project>/ directory from the gitops repo.
+func (s *GitOpsService) DeleteProjectManifests(ctx context.Context, token string, cred model.GitHubCredential, projectName string) error {
+	if token == "" || cred.GitOpsRepo == "" {
+		return nil
+	}
+	owner, repo, ok := resolveGitOpsRepo(cred)
+	if !ok {
+		return fmt.Errorf("gitops repo must be owner/repo when org is empty")
+	}
+	client := github.NewClient(nil).WithAuthToken(token)
+	dirPath := "apps/" + projectName
+
+	// List all files in the project directory recursively
+	files, err := listGitOpsFiles(ctx, client, owner, repo, dirPath)
+	if err != nil {
+		return nil // directory doesn't exist or error listing — skip silently
+	}
+	if len(files) == 0 {
+		return nil
+	}
+
+	// Delete each file (GitHub API requires per-file deletion for contents API)
+	msg := fmt.Sprintf("beancs: remove %s manifests", projectName)
+	for _, f := range files {
+		opts := &github.RepositoryContentFileOptions{
+			Message: github.String(msg),
+			SHA:     github.String(f.sha),
+		}
+		_, _, err := client.Repositories.DeleteFile(ctx, owner, repo, f.path, opts)
+		if err != nil {
+			return fmt.Errorf("delete gitops file %s: %w", f.path, err)
+		}
+	}
+	return nil
+}
+
+type gitOpsFile struct {
+	path string
+	sha  string
+}
+
+// listGitOpsFiles recursively lists all files under a directory in the gitops repo.
+func listGitOpsFiles(ctx context.Context, client *github.Client, owner, repo, dirPath string) ([]gitOpsFile, error) {
+	_, dirContents, resp, err := client.Repositories.GetContents(ctx, owner, repo, dirPath, nil)
+	if err != nil {
+		if resp != nil && resp.Response != nil && resp.Response.StatusCode == 404 {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var files []gitOpsFile
+	for _, entry := range dirContents {
+		if entry.GetType() == "file" {
+			files = append(files, gitOpsFile{path: entry.GetPath(), sha: entry.GetSHA()})
+		} else if entry.GetType() == "dir" {
+			subFiles, err := listGitOpsFiles(ctx, client, owner, repo, entry.GetPath())
+			if err != nil {
+				return nil, err
+			}
+			files = append(files, subFiles...)
+		}
+	}
+	return files, nil
+}
+
+// resolveGitOpsRepo extracts owner/repo from the GitHubCredential's GitOpsRepo field.
+func resolveGitOpsRepo(cred model.GitHubCredential) (string, string, bool) {
+	owner, repo, ok := splitRepo(cred.GitOpsRepo)
+	if !ok {
+		if cred.Org == "" {
+			return "", "", false
+		}
+		owner, repo = cred.Org, cred.GitOpsRepo
+		ok = true
+	}
+	return owner, repo, ok
+}
+
+// extractImageTag extracts the tag from a full image reference like "harbor.host/proj/app:v1.2.0".
+func extractImageTag(imageRef string) string {
+	imageRef = strings.TrimSpace(imageRef)
+	if imageRef == "" {
+		return ""
+	}
+	// Handle digest references (image@sha256:...)
+	if atIdx := strings.Index(imageRef, "@"); atIdx >= 0 {
+		imageRef = imageRef[:atIdx]
+	}
+	lastSlash := strings.LastIndex(imageRef, "/")
+	lastColon := strings.LastIndex(imageRef, ":")
+	if lastColon > lastSlash {
+		return imageRef[lastColon+1:]
+	}
+	return ""
+}
+
+// extractImageName extracts the image name (without tag) from a full image reference.
+func extractImageName(imageRef string) string {
+	imageRef = strings.TrimSpace(imageRef)
+	if imageRef == "" {
+		return ""
+	}
+	if atIdx := strings.Index(imageRef, "@"); atIdx >= 0 {
+		imageRef = imageRef[:atIdx]
+	}
+	lastSlash := strings.LastIndex(imageRef, "/")
+	lastColon := strings.LastIndex(imageRef, ":")
+	if lastColon > lastSlash {
+		return imageRef[:lastColon]
+	}
+	return imageRef
+}
+
 func (s *GitOpsService) RenderManifests(project *model.Project) map[string]string {
 	base := "apps/" + project.Name
 	image := strings.TrimSpace(project.ImageReference)
 	if image == "" {
 		image = "ghcr.io/" + strings.ToLower(project.GitHubRepo) + ":latest"
+	}
+	imageName := extractImageName(image)
+	imageTag := extractImageTag(image)
+	if imageTag == "" {
+		imageTag = "latest"
 	}
 	pullSecrets := ""
 	if project.RegistryPullSecretName != "" {
@@ -121,8 +299,8 @@ spec:
 images:
   - name: app
     newName: %s
-    newTag: latest
-`, image),
+    newTag: %s
+`, imageName, imageTag),
 	}
 }
 
