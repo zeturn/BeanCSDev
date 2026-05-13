@@ -405,11 +405,23 @@ function App() {
     setProjects([]);
   }
 
-  async function connectGitHubApp(event) {
+  async function connectGitHubApp(event, gitopsRepo) {
     event?.preventDefault();
     setError("");
-    const data = await api.post("/credentials/github/app/start", {});
+    const body = {};
+    if (gitopsRepo) body.gitops_repo = gitopsRepo.trim();
+    const data = await api.post("/credentials/github/app/start", body);
     location.href = data.install_url;
+  }
+
+  async function updateGitHubCredential(id, updates) {
+    try {
+      await api.patch(`/credentials/github/${id}`, updates);
+      await loadWorkspace();
+      setNotice("GitHub credential updated.");
+    } catch (err) {
+      setError(err.message);
+    }
   }
 
   async function createCredential(kind, event) {
@@ -1533,7 +1545,7 @@ function App() {
             {view === "metrics" && <MetricsView dashboard={dashboard} runtime={runtime} refresh={loadDashboard} />}
             {view === "settings" && <SettingsView version={appVersion} />}
             {view === "github" && (
-              <GitHubView credentials={credentials.github} onConnect={connectGitHubApp} onRepos={loadRepos} onDelete={(id) => deleteCredential("github", id)} reposByCredential={reposByCredential} repoFilters={repoFilters} setRepoFilters={setRepoFilters} />
+              <GitHubView credentials={credentials.github} onConnect={connectGitHubApp} onUpdate={updateGitHubCredential} onRepos={loadRepos} onDelete={(id) => deleteCredential("github", id)} reposByCredential={reposByCredential} repoFilters={repoFilters} setRepoFilters={setRepoFilters} />
             )}
             {view === "domains" && <DomainsView domains={domains} />}
             {view === "networking" && <NetworkingView network={network} refresh={loadNetwork} onSaveService={saveService} onDeleteService={deleteService} onSaveIngress={saveIngress} onDeleteIngress={deleteIngress} onSaveNetworkPolicy={saveNetworkPolicy} onDeleteNetworkPolicy={deleteNetworkPolicy} onDetail={setRuntimeDetail} />}
@@ -3156,7 +3168,8 @@ function APIKeysView({keys, createdKey, onDismissCreated, onCreate, onRevoke, on
   );
 }
 
-function GitHubView({credentials, onConnect, onRepos, onDelete, reposByCredential, repoFilters, setRepoFilters}) {
+function GitHubView({credentials, onConnect, onUpdate, onRepos, onDelete, reposByCredential, repoFilters, setRepoFilters}) {
+  const gitopsRepoRef = useRef(null);
   return (
     <div className="stack">
       <section className="panel action-panel">
@@ -3164,7 +3177,13 @@ function GitHubView({credentials, onConnect, onRepos, onDelete, reposByCredentia
           <h2><Github size={18} /> GitHub App</h2>
           <p>Authorize repositories directly. BeanCS will name the credential from the GitHub account.</p>
         </div>
-        <form onSubmit={onConnect}><button className="primary"><Github size={16} /> Connect GitHub App</button></form>
+        <form onSubmit={(e) => onConnect(e, gitopsRepoRef.current?.value)} style={{display: "flex", gap: "0.5rem", alignItems: "flex-end", flexWrap: "wrap"}}>
+          <div style={{display: "flex", flexDirection: "column", gap: "0.25rem"}}>
+            <label style={{fontSize: "0.75rem", opacity: 0.7}}>GitOps Repository (optional)</label>
+            <input ref={gitopsRepoRef} name="gitops_repo" placeholder="owner/gitops-manifests" style={{minWidth: "240px"}} />
+          </div>
+          <button className="primary"><Github size={16} /> Connect GitHub App</button>
+        </form>
       </section>
       {credentials.map((cred) => {
         const repos = reposByCredential[cred.id] || [];
@@ -3173,12 +3192,13 @@ function GitHubView({credentials, onConnect, onRepos, onDelete, reposByCredentia
         return (
           <section className="panel" key={cred.id}>
             <div className="account-header">
-              <div className="account-cell">{cred.avatar_url ? <img src={cred.avatar_url} alt="" /> : <Github size={18} />}<div><b>{cred.name}</b><small>{cred.account_login || cred.org || "-"} · {cred.auth_type || "pat"} · GitOps {cred.gitops_repo || "-"}</small></div></div>
+              <div className="account-cell">{cred.avatar_url ? <img src={cred.avatar_url} alt="" /> : <Github size={18} />}<div><b>{cred.name}</b><small>{cred.account_login || cred.org || "-"} · {cred.auth_type || "pat"}</small></div></div>
               <div className="row-actions">
                 <button onClick={() => onRepos(cred.id)}><RefreshCw size={15} /> Load repos</button>
                 <button onClick={() => onDelete(cred.id)}><Trash2 size={15} /></button>
               </div>
             </div>
+            <GitOpsRepoEditor cred={cred} onUpdate={onUpdate} />
             <div className="repo-toolbar">
               <input placeholder="Search repositories" value={filter} onChange={(event) => setRepoFilters((current) => ({...current, [cred.id]: event.target.value}))} />
               <span>{visible.length}/{repos.length} repos</span>
@@ -3195,6 +3215,33 @@ function GitHubView({credentials, onConnect, onRepos, onDelete, reposByCredentia
           </section>
         );
       })}
+    </div>
+  );
+}
+
+function GitOpsRepoEditor({cred, onUpdate}) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(cred.gitops_repo || "");
+  const save = () => {
+    onUpdate(cred.id, {gitops_repo: value.trim() || null});
+    setEditing(false);
+  };
+  useEffect(() => setValue(cred.gitops_repo || ""), [cred.gitops_repo]);
+  return (
+    <div className="gitops-repo-editor">
+      <span style={{fontSize: "0.8rem", opacity: 0.7, display: "flex", alignItems: "center", gap: "0.35rem"}}><GitBranch size={14} /> GitOps Repo</span>
+      {editing ? (
+        <div style={{display: "flex", gap: "0.4rem", alignItems: "center"}}>
+          <input value={value} onChange={(e) => setValue(e.target.value)} placeholder="owner/gitops-manifests" style={{flex: 1, minWidth: "200px"}} />
+          <button className="primary" onClick={save} style={{padding: "0.3rem 0.7rem", fontSize: "0.8rem"}}>Save</button>
+          <button onClick={() => { setValue(cred.gitops_repo || ""); setEditing(false); }} style={{padding: "0.3rem 0.7rem", fontSize: "0.8rem"}}>Cancel</button>
+        </div>
+      ) : (
+        <div style={{display: "flex", gap: "0.4rem", alignItems: "center"}}>
+          <span style={{fontFamily: "monospace", fontSize: "0.85rem"}}>{cred.gitops_repo || <em style={{opacity: 0.5}}>Not configured</em>}</span>
+          <button onClick={() => setEditing(true)} style={{padding: "0.2rem 0.5rem", fontSize: "0.75rem"}}><Edit3 size={13} /> Edit</button>
+        </div>
+      )}
     </div>
   );
 }

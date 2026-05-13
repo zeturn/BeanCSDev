@@ -66,7 +66,7 @@ func main() {
 	registryImageSvc := service.NewContainerRegistryService(db, cipher)
 	quotaSvc := service.NewQuotaService(db)
 	dnsSvc := service.NewDNSService(cfg.IngressIP)
-	gitopsSvc := service.NewGitOpsService()
+	gitopsSvc := service.NewGitOpsService(db, credentialSvc)
 	buildSvc := service.NewGitHubBuildService(db, cfg, credentialSvc, gitopsSvc)
 	projectSvc := service.NewProjectService(db, credentialSvc, quotaSvc, dnsSvc, gitopsSvc, buildSvc, k8sManager, registry, cipher, cfg)
 	processSvc := service.NewProcessService(db, buildSvc, credentialSvc, gitopsSvc, dnsSvc, k8sManager)

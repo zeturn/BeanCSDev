@@ -9,13 +9,47 @@ import (
 
 	"github.com/google/go-github/v62/github"
 	"github.com/zeturn/beancs-controller/internal/model"
+	"gorm.io/gorm"
 )
 
 var newTagPattern = regexp.MustCompile(`(?m)^(\s*newTag:\s*)(.+)$`)
 
-type GitOpsService struct{}
+type GitOpsService struct {
+	db          *gorm.DB
+	credentials *CredentialService
+}
 
-func NewGitOpsService() *GitOpsService { return &GitOpsService{} }
+func NewGitOpsService(db *gorm.DB, credentials *CredentialService) *GitOpsService {
+	return &GitOpsService{db: db, credentials: credentials}
+}
+
+// resolveGitOpsToken returns the correct token for accessing the GitOps repo.
+// If the GitOps repo owner differs from the provided credential's account,
+// it looks up a credential whose account_login matches the repo owner.
+func (s *GitOpsService) resolveGitOpsToken(ctx context.Context, fallbackToken string, cred model.GitHubCredential) (string, error) {
+	owner, _, ok := resolveGitOpsRepo(cred)
+	if !ok {
+		return fallbackToken, nil
+	}
+	// If the credential already belongs to the GitOps repo owner, use it directly
+	if strings.EqualFold(cred.AccountLogin, owner) || strings.EqualFold(cred.Org, owner) {
+		return fallbackToken, nil
+	}
+	// Look up a credential that matches the GitOps repo owner
+	if s.db != nil && s.credentials != nil {
+		var match model.GitHubCredential
+		err := s.db.WithContext(ctx).
+			Where("(account_login = ? OR org = ?) AND is_active = true", owner, owner).
+			First(&match).Error
+		if err == nil {
+			if token, err := s.credentials.GitHubToken(ctx, match); err == nil {
+				return token, nil
+			}
+		}
+	}
+	// Fall back to the provided token (will likely 404, but keeps existing behavior)
+	return fallbackToken, nil
+}
 
 func (s *GitOpsService) CommitProjectManifests(ctx context.Context, token string, cred model.GitHubCredential, project *model.Project) error {
 	if token == "" || cred.GitOpsRepo == "" {
@@ -24,6 +58,10 @@ func (s *GitOpsService) CommitProjectManifests(ctx context.Context, token string
 	owner, repo, ok := resolveGitOpsRepo(cred)
 	if !ok {
 		return fmt.Errorf("gitops repo must be owner/repo when org is empty")
+	}
+	token, err := s.resolveGitOpsToken(ctx, token, cred)
+	if err != nil {
+		return err
 	}
 	client := github.NewClient(nil).WithAuthToken(token)
 	files := s.RenderManifests(project)
@@ -45,6 +83,10 @@ func (s *GitOpsService) UpdateImageTag(ctx context.Context, token string, cred m
 	owner, repo, ok := resolveGitOpsRepo(cred)
 	if !ok {
 		return fmt.Errorf("gitops repo must be owner/repo when org is empty")
+	}
+	token, err := s.resolveGitOpsToken(ctx, token, cred)
+	if err != nil {
+		return err
 	}
 	newTag := extractImageTag(newImageRef)
 	if newTag == "" {
@@ -105,6 +147,7 @@ func (s *GitOpsService) DeleteProjectManifests(ctx context.Context, token string
 	if !ok {
 		return fmt.Errorf("gitops repo must be owner/repo when org is empty")
 	}
+	token, _ = s.resolveGitOpsToken(ctx, token, cred)
 	client := github.NewClient(nil).WithAuthToken(token)
 	dirPath := "apps/" + projectName
 
@@ -321,21 +364,38 @@ func renderServicePorts(ports model.ProjectPorts) string {
 }
 
 func putFile(ctx context.Context, client *github.Client, owner, repo, p, content, msg string) error {
-	current, _, resp, err := client.Repositories.GetContents(ctx, owner, repo, p, nil)
-	opts := &github.RepositoryContentFileOptions{
-		Message: github.String(msg),
-		Content: []byte(content),
+	const maxRetries = 3
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		current, _, resp, err := client.Repositories.GetContents(ctx, owner, repo, p, nil)
+		opts := &github.RepositoryContentFileOptions{
+			Message: github.String(msg),
+			Content: []byte(content),
+		}
+		if err == nil && current != nil {
+			opts.SHA = current.SHA
+			_, _, updateErr := client.Repositories.UpdateFile(ctx, owner, repo, p, opts)
+			if updateErr != nil && attempt < maxRetries && isConflict(updateErr) {
+				continue // re-read SHA and retry
+			}
+			return updateErr
+		}
+		if resp != nil && resp.Response != nil && resp.Response.StatusCode != 404 {
+			return err
+		}
+		_, _, createErr := client.Repositories.CreateFile(ctx, owner, repo, p, opts)
+		if createErr != nil && attempt < maxRetries && isConflict(createErr) {
+			continue // file may have been created concurrently
+		}
+		return createErr
 	}
-	if err == nil && current != nil {
-		opts.SHA = current.SHA
-		_, _, err = client.Repositories.UpdateFile(ctx, owner, repo, p, opts)
-		return err
+	return fmt.Errorf("putFile %s: max retries exceeded", p)
+}
+
+func isConflict(err error) bool {
+	if err == nil {
+		return false
 	}
-	if resp != nil && resp.Response != nil && resp.Response.StatusCode != 404 {
-		return err
-	}
-	_, _, err = client.Repositories.CreateFile(ctx, owner, repo, p, opts)
-	return err
+	return strings.Contains(err.Error(), "409")
 }
 
 func splitRepo(repo string) (string, string, bool) {
