@@ -174,11 +174,11 @@ func registerAPI(api fiber.Router, cfg *config.Config, db *gorm.DB, registry *ba
 		return exchangeBrowserToken(c, cfg)
 	})
 
-	webhookLimiter := limiter.New(limiter.Config{Max: 30, Expiration: time.Minute})
+	webhookLimiter := limiter.New(limiter.Config{Max: cfg.WebhookRateLimitPerMinute, Expiration: time.Minute})
 	handler.NewWebhookHandler(deploymentSvc, v).Register(api.Group("/webhooks", webhookLimiter, middleware.WebhookVerify(cfg.WebhookSecret)))
 
 	authLimiter := limiter.New(limiter.Config{
-		Max:        60,
+		Max:        cfg.APIRateLimitPerMinute,
 		Expiration: time.Minute,
 		KeyGenerator: func(c *fiber.Ctx) string {
 			auth := c.Get("Authorization")
