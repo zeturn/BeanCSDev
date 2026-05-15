@@ -391,6 +391,25 @@ func putFile(ctx context.Context, client *github.Client, owner, repo, p, content
 	return fmt.Errorf("putFile %s: max retries exceeded", p)
 }
 
+func deleteFileIfExists(ctx context.Context, client *github.Client, owner, repo, p, msg string) error {
+	current, _, resp, err := client.Repositories.GetContents(ctx, owner, repo, p, nil)
+	if err != nil {
+		if resp != nil && resp.Response != nil && resp.Response.StatusCode == 404 {
+			return nil
+		}
+		return err
+	}
+	if current == nil {
+		return nil
+	}
+	opts := &github.RepositoryContentFileOptions{
+		Message: github.String(msg),
+		SHA:     current.SHA,
+	}
+	_, _, err = client.Repositories.DeleteFile(ctx, owner, repo, p, opts)
+	return err
+}
+
 func isConflict(err error) bool {
 	if err == nil {
 		return false
