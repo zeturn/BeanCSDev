@@ -27,13 +27,26 @@ func NewGitOpsService(db *gorm.DB, credentials *CredentialService) *GitOpsServic
 // If the GitOps repo owner differs from the provided credential's account,
 // it looks up a credential whose account_login matches the repo owner.
 func (s *GitOpsService) resolveGitOpsToken(ctx context.Context, fallbackToken string, cred model.GitHubCredential) (string, error) {
+	match := s.resolveGitOpsCredential(ctx, cred)
+	if match.ID == cred.ID {
+		return fallbackToken, nil
+	}
+	if s.credentials != nil {
+		if token, err := s.credentials.GitHubToken(ctx, match); err == nil {
+			return token, nil
+		}
+	}
+	return fallbackToken, nil
+}
+
+func (s *GitOpsService) resolveGitOpsCredential(ctx context.Context, cred model.GitHubCredential) model.GitHubCredential {
 	owner, _, ok := resolveGitOpsRepo(cred)
 	if !ok {
-		return fallbackToken, nil
+		return cred
 	}
 	// If the credential already belongs to the GitOps repo owner, use it directly
 	if strings.EqualFold(cred.AccountLogin, owner) || strings.EqualFold(cred.Org, owner) {
-		return fallbackToken, nil
+		return cred
 	}
 	// Look up a credential that matches the GitOps repo owner
 	if s.db != nil && s.credentials != nil {
@@ -41,14 +54,11 @@ func (s *GitOpsService) resolveGitOpsToken(ctx context.Context, fallbackToken st
 		err := s.db.WithContext(ctx).
 			Where("(account_login = ? OR org = ?) AND is_active = true", owner, owner).
 			First(&match).Error
-		if err == nil {
-			if token, err := s.credentials.GitHubToken(ctx, match); err == nil {
-				return token, nil
-			}
+		if err == nil && match.ID != 0 {
+			return match
 		}
 	}
-	// Fall back to the provided token (will likely 404, but keeps existing behavior)
-	return fallbackToken, nil
+	return cred
 }
 
 func (s *GitOpsService) CommitProjectManifests(ctx context.Context, token string, cred model.GitHubCredential, project *model.Project) error {
@@ -113,6 +123,8 @@ func (s *GitOpsService) UpdateImageTag(ctx context.Context, token string, cred m
 	newName := extractImageName(newImageRef)
 	updated := content
 	if newName != "" {
+		imageNamePattern := regexp.MustCompile(`(?m)^(\s*-\s*name:\s*)(.+)$`)
+		updated = imageNamePattern.ReplaceAllString(updated, "${1}"+newName)
 		newNamePattern := regexp.MustCompile(`(?m)^(\s*newName:\s*)(.+)$`)
 		updated = newNamePattern.ReplaceAllString(updated, "${1}"+newName)
 	}
@@ -340,10 +352,10 @@ spec:
 		path.Join(base, "overlays", "dev", "kustomization.yaml"): fmt.Sprintf(`resources:
   - ../../base
 images:
-  - name: app
+  - name: %s
     newName: %s
     newTag: %s
-`, imageName, imageTag),
+`, imageName, imageName, imageTag),
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -426,6 +427,10 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID, te
 		return nil, err
 	}
 	if project.BuildSource == model.BuildSourceGitHub && project.AutoDeploy && ghCred.GitOpsRepo != "" {
+		if err := ensureArgoCDGitOpsRepository(ctx, s.k8s, s.gitops, s.credentials, s.cfg, ghToken, ghCred, project.Name); err != nil {
+			rollback()
+			return nil, err
+		}
 		if err := s.k8s.ApplyArgoCDApplication(ctx, project.Name, gitOpsRepoURL(ghCred), fmt.Sprintf("apps/%s/overlays/dev", project.Name), project.Namespace); err != nil {
 			rollback()
 			return nil, err
@@ -705,6 +710,50 @@ func gitOpsRepoURL(cred model.GitHubCredential) string {
 		return repo
 	}
 	return fmt.Sprintf("https://github.com/%s/%s.git", owner, name)
+}
+
+func ensureArgoCDGitOpsRepository(ctx context.Context, k8sManager *k8s.Manager, gitops *GitOpsService, credentials *CredentialService, cfg *config.Config, fallbackToken string, cred model.GitHubCredential, projectName string) error {
+	if k8sManager == nil || strings.TrimSpace(cred.GitOpsRepo) == "" {
+		return nil
+	}
+	repoCred := cred
+	if gitops != nil {
+		repoCred = gitops.resolveGitOpsCredential(ctx, cred)
+	}
+	repoToken := fallbackToken
+	if repoCred.ID != cred.ID && credentials != nil {
+		if token, err := credentials.GitHubToken(ctx, repoCred); err == nil {
+			repoToken = token
+		}
+	}
+	data := map[string]string{}
+	if repoCred.AuthType == "app" || repoCred.InstallationID != 0 {
+		privateKey := normalizedGitHubAppPrivateKey(cfg)
+		if cfg == nil || cfg.GitHubAppID == 0 || repoCred.InstallationID == 0 || privateKey == "" {
+			return fmt.Errorf("GitHub App credentials are required to register private GitOps repo %s in Argo CD", cred.GitOpsRepo)
+		}
+		data["githubAppID"] = strconv.FormatInt(cfg.GitHubAppID, 10)
+		data["githubAppInstallationID"] = strconv.FormatInt(repoCred.InstallationID, 10)
+		data["githubAppPrivateKey"] = privateKey
+	} else {
+		if strings.TrimSpace(repoToken) == "" {
+			return fmt.Errorf("GitHub token is required to register private GitOps repo %s in Argo CD", cred.GitOpsRepo)
+		}
+		data["username"] = "x-access-token"
+		data["password"] = repoToken
+	}
+	return k8sManager.ApplyArgoCDRepository(ctx, projectName, gitOpsRepoURL(cred), data)
+}
+
+func normalizedGitHubAppPrivateKey(cfg *config.Config) string {
+	if cfg == nil {
+		return ""
+	}
+	raw := strings.TrimSpace(cfg.GitHubAppPrivateKey)
+	if decoded, err := base64.StdEncoding.DecodeString(raw); err == nil && strings.Contains(string(decoded), "PRIVATE KEY") {
+		raw = string(decoded)
+	}
+	return strings.ReplaceAll(raw, `\n`, "\n")
 }
 
 func composeFileCandidates() []string {

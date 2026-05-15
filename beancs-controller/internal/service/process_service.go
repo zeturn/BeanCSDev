@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zeturn/beancs-controller/internal/config"
 	"github.com/zeturn/beancs-controller/internal/k8s"
 	"github.com/zeturn/beancs-controller/internal/model"
 	"gorm.io/gorm"
@@ -491,6 +492,14 @@ func (r *processRun) argocd() error {
 		r.svc.appendJobLog(r.ctx, job, "GitOps manifests committed")
 	}
 	if r.svc.k8s != nil && r.cred.GitOpsRepo != "" {
+		var cfg *config.Config
+		if r.svc.build != nil {
+			cfg = r.svc.build.cfg
+		}
+		if err := ensureArgoCDGitOpsRepository(r.ctx, r.svc.k8s, r.svc.gitops, r.svc.credentials, cfg, r.token, r.cred, r.project.Name); err != nil {
+			return r.svc.failJob(r.ctx, job, err.Error())
+		}
+		r.svc.appendJobLog(r.ctx, job, "Argo CD GitOps repository credentials reconciled")
 		if err := r.svc.k8s.ApplyArgoCDApplication(r.ctx, r.project.Name, gitOpsRepoURL(r.cred), fmt.Sprintf("apps/%s/overlays/dev", r.project.Name), r.project.Namespace); err != nil {
 			return r.svc.failJob(r.ctx, job, err.Error())
 		}
