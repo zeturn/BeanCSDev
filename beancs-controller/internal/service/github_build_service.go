@@ -409,7 +409,11 @@ func (s *GitHubBuildService) webhookURL() string {
 	if s.cfg == nil || s.cfg.WebhookBaseURL() == "" {
 		return ""
 	}
-	return s.cfg.WebhookBaseURL() + "/api/v1/webhooks/github"
+	base := strings.TrimRight(s.cfg.WebhookBaseURL(), "/")
+	if strings.HasSuffix(base, "/api/v1") {
+		return base + "/webhooks/github"
+	}
+	return base + "/api/v1/webhooks/github"
 }
 
 func (s *GitHubBuildService) putRepositorySecret(ctx context.Context, token, owner, repo, name, value string) error {

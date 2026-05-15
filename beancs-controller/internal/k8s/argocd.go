@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -45,6 +46,51 @@ func (m *Manager) ApplyArgoCDApplication(ctx context.Context, projectName, repoU
 	}
 	app.SetResourceVersion(current.GetResourceVersion())
 	_, err = resource.Update(ctx, app, metav1.UpdateOptions{})
+	return err
+}
+
+func (m *Manager) ApplyArgoCDRepository(ctx context.Context, name, repoURL string, data map[string]string) error {
+	if err := m.ensure(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(repoURL) == "" {
+		return fmt.Errorf("argocd repository url is required")
+	}
+	secretName := "beancs-repo-" + strings.Trim(strings.ToLower(name), "-")
+	if len(secretName) > 63 {
+		secretName = secretName[:63]
+	}
+	stringData := map[string]string{
+		"type": "git",
+		"url":  repoURL,
+	}
+	for k, v := range data {
+		if strings.TrimSpace(v) != "" {
+			stringData[k] = v
+		}
+	}
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      secretName,
+			Namespace: "argocd",
+			Labels: map[string]string{
+				"argocd.argoproj.io/secret-type": "repository",
+				"managed-by":                     "beancs",
+			},
+		},
+		StringData: stringData,
+		Type:       corev1.SecretTypeOpaque,
+	}
+	current, err := m.Clientset.CoreV1().Secrets("argocd").Get(ctx, secretName, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		_, err = m.Clientset.CoreV1().Secrets("argocd").Create(ctx, secret, metav1.CreateOptions{})
+		return err
+	}
+	if err != nil {
+		return err
+	}
+	secret.ResourceVersion = current.ResourceVersion
+	_, err = m.Clientset.CoreV1().Secrets("argocd").Update(ctx, secret, metav1.UpdateOptions{})
 	return err
 }
 

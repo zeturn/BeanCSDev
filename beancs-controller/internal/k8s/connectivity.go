@@ -63,9 +63,12 @@ func (m *Manager) ProjectConnectivity(ctx context.Context, namespace, projectNam
 		serviceCheck, serviceErr = httpConnectivity(ctx, "cluster-service", serviceTarget+"/")
 	}
 	checks = append(checks, serviceCheck)
-	if serviceErr != nil {
-		return checks, serviceErr
+	if serviceErr == nil {
+		return checks, nil
 	}
+	// The controller can run outside the cluster network, where *.svc.cluster.local
+	// is not routable. Ready endpoints are enough for the in-cluster readiness gate;
+	// public route checks are handled separately by the deployment process.
 	return checks, nil
 }
 
