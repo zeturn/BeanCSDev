@@ -534,8 +534,7 @@ func (r *processRun) connectivity() error {
 			return r.svc.failJob(r.ctx, job, err.Error())
 		}
 	}
-	publicURL := r.publicRouteURL()
-	if publicURL != "" {
+	for _, publicURL := range r.publicRouteURLs() {
 		status, err := waitForPublicRoute(r.ctx, publicURL, 2*time.Minute)
 		r.svc.appendJobLog(r.ctx, job, fmt.Sprintf("public-route %s: %s", publicURL, status))
 		if err != nil {
@@ -547,13 +546,14 @@ func (r *processRun) connectivity() error {
 	return r.svc.finishJob(r.ctx, job, model.ProcessStatusSucceeded, "")
 }
 
-func (r *processRun) publicRouteURL() string {
+func (r *processRun) publicRouteURLs() []string {
+	var urls []string
 	for _, port := range r.project.Ports {
 		if port.Exposure == model.ExposurePublic && strings.TrimSpace(port.Domain) != "" {
-			return "https://" + strings.TrimSpace(port.Domain) + "/"
+			urls = append(urls, "https://"+strings.TrimSpace(port.Domain)+"/")
 		}
 	}
-	return ""
+	return urls
 }
 
 func waitForPublicRoute(ctx context.Context, url string, timeout time.Duration) (string, error) {
@@ -584,7 +584,22 @@ func waitForPublicRoute(ctx context.Context, url string, timeout time.Duration) 
 func checkPublicRoute(ctx context.Context, url string) (string, error) {
 	reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
+	targets := []string{strings.TrimRight(url, "/") + "/health", url}
+	var lastStatus string
+	var lastErr error
+	for _, target := range targets {
+		status, err := checkHTTPRoute(reqCtx, target)
+		if err == nil {
+			return target + " " + status, nil
+		}
+		lastStatus = target + " " + status
+		lastErr = err
+	}
+	return lastStatus, lastErr
+}
+
+func checkHTTPRoute(ctx context.Context, target string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
 		return "", err
 	}
