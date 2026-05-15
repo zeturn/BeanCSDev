@@ -542,6 +542,11 @@ func (s *ProjectService) DeleteProject(ctx context.Context, project *model.Proje
 			}
 		}
 	}
+	if project.GitHubCredentialID != 0 && s.build != nil {
+		if err := s.build.DeleteProjectWorkflow(ctx, project); err != nil {
+			cleanupErrs = append(cleanupErrs, fmt.Errorf("delete GitHub workflow for %s: %w", project.Name, err))
+		}
+	}
 	// Delete Argo CD Application CR
 	if err := s.k8s.DeleteArgoCDApplication(ctx, project.Name); err != nil {
 		cleanupErrs = append(cleanupErrs, fmt.Errorf("delete Argo CD Application %s: %w", project.Name, err))

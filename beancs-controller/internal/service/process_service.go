@@ -423,7 +423,7 @@ func (r *processRun) githubWorkflow() error {
 	if err := r.svc.build.ensureWorkflow(r.ctx, r.token, r.owner, r.repo, r.project); err != nil {
 		return r.svc.failJob(r.ctx, job, err.Error())
 	}
-	r.svc.appendJobLog(r.ctx, job, "workflow file ensured: "+beancsBuildWorkflowPath)
+	r.svc.appendJobLog(r.ctx, job, "workflow file ensured: "+beancsBuildWorkflowPath(r.project))
 	return r.svc.finishJob(r.ctx, job, model.ProcessStatusSucceeded, "")
 }
 
@@ -441,7 +441,7 @@ func (r *processRun) githubDispatch() error {
 		return r.svc.failJob(r.ctx, job, err.Error())
 	}
 	r.svc.appendJobLog(r.ctx, job, "workflow dispatch accepted")
-	run, err := r.svc.build.waitForRun(r.ctx, r.token, r.owner, r.repo, branch, dispatchedAt)
+	run, err := r.svc.build.waitForRun(r.ctx, r.token, r.owner, r.repo, beancsBuildWorkflowFile(r.project), branch, dispatchedAt)
 	if err != nil {
 		return r.svc.failJob(r.ctx, job, err.Error())
 	}

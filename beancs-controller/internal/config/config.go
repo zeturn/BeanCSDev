@@ -26,6 +26,9 @@ type Config struct {
 	EncryptionKey string `env:"ENCRYPTION_KEY,required"`
 	CORSOrigins   string `env:"CORS_ORIGINS" envDefault:"*"`
 
+	APIRateLimitPerMinute     int `env:"BEANCS_API_RATE_LIMIT_PER_MINUTE" envDefault:"600"`
+	WebhookRateLimitPerMinute int `env:"BEANCS_WEBHOOK_RATE_LIMIT_PER_MINUTE" envDefault:"300"`
+
 	KubeConfig string `env:"KUBECONFIG"`
 	IngressIP  string `env:"INGRESS_IP" envDefault:"127.0.0.1"`
 
