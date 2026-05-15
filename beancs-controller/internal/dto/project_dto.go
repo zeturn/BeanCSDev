@@ -18,6 +18,7 @@ type CreateProjectRequest struct {
 	Namespace              string             `json:"namespace" validate:"omitempty,hostname_rfc1123,max=63"`
 	BasaltPassInstanceID   *uint              `json:"basaltpass_instance_id"`
 	CloudflareCredentialID *uint              `json:"cloudflare_credential_id"`
+	CloudflareZoneID       string             `json:"cloudflare_zone_id" validate:"omitempty,max=128"`
 	ExposureMode           string             `json:"exposure_mode" validate:"required,oneof=public private internal-only"`
 	Subdomain              string             `json:"subdomain" validate:"omitempty,hostname_rfc1123,max=63"`
 	ResourcePreset         string             `json:"resource_preset" validate:"omitempty,oneof=nano small medium large"`

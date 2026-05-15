@@ -32,6 +32,8 @@ Optional:
 - `BEANCS_CERT_MANAGER_CLOUDFLARE_SECRET_NAME`: per-project Cloudflare DNS-01 token Secret name, defaults to `beancs-cloudflare-dns01`.
 - `BEANCS_CERT_MANAGER_CLOUDFLARE_SECRET_KEY`: Cloudflare token Secret key, defaults to `api-token`.
 - `BEANCS_CERT_MANAGER_PRIVATE_KEY_SECRET_SUFFIX`: ACME account private key Secret suffix, defaults to `account-key`.
+- `BEANCS_API_RATE_LIMIT_PER_MINUTE`: authenticated API requests allowed per token/IP per minute, defaults to `600`.
+- `BEANCS_WEBHOOK_RATE_LIMIT_PER_MINUTE`: webhook requests allowed per minute, defaults to `300`.
 
 ## Required GitHub Variables
 

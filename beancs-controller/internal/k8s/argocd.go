@@ -47,3 +47,17 @@ func (m *Manager) ApplyArgoCDApplication(ctx context.Context, projectName, repoU
 	_, err = resource.Update(ctx, app, metav1.UpdateOptions{})
 	return err
 }
+
+// DeleteArgoCDApplication removes the Argo CD Application CR for a project.
+func (m *Manager) DeleteArgoCDApplication(ctx context.Context, projectName string) error {
+	if err := m.ensure(); err != nil {
+		return err
+	}
+	gvr := schema.GroupVersionResource{Group: "argoproj.io", Version: "v1alpha1", Resource: "applications"}
+	resource := m.Dynamic.Resource(gvr).Namespace("argocd")
+	err := resource.Delete(ctx, projectName, metav1.DeleteOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil // already gone
+	}
+	return err
+}

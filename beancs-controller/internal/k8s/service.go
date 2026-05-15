@@ -27,7 +27,14 @@ func (m *Manager) ApplyServicePorts(ctx context.Context, namespace, projectName 
 		})
 	}
 	svc := &corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: namespace, Labels: Labels(projectName)},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      projectName,
+			Namespace: namespace,
+			Labels:    Labels(projectName),
+			Annotations: map[string]string{
+				"traefik.ingress.kubernetes.io/service.nativelb": "true",
+			},
+		},
 		Spec: corev1.ServiceSpec{
 			Type:     corev1.ServiceTypeClusterIP,
 			Selector: Labels(projectName),
@@ -43,6 +50,7 @@ func (m *Manager) ApplyServicePorts(ctx context.Context, namespace, projectName 
 		current.Spec.Ports = svc.Spec.Ports
 		current.Spec.Selector = svc.Spec.Selector
 		current.Labels = svc.Labels
+		current.Annotations = svc.Annotations
 		_, err = m.Clientset.CoreV1().Services(namespace).Update(ctx, current, metav1.UpdateOptions{})
 	}
 	return err

@@ -16,6 +16,8 @@ stringData:
   WEBHOOK_SECRET: replace-me
   ENCRYPTION_KEY: replace-with-64-hex-characters
   INGRESS_IP: 127.0.0.1
+  BEANCS_API_RATE_LIMIT_PER_MINUTE: "600"
+  BEANCS_WEBHOOK_RATE_LIMIT_PER_MINUTE: "300"
   BEANCS_PUBLIC_INGRESS_NAMESPACES: kube-system,traefik
   BEANCS_PRIVATE_INGRESS_NAMESPACES: tailscale,tailscale-system
   BEANCS_CERT_MANAGER_ISSUER_NAME: beancs-letsencrypt

@@ -125,7 +125,7 @@ func (s *ProjectService) AnalyzeRepository(ctx context.Context, userID string, r
 	return out, nil
 }
 
-func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID string, req dto.CreateProjectRequest) (*model.Project, error) {
+func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID, tenantCode string, req dto.CreateProjectRequest) (*model.Project, error) {
 	normalizeProjectRequest(&req)
 	if err := validateProjectPorts(req.Name, req.Ports); err != nil {
 		return nil, err
@@ -227,7 +227,8 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 	var cfToken string
 	var err error
 	if req.CloudflareCredentialID != nil {
-		if err := s.db.WithContext(ctx).First(&cfCred, *req.CloudflareCredentialID).Error; err != nil {
+		cfCred, err = s.credentials.CloudflareCredentialForDomain(ctx, *req.CloudflareCredentialID, req.CloudflareZoneID, firstRoutableDomain(req.Ports))
+		if err != nil {
 			rollback()
 			return nil, err
 		}
@@ -245,6 +246,7 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 		OwnerID:                userID,
 		TeamID:                 req.TeamID,
 		TenantID:               tenantID,
+		TenantCode:             tenantCode,
 		BuildSource:            req.BuildSource,
 		ImageReference:         req.ImageReference,
 		SourceArchiveName:      req.SourceArchiveName,
@@ -269,7 +271,10 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 	}
 	project.Domain = firstRoutableDomain(project.Ports)
 	if project.BuildSource == model.BuildSourceGitHub {
-		configureBeanCSRegistry(project, s.cfg)
+		if err := configureBeanCSRegistry(project, s.cfg, tenantCode); err != nil {
+			rollback()
+			return nil, err
+		}
 		if err := ensureHarborProject(ctx, s.cfg, project.RegistryProject); err != nil {
 			rollback()
 			return nil, err
@@ -320,7 +325,12 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 		}
 	}
 	if project.BuildSource == model.BuildSourceGitHub && project.RegistryImageReference != "" {
-		if err := s.k8s.UpsertRegistryPullSecret(ctx, project.Namespace, project.Name, project.RegistryPullSecretName); err != nil {
+		creds, err := ensureHarborPullRobot(ctx, s.cfg, project)
+		if err != nil {
+			rollback()
+			return nil, err
+		}
+		if err := s.k8s.UpsertRegistryPullSecretWithCredentials(ctx, project.Namespace, project.Name, project.RegistryPullSecretName, creds.Host, creds.Username, creds.Token); err != nil {
 			rollback()
 			return nil, err
 		}
@@ -355,6 +365,7 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID str
 			return nil, err
 		}
 		dnsRecords = append(dnsRecords, *dnsRecord)
+		dnsRecords[len(dnsRecords)-1].CloudflareZoneID = cfCred.ZoneID
 		recordID := dnsRecord.CloudflareRecordID
 		rollbacks = append(rollbacks, func() {
 			_ = s.dns.DeleteRecord(context.Background(), cfToken, cfCred.ZoneID, recordID)
@@ -499,18 +510,17 @@ func (s *ProjectService) DeleteProject(ctx context.Context, project *model.Proje
 	_ = s.db.WithContext(ctx).Where("project_id = ?", project.ID).Find(&dnsRecords).Error
 	for _, rec := range dnsRecords {
 		if cfToken != "" {
-			if err := s.dns.DeleteRecord(ctx, cfToken, cfCred.ZoneID, rec.CloudflareRecordID); err != nil {
+			zoneID := rec.CloudflareZoneID
+			if zoneID == "" {
+				zoneID = cfCred.ZoneID
+			}
+			if err := s.dns.DeleteRecord(ctx, cfToken, zoneID, rec.CloudflareRecordID); err != nil {
 				cleanupErrs = append(cleanupErrs, fmt.Errorf("delete DNS record %s: %w", rec.Name, err))
 			}
 		}
 	}
 	if err := s.k8s.DeleteProjectResources(ctx, project.Namespace, project.Name); err != nil {
 		cleanupErrs = append(cleanupErrs, fmt.Errorf("delete Kubernetes resources for %s/%s: %w", project.Namespace, project.Name, err))
-	}
-	if !k8s.IsSystemNamespace(project.Namespace) {
-		if err := s.k8s.DeleteNamespace(ctx, project.Namespace); err != nil {
-			cleanupErrs = append(cleanupErrs, fmt.Errorf("delete namespace %s: %w", project.Namespace, err))
-		}
 	}
 	if project.BasaltPassInstanceID != nil && project.BasaltAppID != 0 {
 		if client, err := s.registry.GetClientForInstance(*project.BasaltPassInstanceID); err == nil {
@@ -520,6 +530,26 @@ func (s *ProjectService) DeleteProject(ctx context.Context, project *model.Proje
 		} else {
 			cleanupErrs = append(cleanupErrs, fmt.Errorf("load BasaltPass client: %w", err))
 		}
+	}
+	// Clean up GitOps manifests from the gitops repo
+	if project.GitHubCredentialID != 0 && s.credentials != nil && s.gitops != nil {
+		var ghCred model.GitHubCredential
+		if err := s.db.WithContext(ctx).First(&ghCred, project.GitHubCredentialID).Error; err == nil {
+			if ghToken, err := s.credentials.GitHubToken(ctx, ghCred); err == nil {
+				if err := s.gitops.DeleteProjectManifests(ctx, ghToken, ghCred, project.Name); err != nil {
+					cleanupErrs = append(cleanupErrs, fmt.Errorf("delete GitOps manifests for %s: %w", project.Name, err))
+				}
+			}
+		}
+	}
+	if project.GitHubCredentialID != 0 && s.build != nil {
+		if err := s.build.DeleteProjectWorkflow(ctx, project); err != nil {
+			cleanupErrs = append(cleanupErrs, fmt.Errorf("delete GitHub workflow for %s: %w", project.Name, err))
+		}
+	}
+	// Delete Argo CD Application CR
+	if err := s.k8s.DeleteArgoCDApplication(ctx, project.Name); err != nil {
+		cleanupErrs = append(cleanupErrs, fmt.Errorf("delete Argo CD Application %s: %w", project.Name, err))
 	}
 	if len(cleanupErrs) > 0 {
 		return fmt.Errorf("project cleanup failed; database record retained for retry: %v", cleanupErrs)
@@ -532,6 +562,13 @@ func (s *ProjectService) DeleteProject(ctx context.Context, project *model.Proje
 		quotaKey = project.OwnerID
 	}
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		projectProcesses := tx.Model(&model.Process{}).Select("id").Where("project_id = ?", project.ID)
+		if err := tx.Where("process_id IN (?)", projectProcesses).Delete(&model.ProcessJob{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("project_id = ?", project.ID).Delete(&model.Process{}).Error; err != nil {
+			return err
+		}
 		if err := tx.Where("project_id = ?", project.ID).Delete(&model.DNSRecord{}).Error; err != nil {
 			return err
 		}

@@ -22,24 +22,27 @@ type Actor struct {
 }
 
 type IntrospectionResult struct {
-	Active   bool   `json:"active"`
-	Sub      string `json:"sub"`
-	ClientID string `json:"client_id"`
-	Scope    string `json:"scope"`
-	TenantID string `json:"tenant_id"`
-	Exp      int64  `json:"exp"`
-	Act      *Actor `json:"act,omitempty"`
+	Active     bool   `json:"active"`
+	Sub        string `json:"sub"`
+	ClientID   string `json:"client_id"`
+	Scope      string `json:"scope"`
+	TenantID   string `json:"tenant_id"`
+	TenantCode string `json:"tenant_code"`
+	Exp        int64  `json:"exp"`
+	Act        *Actor `json:"act,omitempty"`
 }
 
 func (r *IntrospectionResult) UnmarshalJSON(data []byte) error {
 	var raw struct {
-		Active   bool            `json:"active"`
-		Sub      any             `json:"sub"`
-		ClientID any             `json:"client_id"`
-		Scope    any             `json:"scope"`
-		TenantID any             `json:"tenant_id"`
-		Exp      any             `json:"exp"`
-		Act      json.RawMessage `json:"act"`
+		Active     bool            `json:"active"`
+		Sub        any             `json:"sub"`
+		ClientID   any             `json:"client_id"`
+		Scope      any             `json:"scope"`
+		TenantID   any             `json:"tenant_id"`
+		TenantCode any             `json:"tenant_code"`
+		Tenant     any             `json:"tenant"`
+		Exp        any             `json:"exp"`
+		Act        json.RawMessage `json:"act"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
@@ -49,6 +52,7 @@ func (r *IntrospectionResult) UnmarshalJSON(data []byte) error {
 	r.ClientID = stringifyJSONValue(raw.ClientID)
 	r.Scope = scopeString(raw.Scope)
 	r.TenantID = stringifyJSONValue(raw.TenantID)
+	r.TenantCode = coalesceString(stringifyJSONValue(raw.TenantCode), tenantCodeFromValue(raw.Tenant))
 	r.Exp = int64JSONValue(raw.Exp)
 	r.Act = nil
 	if len(raw.Act) > 0 && string(raw.Act) != "null" {
@@ -62,6 +66,34 @@ func (r *IntrospectionResult) UnmarshalJSON(data []byte) error {
 		r.Act = &Actor{Sub: stringifyJSONValue(actRaw.Sub), ClientID: stringifyJSONValue(actRaw.ClientID)}
 	}
 	return nil
+}
+
+func coalesceString(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func tenantCodeFromValue(v any) string {
+	switch t := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return t
+	case map[string]any:
+		return coalesceString(
+			stringifyJSONValue(t["code"]),
+			stringifyJSONValue(t["tenant_code"]),
+			stringifyJSONValue(t["tenantCode"]),
+			stringifyJSONValue(t["slug"]),
+			stringifyJSONValue(t["name"]),
+		)
+	default:
+		return stringifyJSONValue(t)
+	}
 }
 
 func stringifyJSONValue(v any) string {

@@ -21,8 +21,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const beancsBuildWorkflowPath = ".github/workflows/beancs-build.yml"
-const beancsBuildWorkflowFile = "beancs-build.yml"
+const beancsLegacyBuildWorkflowPath = ".github/workflows/beancs-build.yml"
 
 type GitHubBuildService struct {
 	db          *gorm.DB
@@ -117,8 +116,36 @@ func (s *GitHubBuildService) ensureWorkflow(ctx context.Context, token, owner, r
 	if err := s.ensureRegistrySecrets(ctx, token, owner, repo); err != nil {
 		return err
 	}
-	if err := putFile(ctx, client, owner, repo, beancsBuildWorkflowPath, beancsBuildWorkflow(project, callbackEnabled), "beancs: add build workflow"); err != nil {
-		return githubWorkflowFilePermissionError(owner, repo, err)
+	workflowPath := beancsBuildWorkflowPath(project)
+	if err := putFile(ctx, client, owner, repo, workflowPath, beancsBuildWorkflow(project, callbackEnabled), "beancs: add "+project.Name+" build workflow"); err != nil {
+		return githubWorkflowFilePermissionError(owner, repo, workflowPath, err)
+	}
+	if workflowPath != beancsLegacyBuildWorkflowPath {
+		_ = deleteFileIfExists(ctx, client, owner, repo, beancsLegacyBuildWorkflowPath, "beancs: remove legacy build workflow")
+	}
+	return nil
+}
+
+func (s *GitHubBuildService) DeleteProjectWorkflow(ctx context.Context, project *model.Project) error {
+	if project == nil || s == nil || s.credentials == nil || project.GitHubCredentialID == 0 || strings.TrimSpace(project.GitHubRepo) == "" {
+		return nil
+	}
+	var cred model.GitHubCredential
+	if err := s.db.WithContext(ctx).First(&cred, project.GitHubCredentialID).Error; err != nil {
+		return err
+	}
+	token, err := s.credentials.GitHubToken(ctx, cred)
+	if err != nil {
+		return err
+	}
+	owner, repo, ok := splitRepo(project.GitHubRepo)
+	if !ok {
+		return fmt.Errorf("github_repo must be in owner/repo format")
+	}
+	client := github.NewClient(nil).WithAuthToken(token)
+	workflowPath := beancsBuildWorkflowPath(project)
+	if err := deleteFileIfExists(ctx, client, owner, repo, workflowPath, "beancs: remove "+project.Name+" build workflow"); err != nil {
+		return githubWorkflowFilePermissionError(owner, repo, workflowPath, err)
 	}
 	return nil
 }
@@ -163,7 +190,8 @@ func (s *GitHubBuildService) dispatchWorkflow(ctx context.Context, token, owner,
 		"context":         ".",
 	}
 	body, _ := json.Marshal(map[string]any{"ref": branch, "inputs": inputs})
-	endpoint := fmt.Sprintf("https://api.github.com/repos/%s/%s/actions/workflows/%s/dispatches", url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(beancsBuildWorkflowFile))
+	workflowFile := beancsBuildWorkflowFile(project)
+	endpoint := fmt.Sprintf("https://api.github.com/repos/%s/%s/actions/workflows/%s/dispatches", url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(workflowFile))
 	var lastErr error
 	for attempt := 0; attempt < 12; attempt++ {
 		if err := githubRequest(ctx, http.MethodPost, endpoint, token, body, nil); err != nil {
@@ -180,7 +208,7 @@ func (s *GitHubBuildService) dispatchWorkflow(ctx context.Context, token, owner,
 		}
 		return nil
 	}
-	return githubWorkflowDispatchNotFoundError(owner, repo, branch, lastErr)
+	return githubWorkflowDispatchNotFoundError(owner, repo, branch, beancsBuildWorkflowPath(project), workflowFile, lastErr)
 }
 
 func (s *GitHubBuildService) watchBuild(ctx context.Context, deploymentID uint, dispatchedAt time.Time) {
@@ -242,7 +270,7 @@ func (s *GitHubBuildService) reconcileDeployment(ctx context.Context, deployment
 	branch := coalesce(project.GitHubBranch, "main")
 	runID := deployment.WorkflowRunID
 	if runID == 0 {
-		run, err := s.waitForRun(ctx, token, owner, repo, branch, dispatchedAt)
+		run, err := s.waitForRun(ctx, token, owner, repo, beancsBuildWorkflowFile(&project), branch, dispatchedAt)
 		if err != nil {
 			return err
 		}
@@ -270,7 +298,7 @@ func (s *GitHubBuildService) reconcileDeployment(ctx context.Context, deployment
 	if err := s.db.WithContext(ctx).Model(&project).Updates(map[string]any{"image_reference": image}).Error; err != nil {
 		return err
 	}
-	if err := s.gitops.CommitProjectManifests(ctx, token, cred, &project); err != nil {
+	if err := s.gitops.UpdateImageTag(ctx, token, cred, &project, image); err != nil {
 		return err
 	}
 	return s.db.WithContext(ctx).Model(&deployment).Updates(map[string]any{
@@ -289,10 +317,10 @@ type workflowRun struct {
 	CreatedAt  string `json:"created_at"`
 }
 
-func (s *GitHubBuildService) waitForRun(ctx context.Context, token, owner, repo, branch string, dispatchedAt time.Time) (workflowRun, error) {
+func (s *GitHubBuildService) waitForRun(ctx context.Context, token, owner, repo, workflowFile, branch string, dispatchedAt time.Time) (workflowRun, error) {
 	deadline := time.Now().Add(5 * time.Minute)
 	for time.Now().Before(deadline) {
-		runs, err := s.workflowRuns(ctx, token, owner, repo, branch)
+		runs, err := s.workflowRuns(ctx, token, owner, repo, workflowFile, branch)
 		if err != nil {
 			if isGitHubAPIStatus(err, http.StatusNotFound) {
 				time.Sleep(5 * time.Second)
@@ -326,8 +354,8 @@ func (s *GitHubBuildService) waitForConclusion(ctx context.Context, token, owner
 	return "", fmt.Errorf("github workflow run timed out")
 }
 
-func (s *GitHubBuildService) workflowRuns(ctx context.Context, token, owner, repo, branch string) ([]workflowRun, error) {
-	endpoint := fmt.Sprintf("https://api.github.com/repos/%s/%s/actions/workflows/%s/runs?event=workflow_dispatch&branch=%s&per_page=10", url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(beancsBuildWorkflowFile), url.QueryEscape(branch))
+func (s *GitHubBuildService) workflowRuns(ctx context.Context, token, owner, repo, workflowFile, branch string) ([]workflowRun, error) {
+	endpoint := fmt.Sprintf("https://api.github.com/repos/%s/%s/actions/workflows/%s/runs?event=workflow_dispatch&branch=%s&per_page=10", url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(workflowFile), url.QueryEscape(branch))
 	var out struct {
 		WorkflowRuns []workflowRun `json:"workflow_runs"`
 	}
@@ -494,22 +522,22 @@ func githubActionsPermissionError(owner, repo string, err error) error {
 	return err
 }
 
-func githubWorkflowFilePermissionError(owner, repo string, err error) error {
+func githubWorkflowFilePermissionError(owner, repo, workflowPath string, err error) error {
 	var ghErr *github.ErrorResponse
 	if errors.As(err, &ghErr) && ghErr.Response != nil && ghErr.Response.StatusCode == http.StatusForbidden && strings.Contains(ghErr.Message, "Resource not accessible by integration") {
-		return fmt.Errorf("GitHub App installation for %s/%s cannot create or update %s. Update the GitHub App permissions to include Repository permissions: Contents read/write, Workflows read/write, and Actions read/write, then reinstall or approve the app installation", owner, repo, beancsBuildWorkflowPath)
+		return fmt.Errorf("GitHub App installation for %s/%s cannot create, update, or delete %s. Update the GitHub App permissions to include Repository permissions: Contents read/write, Workflows read/write, Actions read/write, then reinstall or approve the app installation", owner, repo, workflowPath)
 	}
 	if strings.Contains(err.Error(), "Resource not accessible by integration") {
-		return fmt.Errorf("GitHub App installation for %s/%s cannot create or update %s. Update the GitHub App permissions to include Repository permissions: Contents read/write, Workflows read/write, and Actions read/write, then reinstall or approve the app installation", owner, repo, beancsBuildWorkflowPath)
+		return fmt.Errorf("GitHub App installation for %s/%s cannot create, update, or delete %s. Update the GitHub App permissions to include Repository permissions: Contents read/write, Workflows read/write, Actions read/write, then reinstall or approve the app installation", owner, repo, workflowPath)
 	}
 	return err
 }
 
-func githubWorkflowDispatchNotFoundError(owner, repo, branch string, err error) error {
+func githubWorkflowDispatchNotFoundError(owner, repo, branch, workflowPath, workflowFile string, err error) error {
 	if err == nil {
-		return fmt.Errorf("GitHub Actions workflow %s for %s/%s is not available yet. Retry in a minute, or make sure branch %q contains %s", beancsBuildWorkflowFile, owner, repo, branch, beancsBuildWorkflowPath)
+		return fmt.Errorf("GitHub Actions workflow %s for %s/%s is not available yet. Retry in a minute, or make sure branch %q contains %s", workflowFile, owner, repo, branch, workflowPath)
 	}
-	return fmt.Errorf("GitHub Actions workflow %s for %s/%s is not available yet. GitHub may still be indexing the new workflow, or branch %q does not contain %s. Retry in a minute, or make sure the selected branch exists and contains the workflow file: %w", beancsBuildWorkflowFile, owner, repo, branch, beancsBuildWorkflowPath, err)
+	return fmt.Errorf("GitHub Actions workflow %s for %s/%s is not available yet. GitHub may still be indexing the new workflow, or branch %q does not contain %s. Retry in a minute, or make sure the selected branch exists and contains the workflow file: %w", workflowFile, owner, repo, branch, workflowPath, err)
 }
 
 func truncateFailure(value string) string {
@@ -521,6 +549,19 @@ func truncateFailure(value string) string {
 }
 
 func beancsBuildWorkflow(project *model.Project, callbackEnabled bool) string {
+	projectName := strings.TrimSpace(project.Name)
+	workflowSlug := beancsWorkflowSlug(project)
+	imageBase := strings.TrimSpace(project.RegistryImageReference)
+	if imageBase == "" {
+		imageBase = strings.TrimSpace(project.ImageReference)
+	}
+	if imageBase == "" {
+		imageBase = "ghcr.io/" + strings.ToLower(project.GitHubRepo)
+	}
+	ghcrBase := ghcrImageBase(project)
+	if ghcrBase == "" {
+		ghcrBase = "ghcr.io/" + strings.ToLower(project.GitHubRepo)
+	}
 	trigger := `  workflow_dispatch:
     inputs:
       image:
@@ -540,9 +581,10 @@ func beancsBuildWorkflow(project *model.Project, callbackEnabled bool) string {
 `
 	if project.AutoDeploy {
 		trigger += fmt.Sprintf(`  push:
-    branches:
-      - %s
-`, coalesce(project.GitHubBranch, "main"))
+    tags:
+      - '%s-v*'
+      - 'all-v*'
+`, workflowSlug)
 	}
 	callback := ""
 	if callbackEnabled {
@@ -559,10 +601,10 @@ func beancsBuildWorkflow(project *model.Project, callbackEnabled bool) string {
           if [ "$BEANCS_STATUS" = "success" ]; then STATUS="success"; fi
           BODY=$(jq -nc --arg project "$BEANCS_PROJECT" --arg tag "$BEANCS_IMAGE" --arg commit "$GITHUB_SHA" --arg status "$STATUS" '{project:$project, tag:$tag, commit:$commit, status:$status}')
           SIG="sha256=$(printf '%%s' "$BODY" | openssl dgst -sha256 -hmac "$BEANCS_WEBHOOK_SECRET" -binary | xxd -p -c 256)"
-          curl -fsS -X POST "$BEANCS_WEBHOOK_URL" -H "Content-Type: application/json" -H "X-Hub-Signature-256: $SIG" --data "$BODY"
-`, project.Name)
+          curl -fsS -X POST "$BEANCS_WEBHOOK_URL" -H "Content-Type: application/json" -H "X-Hub-Signature-256: $SIG" --data "$BODY" || echo "BeanCS webhook notification failed; build result remains valid."
+`, projectName)
 	}
-	return fmt.Sprintf(`name: BeanCS Build
+	return fmt.Sprintf(`name: BeanCS Build %s
 
 on:
 %s
@@ -574,6 +616,10 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      BEANCS_PROJECT: %s
+      BEANCS_IMAGE_BASE: %s
+      BEANCS_GHCR_IMAGE_BASE: %s
     steps:
       - uses: actions/checkout@v4
       - name: Resolve image
@@ -583,18 +629,24 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             IMAGE="${{ inputs.image }}"
             GHCR_IMAGE="${{ inputs.ghcr_image }}"
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+            VERSION_TAG="$TAG"
+            VERSION_TAG="${VERSION_TAG#${BEANCS_PROJECT}-}"
+            VERSION_TAG="${VERSION_TAG#all-}"
+            IMAGE="${BEANCS_IMAGE_BASE}:${VERSION_TAG}"
+            GHCR_IMAGE="${BEANCS_GHCR_IMAGE_BASE}:${VERSION_TAG}"
           else
-            REPO="${GITHUB_REPOSITORY,,}"
-            IMAGE="${{ secrets.BEANCS_REGISTRY_HOST }}/${REPO}:beancs-${GITHUB_SHA::12}"
-            GHCR_IMAGE="ghcr.io/${REPO}:beancs-${GITHUB_SHA::12}"
+            IMAGE="${BEANCS_IMAGE_BASE}:beancs-${GITHUB_SHA::12}"
+            GHCR_IMAGE="${BEANCS_GHCR_IMAGE_BASE}:beancs-${GITHUB_SHA::12}"
           fi
           if [ -z "$GHCR_IMAGE" ]; then
-            REPO="${GITHUB_REPOSITORY,,}"
             TAG="${IMAGE##*:}"
-            GHCR_IMAGE="ghcr.io/${REPO}:${TAG}"
+            GHCR_IMAGE="${BEANCS_GHCR_IMAGE_BASE}:${TAG}"
           fi
           echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
           echo "ghcr_image=$GHCR_IMAGE" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
@@ -610,9 +662,28 @@ jobs:
         with:
           context: ${{ github.event_name == 'workflow_dispatch' && inputs.context || '.' }}
           file: ${{ github.event_name == 'workflow_dispatch' && inputs.dockerfile_path || '%s' }}
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: |
             ${{ steps.meta.outputs.image }}
             ${{ steps.meta.outputs.ghcr_image }}
-%s`, trigger, coalesce(project.DockerfilePath, "Dockerfile"), callback)
+%s`, projectName, trigger, projectName, imageBase, ghcrBase, coalesce(project.DockerfilePath, "Dockerfile"), callback)
+}
+
+func beancsWorkflowSlug(project *model.Project) string {
+	if project == nil {
+		return "project"
+	}
+	if slug := harborName(project.Name); slug != "" {
+		return slug
+	}
+	return "project"
+}
+
+func beancsBuildWorkflowFile(project *model.Project) string {
+	return "beancs-build-" + beancsWorkflowSlug(project) + ".yml"
+}
+
+func beancsBuildWorkflowPath(project *model.Project) string {
+	return ".github/workflows/" + beancsBuildWorkflowFile(project)
 }

@@ -50,12 +50,28 @@ func (m *Manager) UpsertRegistryPullSecret(ctx context.Context, namespace, proje
 	if m.RegistryHost == "" || m.RegistryPullUsername == "" || m.RegistryPullToken == "" {
 		return fmt.Errorf("registry pull credentials are not configured")
 	}
-	auth := base64.StdEncoding.EncodeToString([]byte(m.RegistryPullUsername + ":" + m.RegistryPullToken))
+	return m.UpsertRegistryPullSecretWithCredentials(ctx, namespace, projectName, secretName, m.RegistryHost, m.RegistryPullUsername, m.RegistryPullToken)
+}
+
+func (m *Manager) UpsertRegistryPullSecretWithCredentials(ctx context.Context, namespace, projectName, secretName, registryHost, username, token string) error {
+	if err := m.ensure(); err != nil {
+		return err
+	}
+	if secretName == "" {
+		secretName = m.RegistryPullSecret
+	}
+	if secretName == "" {
+		return fmt.Errorf("registry pull secret name is required")
+	}
+	if registryHost == "" || username == "" || token == "" {
+		return fmt.Errorf("registry pull credentials are not configured")
+	}
+	auth := base64.StdEncoding.EncodeToString([]byte(username + ":" + token))
 	payload, err := json.Marshal(map[string]any{
 		"auths": map[string]any{
-			m.RegistryHost: map[string]string{
-				"username": m.RegistryPullUsername,
-				"password": m.RegistryPullToken,
+			registryHost: map[string]string{
+				"username": username,
+				"password": token,
 				"auth":     auth,
 			},
 		},
