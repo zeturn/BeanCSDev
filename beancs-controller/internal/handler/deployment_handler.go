@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"strconv"
+
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2"
 	"github.com/zeturn/beancs-controller/internal/dto"
@@ -23,6 +25,8 @@ func NewDeploymentHandler(db *gorm.DB, svc *service.DeploymentService, v *valida
 func (h *DeploymentHandler) Register(r fiber.Router) {
 	r.Post("/projects/:id/deployments", middleware.ProjectAccess(h.db), h.create)
 	r.Get("/projects/:id/deployments", middleware.ProjectAccess(h.db), h.list)
+	r.Get("/projects/:id/tracking", middleware.ProjectAccess(h.db), h.tracking)
+	r.Get("/projects/:id/releases", middleware.ProjectAccess(h.db), h.tracking)
 	r.Get("/projects/:id/deployments/:did", middleware.ProjectAccess(h.db), h.get)
 	r.Get("/projects/:id/deployments/:did/logs", middleware.ProjectAccess(h.db), h.logs)
 	r.Post("/projects/:id/deployments/:did/rollback", middleware.ProjectOwner(h.db), h.rollback)
@@ -52,6 +56,16 @@ func (h *DeploymentHandler) list(c *fiber.Ctx) error {
 		return fail(c, 500, err)
 	}
 	return c.JSON(fiber.Map{"data": out})
+}
+
+func (h *DeploymentHandler) tracking(c *fiber.Ctx) error {
+	project := projectFromCtx(c)
+	limit, _ := strconv.Atoi(c.Query("limit", "50"))
+	out, err := h.service.ProjectTracking(c.UserContext(), *project, limit)
+	if err != nil {
+		return fail(c, 500, err)
+	}
+	return c.JSON(out)
 }
 
 func (h *DeploymentHandler) get(c *fiber.Ctx) error {

@@ -162,6 +162,9 @@ function App() {
   const [deployForm, setDeployForm] = useState(defaultDeployForm());
   const [editingProject, setEditingProject] = useState(null);
   const [deletingProject, setDeletingProject] = useState(null);
+  const [trackingProject, setTrackingProject] = useState(null);
+  const [projectTracking, setProjectTracking] = useState(null);
+  const [trackingLoading, setTrackingLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarQuery, setSidebarQuery] = useState("");
   const [activeProgressProjectID, setActiveProgressProjectID] = useState("");
@@ -1357,6 +1360,21 @@ function App() {
     }
   }
 
+  async function openProjectTracking(project) {
+    setTrackingProject(project);
+    setProjectTracking(null);
+    setTrackingLoading(true);
+    setError("");
+    try {
+      const data = await api.get(`/projects/${project.id}/tracking?limit=100`);
+      setProjectTracking(data);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setTrackingLoading(false);
+    }
+  }
+
   function selectNav(item) {
     if (item.id === "progress") {
       setActiveProgressProjectID("");
@@ -1486,7 +1504,7 @@ function App() {
               />
             )}
             {view === "projects" && (
-              <ProjectsView projects={projects} onEdit={setEditingProject} onDelete={deleteProject} onScale={scaleProject} onRestart={restartProject} onBuild={buildProject} onProgress={(project) => { setActiveProgressProjectID(String(project.id)); setView("progress"); }} />
+              <ProjectsView projects={projects} onEdit={setEditingProject} onDelete={deleteProject} onScale={scaleProject} onRestart={restartProject} onBuild={buildProject} onTracking={openProjectTracking} onProgress={(project) => { setActiveProgressProjectID(String(project.id)); setView("progress"); }} />
             )}
             {view === "deployments" && <DeploymentsView projects={projects} processes={processRecords} runtimeDeployments={runtime.deployments || []} refresh={loadWorkspace} onOpenProcess={(process) => { setActiveProcessID(String(process.id)); setActiveProgressProjectID(String(process.project_id || "")); setView("progress"); }} />}
             {view === "apiKeys" && <APIKeysView keys={apiKeys} createdKey={createdAPIKey} onDismissCreated={() => setCreatedAPIKey(null)} onCreate={createAPIKey} onRevoke={revokeAPIKey} onRefresh={loadAPIKeys} isAdmin={userProfile.scopes.includes("beancs.admin")} />}
@@ -1557,6 +1575,7 @@ function App() {
       </main>
       {editingProject && <ProjectModal project={editingProject} onClose={() => setEditingProject(null)} onSubmit={updateProject} />}
       {deletingProject && <DeleteProjectModal project={deletingProject} busy={loading} onClose={() => setDeletingProject(null)} onDelete={confirmDeleteProject} />}
+      {trackingProject && <ProjectTrackingModal project={trackingProject} tracking={projectTracking} loading={trackingLoading} onRefresh={() => openProjectTracking(trackingProject)} onClose={() => { setTrackingProject(null); setProjectTracking(null); }} />}
       {runtimeDetail && <RuntimeDetailDrawer detail={runtimeDetail} logs={runtimeLogs} logFollow={runtimeLogFollow} logStatus={runtimeLogStatus} selectedLogContainer={runtimeLogContainer} logTail={runtimeLogTail} logLoaded={runtimeLogLoaded} nodeHealth={nodeHealth} onLoadNodeHealth={loadNodeHealth} onSaveNodeLabels={saveNodeLabels} onSaveNodeTaints={saveNodeTaints} onCordonNode={cordonNode} onDrainNode={drainNode} onDeleteNode={deleteNode} onSaveResourceQuota={saveResourceQuota} onDeleteResourceQuota={deleteResourceQuota} onSaveLimitRange={saveLimitRange} onDeleteLimitRange={deleteLimitRange} onSaveNamespacePermission={saveNamespacePermission} onDeleteNamespacePermission={deleteNamespacePermission} onSaveNamespaceIsolation={saveNamespaceIsolation} onSelectLogContainer={setRuntimeLogContainer} onSetLogTail={setRuntimeLogTail} onLoadContainerLogs={loadRuntimeContainerLogs} onFollowPodLogs={startRuntimeLogFollow} onStopPodLogs={stopRuntimeLogFollow} onClose={() => { stopRuntimeLogFollow(); setRuntimeDetail(null); setRuntimeLogs(""); setRuntimeLogContainer(""); setRuntimeLogLoaded(false); setRuntimeLogStatus(""); setNodeHealth(null); }} onSaveService={saveService} onPatchNamespace={patchNamespaceLabels} />}
     </div>
   );
@@ -2847,7 +2866,7 @@ function DeploymentsView({projects, processes, runtimeDeployments, refresh, onOp
   );
 }
 
-function ProjectsView({projects, onEdit, onDelete, onScale, onRestart, onBuild, onProgress}) {
+function ProjectsView({projects, onEdit, onDelete, onScale, onRestart, onBuild, onTracking, onProgress}) {
   const [projectSearch, setProjectSearch] = useState("");
   const visibleProjects = useMemo(() => {
     const needle = String(projectSearch || "").trim().toLowerCase();
@@ -2886,6 +2905,7 @@ function ProjectsView({projects, onEdit, onDelete, onScale, onRestart, onBuild, 
             <ExpandableCell value={project.domain || project.exposure_mode} max={36} />
             <ExpandableCell value={project.status} max={24} />
             <span className="row-actions">
+              <button onClick={() => onTracking(project)} title="Release history"><ScrollText size={15} /> History</button>
               <button onClick={() => onProgress(project)} title="Progress"><LoaderCircle size={15} /> Progress</button>
               <button onClick={() => onBuild(project)} title="Rebuild"><Play size={15} /> Rebuild</button>
               <button onClick={() => onRestart(project)} title="Restart"><RotateCcw size={15} /></button>
@@ -2897,6 +2917,57 @@ function ProjectsView({projects, onEdit, onDelete, onScale, onRestart, onBuild, 
         {visibleProjects.length === 0 && <div className="empty">{projectSearch ? "No projects match this search." : "No projects yet."}</div>}
       </div>
     </section>
+  );
+}
+
+function ProjectTrackingModal({project, tracking, loading, onRefresh, onClose}) {
+  const history = tracking?.history || [];
+  const current = tracking?.running_deployment || tracking?.latest_deployment;
+  return (
+    <div className="modal-backdrop">
+      <div className="modal wide-modal tracking-modal">
+        <div className="side-drawer-head">
+          <div>
+            <h2><ScrollText size={18} /> {project.display_name || project.name}</h2>
+            <p>{tracking?.github_repo || project.github_repo || tracking?.current_image || project.image_reference || "Deployment tracking"}</p>
+          </div>
+          <button type="button" onClick={onClose} title="Close"><X size={16} /></button>
+        </div>
+        <div className="tracking-summary-grid">
+          <MetricCard icon={Rocket} label="Current" value={tracking?.current_version || current?.version || "-"} detail={tracking?.current_image || current?.image_ref || "-"} tone={current?.status === "failed" ? "warning" : "good"} />
+          <MetricCard icon={Activity} label="Latest" value={tracking?.latest_status || current?.status || "-"} detail={tracking?.latest_deployment ? formatDeploymentDate(tracking.latest_deployment.updated_at) : "-"} />
+          <MetricCard icon={Box} label="History" value={tracking?.summary?.total ?? history.length} detail={`${tracking?.summary?.failed || 0} failed, ${tracking?.summary?.deploying || 0} deploying`} />
+        </div>
+        <div className="modal-actions tracking-actions">
+          <button type="button" onClick={onRefresh} disabled={loading}><RefreshCw size={15} /> Refresh</button>
+        </div>
+        <div className="tracking-history">
+          {loading && <div className="empty">Loading release history...</div>}
+          {!loading && history.map((item) => (
+            <div className="tracking-row" key={item.id}>
+              <span className={`deploy-state ${normalizeDeploymentStatus(item.status)}`}>
+                <i />
+                <b>{item.version || item.tag || `Deployment ${item.id}`}</b>
+                <small>{item.status || "pending"}{item.process_status ? ` · process ${item.process_status}` : ""}</small>
+              </span>
+              <span>
+                <b>{truncateMiddle(item.image_ref || item.tag || "-", 54)}</b>
+                <small>{item.commit_sha ? truncateMiddle(item.commit_sha, 18) : "No commit recorded"}</small>
+              </span>
+              <span>
+                <b>{formatDeploymentDate(item.created_at)}</b>
+                <small>{item.triggered_by || "system"}</small>
+              </span>
+              <span>
+                {item.workflow_url ? <a href={item.workflow_url} target="_blank" rel="noreferrer">Workflow</a> : <small>No workflow link</small>}
+                {item.failure_reason && <small className="error-inline">{item.failure_reason}</small>}
+              </span>
+            </div>
+          ))}
+          {!loading && history.length === 0 && <div className="empty">No release history recorded for this project.</div>}
+        </div>
+      </div>
+    </div>
   );
 }
 

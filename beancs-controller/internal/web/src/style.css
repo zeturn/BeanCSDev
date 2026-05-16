@@ -2379,6 +2379,67 @@ button.domain-tile {
   width: min(920px, 100%);
 }
 
+.tracking-modal {
+  max-height: min(780px, calc(100vh - 36px));
+  overflow: auto;
+}
+
+.tracking-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.tracking-actions {
+  justify-content: flex-start;
+  margin: 0;
+}
+
+.tracking-history {
+  display: grid;
+  overflow: hidden;
+  border: 1px solid var(--bc-border);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.tracking-row {
+  min-height: 70px;
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(220px, 1.4fr) minmax(150px, 0.8fr) minmax(120px, 0.7fr);
+  gap: 14px;
+  align-items: center;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--bc-border);
+}
+
+.tracking-row:last-child {
+  border-bottom: 0;
+}
+
+.tracking-row > span {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.tracking-row b,
+.tracking-row small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tracking-row small {
+  color: var(--bc-muted);
+}
+
+.tracking-row a {
+  color: var(--bc-primary-700);
+  font-weight: 800;
+}
+
 .modal-log {
   max-height: 520px;
   overflow: auto;
