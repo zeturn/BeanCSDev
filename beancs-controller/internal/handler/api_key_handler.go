@@ -18,9 +18,14 @@ func NewAPIKeyHandler(svc *service.APIKeyService, v *validator.Validate) *APIKey
 }
 
 func (h *APIKeyHandler) Register(r fiber.Router) {
-	r.Get("/api-keys", h.list)
-	r.Post("/api-keys", h.create)
-	r.Delete("/api-keys/:id", h.revoke)
+	r.Get("/api-keys/scopes", h.scopes)
+	r.Get("/api-keys", middleware.RequireAPIScope(service.ScopeAPIKeysRead), h.list)
+	r.Post("/api-keys", middleware.RequireAPIScope(service.ScopeAPIKeysWrite), h.create)
+	r.Delete("/api-keys/:id", middleware.RequireAPIScope(service.ScopeAPIKeysRevoke), h.revoke)
+}
+
+func (h *APIKeyHandler) scopes(c *fiber.Ctx) error {
+	return c.JSON(h.service.ScopeOptions(middleware.Scopes(c)))
 }
 
 func (h *APIKeyHandler) list(c *fiber.Ctx) error {
@@ -36,7 +41,7 @@ func (h *APIKeyHandler) create(c *fiber.Ctx) error {
 	if err := h.parseAndValidate(c, &req); err != nil {
 		return err
 	}
-	out, err := h.service.Create(c.UserContext(), middleware.UserID(c), middleware.TenantID(c), middleware.Scopes(c), req)
+	out, err := h.service.Create(c.UserContext(), middleware.UserID(c), middleware.TenantID(c), middleware.Scopes(c), middleware.AuthMethod(c) == "api_key", req)
 	if err != nil {
 		return fail(c, 400, err)
 	}

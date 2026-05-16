@@ -23,13 +23,13 @@ func NewDeploymentHandler(db *gorm.DB, svc *service.DeploymentService, v *valida
 }
 
 func (h *DeploymentHandler) Register(r fiber.Router) {
-	r.Post("/projects/:id/deployments", middleware.ProjectAccess(h.db), h.create)
-	r.Get("/projects/:id/deployments", middleware.ProjectAccess(h.db), h.list)
-	r.Get("/projects/:id/tracking", middleware.ProjectAccess(h.db), h.tracking)
-	r.Get("/projects/:id/releases", middleware.ProjectAccess(h.db), h.tracking)
-	r.Get("/projects/:id/deployments/:did", middleware.ProjectAccess(h.db), h.get)
-	r.Get("/projects/:id/deployments/:did/logs", middleware.ProjectAccess(h.db), h.logs)
-	r.Post("/projects/:id/deployments/:did/rollback", middleware.ProjectOwner(h.db), h.rollback)
+	r.Post("/projects/:id/deployments", middleware.RequireAPIScope(service.ScopeDeploymentsWrite), middleware.ProjectAccess(h.db), h.create)
+	r.Get("/projects/:id/deployments", middleware.RequireAPIScope(service.ScopeDeploymentsRead), middleware.ProjectAccess(h.db), h.list)
+	r.Get("/projects/:id/tracking", middleware.RequireAPIScope(service.ScopeDeploymentsRead), middleware.ProjectAccess(h.db), h.tracking)
+	r.Get("/projects/:id/releases", middleware.RequireAPIScope(service.ScopeDeploymentsRead), middleware.ProjectAccess(h.db), h.tracking)
+	r.Get("/projects/:id/deployments/:did", middleware.RequireAPIScope(service.ScopeDeploymentsRead), middleware.ProjectAccess(h.db), h.get)
+	r.Get("/projects/:id/deployments/:did/logs", middleware.RequireAPIScope(service.ScopeDeploymentsRead), middleware.ProjectAccess(h.db), h.logs)
+	r.Post("/projects/:id/deployments/:did/rollback", middleware.RequireAPIScope(service.ScopeDeploymentsWrite), middleware.ProjectOwner(h.db), h.rollback)
 }
 
 func (h *DeploymentHandler) create(c *fiber.Ctx) error {

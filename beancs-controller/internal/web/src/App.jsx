@@ -141,6 +141,7 @@ function App() {
   const [projects, setProjects] = useState([]);
   const [credentials, setCredentials] = useState({github: [], cloudflare: [], basaltpass: []});
   const [apiKeys, setAPIKeys] = useState([]);
+  const [apiKeyScopeCatalog, setAPIKeyScopeCatalog] = useState({scopes: [], presets: []});
   const [registryPresets, setRegistryPresets] = useState([]);
   const [containerRegistries, setContainerRegistries] = useState([]);
   const [containerImages, setContainerImages] = useState([]);
@@ -262,6 +263,11 @@ function App() {
     publicJSON(`${API}/version`)
       .then((d) => setAppVersion(d.version || ""))
       .catch(() => setAppVersion(""));
+  }, [token, view]);
+
+  useEffect(() => {
+    if (!token || view !== "apiKeys") return;
+    loadAPIKeys();
   }, [token, view]);
 
   useEffect(() => {
@@ -461,10 +467,10 @@ function App() {
     setNotice("");
     const form = event.currentTarget;
     const data = new FormData(form);
-    const scopes = ["beancs.api"];
-    if (data.get("admin_scope") === "on") scopes.push("beancs.admin");
+    const scopes = data.getAll("scopes").map((scope) => String(scope || "").trim()).filter(Boolean);
     const body = {
       name: String(data.get("name") || "").trim(),
+      preset: String(data.get("preset") || "").trim(),
       scopes,
       expires_at: localDateTimeToRFC3339(data.get("expires_at")),
     };
@@ -473,14 +479,17 @@ function App() {
       setCreatedAPIKey(out);
       form.reset();
       await loadAPIKeys();
+      return true;
     } catch (err) {
       setError(err.message);
+      return false;
     }
   }
 
   async function loadAPIKeys() {
-    const data = await api.get("/api-keys");
-    setAPIKeys(data.data || []);
+    const [keyData, scopeData] = await Promise.all([api.get("/api-keys"), api.get("/api-keys/scopes")]);
+    setAPIKeys(keyData.data || []);
+    setAPIKeyScopeCatalog(scopeData || {scopes: [], presets: []});
   }
 
   async function loadRegistriesPage() {
@@ -1507,7 +1516,7 @@ function App() {
               <ProjectsView projects={projects} onEdit={setEditingProject} onDelete={deleteProject} onScale={scaleProject} onRestart={restartProject} onBuild={buildProject} onTracking={openProjectTracking} onProgress={(project) => { setActiveProgressProjectID(String(project.id)); setView("progress"); }} />
             )}
             {view === "deployments" && <DeploymentsView projects={projects} processes={processRecords} runtimeDeployments={runtime.deployments || []} refresh={loadWorkspace} onOpenProcess={(process) => { setActiveProcessID(String(process.id)); setActiveProgressProjectID(String(process.project_id || "")); setView("progress"); }} />}
-            {view === "apiKeys" && <APIKeysView keys={apiKeys} createdKey={createdAPIKey} onDismissCreated={() => setCreatedAPIKey(null)} onCreate={createAPIKey} onRevoke={revokeAPIKey} onRefresh={loadAPIKeys} isAdmin={userProfile.scopes.includes("beancs.admin")} />}
+            {view === "apiKeys" && <APIKeysView keys={apiKeys} scopeCatalog={apiKeyScopeCatalog} createdKey={createdAPIKey} onDismissCreated={() => setCreatedAPIKey(null)} onCreate={createAPIKey} onRevoke={revokeAPIKey} onRefresh={loadAPIKeys} />}
             {view === "registries" && (
               <ContainerRegistriesView
                 presets={registryPresets}
@@ -3186,7 +3195,10 @@ function SettingsView({version}) {
   );
 }
 
-function APIKeysView({keys, createdKey, onDismissCreated, onCreate, onRevoke, onRefresh, isAdmin}) {
+function APIKeysView({keys, scopeCatalog, createdKey, onDismissCreated, onCreate, onRevoke, onRefresh}) {
+  const presets = scopeCatalog?.presets || [];
+  const scopes = scopeCatalog?.scopes || [];
+  const [drawerOpen, setDrawerOpen] = useState(false);
   return (
     <div className="stack">
       <section className="panel action-panel">
@@ -3194,7 +3206,10 @@ function APIKeysView({keys, createdKey, onDismissCreated, onCreate, onRevoke, on
           <h2><KeyRound size={18} /> API keys</h2>
           <p>Create keys for beanctl, scripts, and external systems that need to manage BeanCS through the API.</p>
         </div>
-        <button onClick={onRefresh}><RefreshCw size={15} /> Refresh</button>
+        <div className="row-actions">
+          <button onClick={onRefresh}><RefreshCw size={15} /> Refresh</button>
+          <button type="button" className="primary" onClick={() => setDrawerOpen(true)}><Plus size={15} /> Create key</button>
+        </div>
       </section>
       {createdKey && (
         <section className="panel api-key-created">
@@ -3204,18 +3219,6 @@ function APIKeysView({keys, createdKey, onDismissCreated, onCreate, onRevoke, on
           <div className="modal-actions"><button onClick={onDismissCreated}>I saved it</button></div>
         </section>
       )}
-      <section className="panel">
-        <h2><Plus size={18} /> Create API key</h2>
-        <form className="form-grid api-key-form" onSubmit={onCreate}>
-          <input name="name" placeholder="Key name, e.g. local beanctl" required />
-          <input name="expires_at" type="datetime-local" />
-          <label className="checkbox-row">
-            <input name="admin_scope" type="checkbox" disabled={!isAdmin} />
-            Include beancs.admin scope {isAdmin ? "" : "(admin session required)"}
-          </label>
-          <button className="primary" type="submit"><KeyRound size={15} /> Create key</button>
-        </form>
-      </section>
       <section className="panel">
         <h2><KeyRound size={18} /> Issued keys</h2>
         <div className="table api-key-table">
@@ -3235,6 +3238,64 @@ function APIKeysView({keys, createdKey, onDismissCreated, onCreate, onRevoke, on
           {keys.length === 0 && <div className="empty">No API keys issued yet.</div>}
         </div>
       </section>
+      {drawerOpen && (
+        <APIKeyDrawer
+          presets={presets}
+          scopes={scopes}
+          onClose={() => setDrawerOpen(false)}
+          onCreate={async (event) => {
+            const ok = await onCreate(event);
+            if (ok) setDrawerOpen(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function APIKeyDrawer({presets, scopes, onClose, onCreate}) {
+  const defaultPreset = presets[0]?.id || "";
+  return (
+    <div className="side-drawer-backdrop" onClick={onClose}>
+      <aside className="side-drawer api-key-drawer" onClick={(event) => event.stopPropagation()}>
+        <div className="side-drawer-head">
+          <div>
+            <h2><KeyRound size={18} /> Create API key</h2>
+            <p>Choose a preset or select exact scopes for local automation.</p>
+          </div>
+          <button type="button" className="icon-button" aria-label="Close" onClick={onClose}><X size={16} /></button>
+        </div>
+        <form className="drawer-form api-key-form" onSubmit={onCreate}>
+          <label>
+            Key name
+            <input name="name" placeholder="local beanctl" required autoFocus />
+          </label>
+          <label>
+            Expires at
+            <input name="expires_at" type="datetime-local" />
+          </label>
+          <label>
+            Permission preset
+            <select name="preset" defaultValue={defaultPreset}>
+              <option value="">Custom scopes</option>
+              {presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
+            </select>
+          </label>
+          <div className="scope-picker">
+            {scopes.map((scope) => (
+              <label className="checkbox-row" key={scope.id} title={scope.description}>
+                <input name="scopes" type="checkbox" value={scope.id} />
+                <span><b>{scope.label}</b><small>{scope.id}</small></span>
+              </label>
+            ))}
+            {scopes.length === 0 && <div className="empty">No scope options loaded.</div>}
+          </div>
+          <div className="drawer-actions">
+            <button type="button" onClick={onClose}>Cancel</button>
+            <button className="primary" type="submit"><KeyRound size={15} /> Create key</button>
+          </div>
+        </form>
+      </aside>
     </div>
   );
 }

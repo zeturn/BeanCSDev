@@ -337,6 +337,15 @@ func exchangeBrowserToken(c *fiber.Ctx, cfg *config.Config) error {
 }
 
 func browserUserInfo(c *fiber.Ctx, cfg *config.Config) error {
+	if middleware.AuthMethod(c) == "api_key" {
+		return c.JSON(fiber.Map{
+			"sub":         middleware.UserID(c),
+			"tenant_id":   middleware.TenantID(c),
+			"tenant_code": middleware.TenantCode(c),
+			"scope":       strings.Join(middleware.Scopes(c), " "),
+			"auth_method": "api_key",
+		})
+	}
 	token := bearerToken(c.Get("Authorization"))
 	if token == "" {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "missing token"})

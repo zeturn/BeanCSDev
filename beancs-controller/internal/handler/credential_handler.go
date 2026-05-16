@@ -41,32 +41,32 @@ func (h *CredentialHandler) Register(r fiber.Router) {
 }
 
 func (h *CredentialHandler) registerCloudflare(r fiber.Router) {
-	r.Post("/", h.createCloudflare)
-	r.Get("/", h.listCloudflare)
-	r.Get("/domains", h.listCloudflareDomains)
-	r.Get("/:id/dns-records", h.listCloudflareDNSRecords)
-	r.Post("/:id/dns-records", h.createCloudflareDNSRecord)
-	r.Put("/:id/dns-records/:record_id", h.updateCloudflareDNSRecord)
-	r.Delete("/:id/dns-records/:record_id", h.deleteCloudflareDNSRecord)
-	r.Get("/:id", h.getCloudflare)
-	r.Patch("/:id", h.updateCloudflare)
-	r.Delete("/:id", h.delete(model.CredentialTypeCloudflare))
-	r.Post("/:id/share", h.share(model.CredentialTypeCloudflare))
-	r.Delete("/:id/share/:user_id", h.revoke(model.CredentialTypeCloudflare))
-	r.Get("/:id/verify", h.verifyCloudflare)
+	r.Post("/", middleware.RequireAPIScope(service.ScopeCredentialsWrite), h.createCloudflare)
+	r.Get("/", middleware.RequireAPIScope(service.ScopeCredentialsRead), h.listCloudflare)
+	r.Get("/domains", middleware.RequireAPIScope(service.ScopeCredentialsRead), h.listCloudflareDomains)
+	r.Get("/:id/dns-records", middleware.RequireAPIScope(service.ScopeCredentialsRead), h.listCloudflareDNSRecords)
+	r.Post("/:id/dns-records", middleware.RequireAPIScope(service.ScopeCredentialsWrite), h.createCloudflareDNSRecord)
+	r.Put("/:id/dns-records/:record_id", middleware.RequireAPIScope(service.ScopeCredentialsWrite), h.updateCloudflareDNSRecord)
+	r.Delete("/:id/dns-records/:record_id", middleware.RequireAPIScope(service.ScopeCredentialsDelete), h.deleteCloudflareDNSRecord)
+	r.Get("/:id", middleware.RequireAPIScope(service.ScopeCredentialsRead), h.getCloudflare)
+	r.Patch("/:id", middleware.RequireAPIScope(service.ScopeCredentialsWrite), h.updateCloudflare)
+	r.Delete("/:id", middleware.RequireAPIScope(service.ScopeCredentialsDelete), h.delete(model.CredentialTypeCloudflare))
+	r.Post("/:id/share", middleware.RequireAPIScope(service.ScopeCredentialsWrite), h.share(model.CredentialTypeCloudflare))
+	r.Delete("/:id/share/:user_id", middleware.RequireAPIScope(service.ScopeCredentialsDelete), h.revoke(model.CredentialTypeCloudflare))
+	r.Get("/:id/verify", middleware.RequireAPIScope(service.ScopeCredentialsRead), h.verifyCloudflare)
 }
 
 func (h *CredentialHandler) registerGitHub(r fiber.Router) {
-	r.Post("/app/start", h.startGitHubAppInstall)
-	r.Post("/", h.createGitHub)
-	r.Get("/", h.listGitHub)
-	r.Get("/:id/repositories", h.listGitHubRepositories)
-	r.Get("/:id", h.getGitHub)
-	r.Patch("/:id", h.updateGitHub)
-	r.Delete("/:id", h.delete(model.CredentialTypeGitHub))
-	r.Post("/:id/share", h.share(model.CredentialTypeGitHub))
-	r.Delete("/:id/share/:user_id", h.revoke(model.CredentialTypeGitHub))
-	r.Get("/:id/verify", h.verifyOK)
+	r.Post("/app/start", middleware.RequireAPIScope(service.ScopeCredentialsWrite), h.startGitHubAppInstall)
+	r.Post("/", middleware.RequireAPIScope(service.ScopeCredentialsWrite), h.createGitHub)
+	r.Get("/", middleware.RequireAPIScope(service.ScopeCredentialsRead), h.listGitHub)
+	r.Get("/:id/repositories", middleware.RequireAPIScope(service.ScopeCredentialsRead), h.listGitHubRepositories)
+	r.Get("/:id", middleware.RequireAPIScope(service.ScopeCredentialsRead), h.getGitHub)
+	r.Patch("/:id", middleware.RequireAPIScope(service.ScopeCredentialsWrite), h.updateGitHub)
+	r.Delete("/:id", middleware.RequireAPIScope(service.ScopeCredentialsDelete), h.delete(model.CredentialTypeGitHub))
+	r.Post("/:id/share", middleware.RequireAPIScope(service.ScopeCredentialsWrite), h.share(model.CredentialTypeGitHub))
+	r.Delete("/:id/share/:user_id", middleware.RequireAPIScope(service.ScopeCredentialsDelete), h.revoke(model.CredentialTypeGitHub))
+	r.Get("/:id/verify", middleware.RequireAPIScope(service.ScopeCredentialsRead), h.verifyOK)
 }
 
 func (h *CredentialHandler) RegisterGitHubAppCallback(r fiber.Router) {
@@ -74,14 +74,14 @@ func (h *CredentialHandler) RegisterGitHubAppCallback(r fiber.Router) {
 }
 
 func (h *CredentialHandler) registerBasaltPass(r fiber.Router) {
-	r.Post("/", h.createBasaltPass)
-	r.Get("/", h.listBasaltPass)
-	r.Get("/:id", h.getBasaltPass)
-	r.Patch("/:id", h.updateBasaltPass)
-	r.Delete("/:id", h.delete(model.CredentialTypeBasaltPass))
-	r.Post("/:id/share", h.share(model.CredentialTypeBasaltPass))
-	r.Delete("/:id/share/:user_id", h.revoke(model.CredentialTypeBasaltPass))
-	r.Get("/:id/health", h.healthBasaltPass)
+	r.Post("/", middleware.RequireAPIScope(service.ScopeCredentialsWrite), h.createBasaltPass)
+	r.Get("/", middleware.RequireAPIScope(service.ScopeCredentialsRead), h.listBasaltPass)
+	r.Get("/:id", middleware.RequireAPIScope(service.ScopeCredentialsRead), h.getBasaltPass)
+	r.Patch("/:id", middleware.RequireAPIScope(service.ScopeCredentialsWrite), h.updateBasaltPass)
+	r.Delete("/:id", middleware.RequireAPIScope(service.ScopeCredentialsDelete), h.delete(model.CredentialTypeBasaltPass))
+	r.Post("/:id/share", middleware.RequireAPIScope(service.ScopeCredentialsWrite), h.share(model.CredentialTypeBasaltPass))
+	r.Delete("/:id/share/:user_id", middleware.RequireAPIScope(service.ScopeCredentialsDelete), h.revoke(model.CredentialTypeBasaltPass))
+	r.Get("/:id/health", middleware.RequireAPIScope(service.ScopeCredentialsRead), h.healthBasaltPass)
 }
 
 func (h *CredentialHandler) createCloudflare(c *fiber.Ctx) error {

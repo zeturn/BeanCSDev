@@ -23,16 +23,16 @@ func NewProjectHandler(db *gorm.DB, svc *service.ProjectService, k8sManager *k8s
 }
 
 func (h *ProjectHandler) Register(r fiber.Router) {
-	r.Post("/projects/analyze", h.analyze)
-	r.Post("/projects", h.create)
-	r.Get("/projects", h.list)
-	r.Get("/projects/:id", middleware.ProjectAccess(h.db), h.get)
-	r.Patch("/projects/:id", middleware.ProjectAccess(h.db), h.update)
-	r.Delete("/projects/:id", middleware.ProjectOwner(h.db), h.delete)
-	r.Get("/projects/:id/env", middleware.ProjectAccess(h.db), h.getEnv)
-	r.Put("/projects/:id/env", middleware.ProjectOwner(h.db), h.setEnv)
-	r.Patch("/projects/:id/env", middleware.ProjectOwner(h.db), h.patchEnv)
-	r.Get("/projects/:id/dns", middleware.ProjectAccess(h.db), h.dns)
+	r.Post("/projects/analyze", middleware.RequireAPIScope(service.ScopeProjectsRead), h.analyze)
+	r.Post("/projects", middleware.RequireAPIScope(service.ScopeProjectsWrite), h.create)
+	r.Get("/projects", middleware.RequireAPIScope(service.ScopeProjectsRead), h.list)
+	r.Get("/projects/:id", middleware.RequireAPIScope(service.ScopeProjectsRead), middleware.ProjectAccess(h.db), h.get)
+	r.Patch("/projects/:id", middleware.RequireAPIScope(service.ScopeProjectsWrite), middleware.ProjectAccess(h.db), h.update)
+	r.Delete("/projects/:id", middleware.RequireAPIScope(service.ScopeProjectsDelete), middleware.ProjectOwner(h.db), h.delete)
+	r.Get("/projects/:id/env", middleware.RequireAPIScope(service.ScopeProjectsRead), middleware.ProjectAccess(h.db), h.getEnv)
+	r.Put("/projects/:id/env", middleware.RequireAPIScope(service.ScopeProjectsWrite), middleware.ProjectOwner(h.db), h.setEnv)
+	r.Patch("/projects/:id/env", middleware.RequireAPIScope(service.ScopeProjectsWrite), middleware.ProjectOwner(h.db), h.patchEnv)
+	r.Get("/projects/:id/dns", middleware.RequireAPIScope(service.ScopeProjectsRead), middleware.ProjectAccess(h.db), h.dns)
 }
 
 func (h *ProjectHandler) analyze(c *fiber.Ctx) error {
