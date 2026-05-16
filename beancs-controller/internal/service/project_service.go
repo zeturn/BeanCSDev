@@ -283,7 +283,14 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID, te
 	}
 
 	var secret string
+	var bpInstance *model.BasaltPassInstance
 	if req.BasaltPassInstanceID != nil {
+		var inst model.BasaltPassInstance
+		if err := s.db.WithContext(ctx).First(&inst, *req.BasaltPassInstanceID).Error; err != nil {
+			rollback()
+			return nil, err
+		}
+		bpInstance = &inst
 		bpClient, err := s.registry.GetClientForInstance(*req.BasaltPassInstanceID)
 		if err != nil {
 			rollback()
@@ -320,7 +327,7 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID, te
 	rollbacks = append(rollbacks, func() { _ = s.k8s.DeleteNamespace(context.Background(), project.Namespace) })
 
 	if project.BasaltClientID != "" {
-		if err := s.k8s.UpsertSecret(ctx, project.Namespace, "basaltpass-keys", project.Name, map[string]string{"client_id": project.BasaltClientID, "client_secret": secret}); err != nil {
+		if err := s.k8s.UpsertSecret(ctx, project.Namespace, "basaltpass-keys", project.Name, basaltPassRuntimeEnv(bpInstance, project, secret, map[string]string{"client_id": project.BasaltClientID, "client_secret": secret})); err != nil {
 			rollback()
 			return nil, err
 		}
@@ -336,7 +343,7 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID, te
 			return nil, err
 		}
 	}
-	if err := s.k8s.UpsertSecret(ctx, project.Namespace, "app-env-vars", project.Name, req.Env); err != nil {
+	if err := s.k8s.UpsertSecret(ctx, project.Namespace, "app-env-vars", project.Name, basaltPassRuntimeEnv(bpInstance, project, secret, req.Env)); err != nil {
 		rollback()
 		return nil, err
 	}
@@ -593,6 +600,29 @@ func projectNamespace(req dto.CreateProjectRequest) string {
 		return "proj-" + req.Name
 	}
 	return namespace
+}
+
+func basaltPassRuntimeEnv(inst *model.BasaltPassInstance, project *model.Project, clientSecret string, base map[string]string) map[string]string {
+	out := make(map[string]string, len(base)+8)
+	for key, value := range base {
+		out[key] = value
+	}
+	if inst == nil || project == nil || project.BasaltClientID == "" {
+		return out
+	}
+	out["BASALTPASS_BASE_URL"] = strings.TrimRight(inst.BaseURL, "/")
+	out["BASALTPASS_CLIENT_ID"] = project.BasaltClientID
+	out["BASALTPASS_CLIENT_SECRET"] = clientSecret
+	if inst.TenantID != "" {
+		out["BASALTPASS_TENANT_ID"] = inst.TenantID
+	}
+	if inst.TenantCode != "" {
+		out["BASALTPASS_TENANT_CODE"] = inst.TenantCode
+	}
+	if project.BasaltAppID != 0 {
+		out["BASALTPASS_APP_ID"] = strconv.FormatUint(uint64(project.BasaltAppID), 10)
+	}
+	return out
 }
 
 func normalizeProjectRequest(req *dto.CreateProjectRequest) {

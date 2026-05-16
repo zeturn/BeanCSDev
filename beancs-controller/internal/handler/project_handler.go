@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"strings"
+
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2"
 	"github.com/zeturn/beancs-controller/internal/dto"
@@ -9,6 +11,7 @@ import (
 	"github.com/zeturn/beancs-controller/internal/model"
 	"github.com/zeturn/beancs-controller/internal/service"
 	"gorm.io/gorm"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
 type ProjectHandler struct {
@@ -108,7 +111,12 @@ func (h *ProjectHandler) setEnv(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "invalid request body"})
 	}
-	if err := h.k8s.UpsertSecret(c.UserContext(), project.Namespace, "app-env-vars", project.Name, req); err != nil {
+	current, _ := h.k8s.SecretPlainData(c.UserContext(), project.Namespace, "app-env-vars")
+	next := mergeMaskedSecretValues(current, req)
+	if err := h.k8s.UpsertSecret(c.UserContext(), project.Namespace, "app-env-vars", project.Name, next); err != nil {
+		return fail(c, 400, err)
+	}
+	if err := h.k8s.RestartDeployment(c.UserContext(), project.Namespace, project.Name); err != nil && !apierrors.IsNotFound(err) {
 		return fail(c, 400, err)
 	}
 	return c.JSON(fiber.Map{"status": "ok"})
@@ -125,12 +133,39 @@ func (h *ProjectHandler) patchEnv(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "invalid request body"})
 	}
 	for k, v := range req {
+		if strings.TrimSpace(k) == "" {
+			continue
+		}
+		if v == "********" {
+			continue
+		}
 		current[k] = v
 	}
 	if err := h.k8s.UpsertSecret(c.UserContext(), project.Namespace, "app-env-vars", project.Name, current); err != nil {
 		return fail(c, 400, err)
 	}
+	if err := h.k8s.RestartDeployment(c.UserContext(), project.Namespace, project.Name); err != nil && !apierrors.IsNotFound(err) {
+		return fail(c, 400, err)
+	}
 	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+func mergeMaskedSecretValues(current, requested map[string]string) map[string]string {
+	out := map[string]string{}
+	for key, value := range requested {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		if value == "********" {
+			if currentValue, ok := current[key]; ok {
+				out[key] = currentValue
+			}
+			continue
+		}
+		out[key] = value
+	}
+	return out
 }
 
 func (h *ProjectHandler) dns(c *fiber.Ctx) error {

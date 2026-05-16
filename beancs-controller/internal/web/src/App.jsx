@@ -1311,12 +1311,21 @@ function App() {
     setProjectLogStatus("");
   }
 
-  async function updateProject(event) {
+  async function loadProjectEnv(project) {
+    const data = await api.get(`/projects/${project.id}/env`);
+    return data.data || {};
+  }
+
+  async function updateProject(event, envData) {
     event.preventDefault();
     const body = Object.fromEntries(new FormData(event.currentTarget).entries());
     body.replicas = Number(body.replicas || 1);
     body.auto_deploy = body.auto_deploy === "on";
     await api.patch(`/projects/${editingProject.id}`, body);
+    if (envData) {
+      await api.put(`/projects/${editingProject.id}/env`, envData);
+      setNotice(`${editingProject.name} updated and restarted.`);
+    }
     setEditingProject(null);
     await loadWorkspace();
   }
@@ -1582,7 +1591,7 @@ function App() {
           </>
         )}
       </main>
-      {editingProject && <ProjectModal project={editingProject} onClose={() => setEditingProject(null)} onSubmit={updateProject} />}
+      {editingProject && <ProjectModal project={editingProject} onClose={() => setEditingProject(null)} onSubmit={updateProject} onLoadEnv={loadProjectEnv} />}
       {deletingProject && <DeleteProjectModal project={deletingProject} busy={loading} onClose={() => setDeletingProject(null)} onDelete={confirmDeleteProject} />}
       {trackingProject && <ProjectTrackingModal project={trackingProject} tracking={projectTracking} loading={trackingLoading} onRefresh={() => openProjectTracking(trackingProject)} onClose={() => { setTrackingProject(null); setProjectTracking(null); }} />}
       {runtimeDetail && <RuntimeDetailDrawer detail={runtimeDetail} logs={runtimeLogs} logFollow={runtimeLogFollow} logStatus={runtimeLogStatus} selectedLogContainer={runtimeLogContainer} logTail={runtimeLogTail} logLoaded={runtimeLogLoaded} nodeHealth={nodeHealth} onLoadNodeHealth={loadNodeHealth} onSaveNodeLabels={saveNodeLabels} onSaveNodeTaints={saveNodeTaints} onCordonNode={cordonNode} onDrainNode={drainNode} onDeleteNode={deleteNode} onSaveResourceQuota={saveResourceQuota} onDeleteResourceQuota={deleteResourceQuota} onSaveLimitRange={saveLimitRange} onDeleteLimitRange={deleteLimitRange} onSaveNamespacePermission={saveNamespacePermission} onDeleteNamespacePermission={deleteNamespacePermission} onSaveNamespaceIsolation={saveNamespaceIsolation} onSelectLogContainer={setRuntimeLogContainer} onSetLogTail={setRuntimeLogTail} onLoadContainerLogs={loadRuntimeContainerLogs} onFollowPodLogs={startRuntimeLogFollow} onStopPodLogs={stopRuntimeLogFollow} onClose={() => { stopRuntimeLogFollow(); setRuntimeDetail(null); setRuntimeLogs(""); setRuntimeLogContainer(""); setRuntimeLogLoaded(false); setRuntimeLogStatus(""); setNodeHealth(null); }} onSaveService={saveService} onPatchNamespace={patchNamespaceLabels} />}
@@ -1991,10 +2000,14 @@ function DeployView({credentials, domains, namespaces, selectedCredential, setSe
               <option value="medium">Medium</option>
               <option value="large">Large</option>
             </select>
-            <label>BasaltPass optional</label>
+            <label>BasaltPass tenant</label>
             <select value={form.basaltpass_instance_id} onChange={(event) => setForm({...form, basaltpass_instance_id: event.target.value})}>
               <option value="">Do not register OAuth app</option>
-              {credentials.basaltpass.map((cred) => <option key={cred.id} value={cred.id}>{cred.name}</option>)}
+              {credentials.basaltpass.map((cred) => (
+                <option key={cred.id} value={cred.id}>
+                  {[cred.name, cred.tenant_code || cred.tenant_id].filter(Boolean).join(" / ")}
+                </option>
+              ))}
             </select>
           </div>
         )}
@@ -2038,6 +2051,14 @@ function DeployView({credentials, domains, namespaces, selectedCredential, setSe
             {form.exposure_mode === "internal-only" && <p className="muted">No domain is required for internal-only projects.</p>}
           </div>
         )}
+        {step.id === "env" && (
+          <EnvEditor
+            entries={form.env_entries || []}
+            onChange={(entries) => setForm({...form, env_entries: entries})}
+            masked={false}
+            title="Runtime environment"
+          />
+        )}
         {step.id === "confirm" && (
           <div className="detail-list">
             <span>Install method <b>{sourceLabel(form.build_source)}</b></span>
@@ -2047,6 +2068,7 @@ function DeployView({credentials, domains, namespaces, selectedCredential, setSe
             <span>Ingress <b>{form.exposure_mode}</b></span>
             <span>Domain <b>{publicHost || form.private_host || "internal only"}</b></span>
             <span>Port <b>{form.port}</b></span>
+            <span>Runtime variables <b>{(form.env_entries || []).filter((entry) => entry.key.trim()).length}</b></span>
             <span>Update mode <b>{form.deploy_source === "registry" ? "Passive" : form.update_mode === "argocd" ? "Argo CD" : "Passive"}</b></span>
             {form.deploy_source === "gitops" && form.update_mode === "argocd" && <span>Future GHCR image <b>{ghcrPreview}</b></span>}
           </div>
@@ -2768,6 +2790,7 @@ const deploySteps = [
   {id: "namespace", label: "Namespace", title: "Choose namespace"},
   {id: "ingress", label: "Ingress", title: "Choose ingress mode"},
   {id: "domain", label: "Domain", title: "Choose domain"},
+  {id: "env", label: "Env", title: "Add runtime variables"},
   {id: "confirm", label: "Confirm", title: "Confirm and build"},
 ];
 
@@ -4167,12 +4190,12 @@ function ServiceForm({existing, onSubmit}) {
 
 function CredentialManager({kind, rows, onCreate, onDelete}) {
   const isCloudflare = kind === "cloudflare";
-  const title = isCloudflare ? "Cloudflare accounts" : "BasaltPass instances";
-  const columns = isCloudflare ? ["name", "account_id", "is_active"] : ["name", "base_url", "client_id"];
+  const title = isCloudflare ? "Cloudflare accounts" : "BasaltPass tenants";
+  const columns = isCloudflare ? ["name", "account_id", "is_active"] : ["name", "tenant_code", "tenant_id", "base_url", "is_active"];
   return (
     <div className="stack">
       <section className="panel">
-        <h2><KeyRound size={18} /> Add {isCloudflare ? "Cloudflare account" : "BasaltPass instance"}</h2>
+        <h2><KeyRound size={18} /> Add {isCloudflare ? "Cloudflare account" : "BasaltPass tenant"}</h2>
         <form className="form-grid" onSubmit={(event) => onCreate(kind, event)}>
           <input name="name" placeholder="Name" required />
           {isCloudflare ? (
@@ -4183,9 +4206,9 @@ function CredentialManager({kind, rows, onCreate, onDelete}) {
           ) : (
             <>
               <input name="base_url" placeholder="https://auth.example.com" required />
-              <input name="client_id" placeholder="Management client ID" required />
-              <input name="client_secret" type="password" placeholder="Management client secret" required />
-              <input name="service_token" type="password" placeholder="Service token, optional" />
+              <input name="tenant_code" placeholder="Tenant code" required />
+              <input name="tenant_id" placeholder="Tenant ID, optional" />
+              <input name="automation_token" type="password" placeholder="Automation token bpk_..." required />
             </>
           )}
           <button className="primary" type="submit"><Plus size={16} /> Add</button>
@@ -4208,10 +4231,64 @@ function CredentialManager({kind, rows, onCreate, onDelete}) {
   );
 }
 
-function ProjectModal({project, onClose, onSubmit}) {
+function EnvEditor({entries, onChange, title = "Environment variables", masked = false}) {
+  const [bulkText, setBulkText] = useState("");
+  const setEntry = (index, patch) => onChange(entries.map((entry, itemIndex) => itemIndex === index ? {...entry, ...patch} : entry));
+  const addEntry = () => onChange([...(entries || []), {key: "", value: ""}]);
+  const removeEntry = (index) => onChange(entries.filter((_, itemIndex) => itemIndex !== index));
+  const importBulk = () => {
+    const parsed = parseDotEnv(bulkText);
+    if (!parsed.length) return;
+    const byKey = new Map((entries || []).filter((entry) => entry.key).map((entry) => [entry.key, entry]));
+    parsed.forEach((entry) => byKey.set(entry.key, entry));
+    onChange(Array.from(byKey.values()));
+    setBulkText("");
+  };
+  return (
+    <div className="env-editor">
+      <div className="section-head">
+        <h3>{title}</h3>
+        <button type="button" onClick={addEntry}><Plus size={15} /> Add variable</button>
+      </div>
+      <div className="env-list">
+        {(entries || []).map((entry, index) => (
+          <div className="env-row" key={`${entry.key}-${index}`}>
+            <input value={entry.key} placeholder="DATABASE_URL" onChange={(event) => setEntry(index, {key: event.target.value.trim()})} />
+            <input value={entry.value} type={masked && entry.value === "********" ? "password" : "text"} placeholder={masked ? "Keep existing secret" : "value"} onChange={(event) => setEntry(index, {value: event.target.value})} />
+            <button type="button" onClick={() => removeEntry(index)}><Trash2 size={15} /></button>
+          </div>
+        ))}
+        {(entries || []).length === 0 && <div className="empty">No runtime variables configured.</div>}
+      </div>
+      <label>Import .env</label>
+      <textarea value={bulkText} placeholder={"DATABASE_URL=postgres://...\nRABBITMQ_URL=amqp://..."} onChange={(event) => setBulkText(event.target.value)} />
+      <button type="button" onClick={importBulk} disabled={!bulkText.trim()}><Upload size={15} /> Import variables</button>
+      <p className="muted">Values are stored in the Kubernetes app-env-vars Secret. Existing masked values stay unchanged unless replaced.</p>
+    </div>
+  );
+}
+
+function ProjectModal({project, onClose, onSubmit, onLoadEnv}) {
+  const [envEntries, setEnvEntries] = useState([]);
+  const [envLoading, setEnvLoading] = useState(true);
+  const [envError, setEnvError] = useState("");
+  useEffect(() => {
+    let cancelled = false;
+    setEnvLoading(true);
+    setEnvError("");
+    onLoadEnv(project).then((data) => {
+      if (!cancelled) setEnvEntries(envEntriesFromObject(data));
+    }).catch((err) => {
+      if (!cancelled) setEnvError(err.message);
+    }).finally(() => {
+      if (!cancelled) setEnvLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [project.id]);
+  const submit = (event) => onSubmit(event, envError ? null : envObjectFromEntries(envEntries));
   return (
     <div className="modal-backdrop">
-      <form className="modal" onSubmit={onSubmit}>
+      <form className="modal wide-modal" onSubmit={submit}>
         <h2>Edit {project.name}</h2>
         <label>Display name</label>
         <input name="display_name" defaultValue={project.display_name || ""} />
@@ -4231,9 +4308,15 @@ function ProjectModal({project, onClose, onSubmit}) {
             Auto build and deploy on GitHub push
           </label>
         )}
+        {envLoading ? <div className="empty">Loading environment variables...</div> : (
+          <>
+            {envError && <p className="warning-note">{envError}</p>}
+            <EnvEditor entries={envEntries} onChange={setEnvEntries} title="Runtime environment" masked />
+          </>
+        )}
         <div className="modal-actions">
           <button type="button" onClick={onClose}>Cancel</button>
-          <button className="primary" type="submit">Save</button>
+          <button className="primary" type="submit" disabled={envLoading}>Save</button>
         </div>
       </form>
     </div>
@@ -4277,6 +4360,7 @@ function defaultDeployForm() {
     port: 8080,
     replicas: 1,
     resource_preset: "small",
+    env_entries: [],
   };
 }
 
@@ -4306,8 +4390,40 @@ function buildProjectPayload(form, githubCredentialID, credentials) {
     port: Number(form.port || 8080),
     replicas: Number(form.replicas || 1),
     ports: [{name: "http", port: Number(form.port || 8080), protocol: "http", exposure, domain}],
-    env: {},
+    env: envObjectFromEntries(form.env_entries || []),
   };
+}
+
+function envObjectFromEntries(entries) {
+  const out = {};
+  for (const entry of entries || []) {
+    const key = String(entry.key || "").trim();
+    if (!key) continue;
+    out[key] = String(entry.value ?? "");
+  }
+  return out;
+}
+
+function envEntriesFromObject(obj = {}) {
+  return Object.entries(obj).sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => ({key, value: String(value ?? "")}));
+}
+
+function parseDotEnv(text) {
+  const entries = [];
+  String(text || "").split(/\r?\n/).forEach((line) => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) return;
+    const normalized = trimmed.startsWith("export ") ? trimmed.slice(7).trim() : trimmed;
+    const index = normalized.indexOf("=");
+    if (index <= 0) return;
+    const key = normalized.slice(0, index).trim();
+    let value = normalized.slice(index + 1).trim();
+    if ((value.startsWith("\"") && value.endsWith("\"")) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    entries.push({key, value});
+  });
+  return entries;
 }
 
 function imageName(image) {

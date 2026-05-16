@@ -43,6 +43,12 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := db.Exec("ALTER TABLE projects ALTER COLUMN basalt_pass_instance_id DROP NOT NULL").Error; err != nil {
 		return err
 	}
+	if err := db.Exec("ALTER TABLE basalt_pass_instances ALTER COLUMN client_id DROP NOT NULL").Error; err != nil {
+		return err
+	}
+	if err := db.Exec("ALTER TABLE basalt_pass_instances ALTER COLUMN client_secret_enc DROP NOT NULL").Error; err != nil {
+		return err
+	}
 	if err := db.Exec("ALTER TABLE projects ALTER COLUMN git_hub_credential_id DROP NOT NULL").Error; err != nil {
 		return err
 	}

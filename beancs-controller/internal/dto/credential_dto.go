@@ -76,20 +76,26 @@ type UpdateGitHubCredentialRequest struct {
 }
 
 type CreateBasaltPassCredentialRequest struct {
-	Name         string `json:"name" validate:"required,max=128"`
-	BaseURL      string `json:"base_url" validate:"required,url"`
-	ClientID     string `json:"client_id" validate:"required,max=256"`
-	ClientSecret string `json:"client_secret" validate:"required"`
-	ServiceToken string `json:"service_token" validate:"omitempty"`
+	Name            string `json:"name" validate:"required,max=128"`
+	BaseURL         string `json:"base_url" validate:"required,url"`
+	TenantID        string `json:"tenant_id" validate:"omitempty,max=128"`
+	TenantCode      string `json:"tenant_code" validate:"omitempty,max=128"`
+	AutomationToken string `json:"automation_token" validate:"omitempty"`
+	ClientID        string `json:"client_id" validate:"omitempty,max=256"`
+	ClientSecret    string `json:"client_secret" validate:"omitempty"`
+	ServiceToken    string `json:"service_token" validate:"omitempty"`
 }
 
 type UpdateBasaltPassCredentialRequest struct {
-	Name         *string `json:"name" validate:"omitempty,max=128"`
-	BaseURL      *string `json:"base_url" validate:"omitempty,url"`
-	ClientID     *string `json:"client_id" validate:"omitempty,max=256"`
-	ClientSecret *string `json:"client_secret"`
-	ServiceToken *string `json:"service_token"`
-	IsActive     *bool   `json:"is_active"`
+	Name            *string `json:"name" validate:"omitempty,max=128"`
+	BaseURL         *string `json:"base_url" validate:"omitempty,url"`
+	TenantID        *string `json:"tenant_id" validate:"omitempty,max=128"`
+	TenantCode      *string `json:"tenant_code" validate:"omitempty,max=128"`
+	AutomationToken *string `json:"automation_token"`
+	ClientID        *string `json:"client_id" validate:"omitempty,max=256"`
+	ClientSecret    *string `json:"client_secret"`
+	ServiceToken    *string `json:"service_token"`
+	IsActive        *bool   `json:"is_active"`
 }
 
 type ShareCredentialRequest struct {
