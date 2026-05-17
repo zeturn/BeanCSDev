@@ -392,14 +392,17 @@ function App() {
     const verifier = randomString(64);
     const challenge = await codeChallenge(verifier);
     const authState = randomString(32);
+    const nonce = randomString(32);
     sessionStorage.setItem("beancs.pkceVerifier", verifier);
     sessionStorage.setItem("beancs.oauthState", authState);
+    sessionStorage.setItem("beancs.oauthNonce", nonce);
     const params = new URLSearchParams({
       response_type: "code",
       client_id: config.client_id,
       redirect_uri: browserRedirectURI(),
       scope: "openid profile email",
       state: authState,
+      nonce,
       code_challenge: challenge,
       code_challenge_method: "S256",
     });
@@ -4628,13 +4631,31 @@ async function finishLogin(config) {
   const returnedState = params.get("state");
   const expectedState = sessionStorage.getItem("beancs.oauthState");
   const verifier = sessionStorage.getItem("beancs.pkceVerifier");
+  const expectedNonce = sessionStorage.getItem("beancs.oauthNonce");
   if (!code || !verifier || returnedState !== expectedState) throw new Error("Login callback was incomplete.");
   const data = await publicJSON(`${API}/ui/oauth/token`, {
     method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({code, redirect_uri: browserRedirectURI(), code_verifier: verifier}),
   });
+  if (data.id_token && claimFromJwt(data.id_token, "nonce") !== expectedNonce) {
+    throw new Error("Login callback returned an invalid id_token nonce.");
+  }
+  sessionStorage.removeItem("beancs.pkceVerifier");
+  sessionStorage.removeItem("beancs.oauthState");
+  sessionStorage.removeItem("beancs.oauthNonce");
   return data.access_token;
+}
+
+function claimFromJwt(token, key) {
+  try {
+    const payload = token.split(".")[1] || "";
+    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
+    return JSON.parse(atob(padded))[key];
+  } catch {
+    return undefined;
+  }
 }
 
 function titleFor(view) {
