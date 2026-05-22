@@ -29,18 +29,29 @@ type Project struct {
 	TenantID    string `gorm:"size:128;index" json:"tenant_id"`
 	TenantCode  string `gorm:"size:128;index" json:"tenant_code,omitempty"`
 
+	ApplicationID       *uint      `gorm:"index" json:"application_id,omitempty"`
+	ComponentName       string     `gorm:"size:128" json:"component_name,omitempty"`
+	ComponentPath       string     `gorm:"size:512" json:"component_path,omitempty"`
+	DependsOn           StringList `gorm:"type:jsonb" json:"depends_on,omitempty"`
+	EnvFromDependencies JSONMap    `gorm:"type:jsonb" json:"env_from_dependencies,omitempty"`
+
 	BuildSource       string `gorm:"size:32;default:'github'" json:"build_source"`
 	ImageReference    string `gorm:"size:512" json:"image_reference"`
 	SourceArchiveName string `gorm:"size:256" json:"source_archive_name"`
 
-	GitHubCredentialID   uint   `gorm:"index" json:"github_credential_id"`
-	GitHubRepo           string `gorm:"size:256" json:"github_repo"`
-	GitHubBranch         string `gorm:"size:128;default:'main'" json:"github_branch"`
-	GitHubInstallationID int64  `gorm:"index" json:"github_installation_id,omitempty"`
-	GitHubRepoID         int64  `gorm:"index" json:"github_repo_id,omitempty"`
-	GitHubRepoFullName   string `gorm:"size:256" json:"github_repo_full_name,omitempty"`
-	DockerfilePath       string `gorm:"size:512;default:'Dockerfile'" json:"dockerfile_path"`
-	AutoDeploy           bool   `gorm:"default:true" json:"auto_deploy"`
+	GitHubCredentialID   uint       `gorm:"index" json:"github_credential_id"`
+	GitHubRepo           string     `gorm:"size:256" json:"github_repo"`
+	GitHubBranch         string     `gorm:"size:128;default:'main'" json:"github_branch"`
+	GitHubInstallationID int64      `gorm:"index" json:"github_installation_id,omitempty"`
+	GitHubRepoID         int64      `gorm:"index" json:"github_repo_id,omitempty"`
+	GitHubRepoFullName   string     `gorm:"size:256" json:"github_repo_full_name,omitempty"`
+	DockerfilePath       string     `gorm:"size:512;default:'Dockerfile'" json:"dockerfile_path"`
+	BuildContext         string     `gorm:"size:512;default:'.'" json:"build_context"`
+	BuildArgs            JSONMap    `gorm:"type:jsonb" json:"build_args,omitempty"`
+	HealthCheck          JSONMap    `gorm:"type:jsonb" json:"health_check,omitempty"`
+	Volumes              JSONMap    `gorm:"type:jsonb" json:"volumes,omitempty"`
+	WatchPaths           StringList `gorm:"type:jsonb" json:"watch_paths,omitempty"`
+	AutoDeploy           bool       `gorm:"default:true" json:"auto_deploy"`
 
 	RegistryHost           string `gorm:"size:256" json:"registry_host,omitempty"`
 	RegistryProject        string `gorm:"size:128" json:"registry_project,omitempty"`

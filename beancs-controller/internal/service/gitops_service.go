@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/google/go-github/v62/github"
@@ -15,12 +16,17 @@ import (
 var newTagPattern = regexp.MustCompile(`(?m)^(\s*newTag:\s*)(.+)$`)
 
 type GitOpsService struct {
-	db          *gorm.DB
-	credentials *CredentialService
+	db                 *gorm.DB
+	credentials        *CredentialService
+	dependencyRegistry *DependencyDefinitionRegistry
 }
 
 func NewGitOpsService(db *gorm.DB, credentials *CredentialService) *GitOpsService {
 	return &GitOpsService{db: db, credentials: credentials}
+}
+
+func (s *GitOpsService) SetDependencyRegistry(registry *DependencyDefinitionRegistry) {
+	s.dependencyRegistry = registry
 }
 
 // resolveGitOpsToken returns the correct token for accessing the GitOps repo.
@@ -76,6 +82,39 @@ func (s *GitOpsService) CommitProjectManifests(ctx context.Context, token string
 	client := github.NewClient(nil).WithAuthToken(token)
 	files := s.RenderManifests(project)
 	msg := fmt.Sprintf("beancs: add %s manifests", project.Name)
+	for p, content := range files {
+		if err := putFile(ctx, client, owner, repo, p, content, msg); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *GitOpsService) CommitDependencyManifests(ctx context.Context, token string, cred model.GitHubCredential, app model.Application, dep model.ManagedDependency) error {
+	if token == "" || cred.GitOpsRepo == "" || s.dependencyRegistry == nil {
+		return nil
+	}
+	def, ok := s.dependencyRegistry.Get(dep.DefinitionName)
+	if !ok {
+		def, ok = s.dependencyRegistry.Get(dep.Type)
+	}
+	if !ok {
+		return fmt.Errorf("dependency definition %q not found", dep.DefinitionName)
+	}
+	if dep.DeployMethod != model.DependencyDeployMethodHelm {
+		return nil
+	}
+	owner, repo, ok := resolveGitOpsRepo(cred)
+	if !ok {
+		return fmt.Errorf("gitops repo must be owner/repo when org is empty")
+	}
+	token, err := s.resolveGitOpsToken(ctx, token, cred)
+	if err != nil {
+		return err
+	}
+	client := github.NewClient(nil).WithAuthToken(token)
+	files := s.RenderDependencyManifests(app, dep, def)
+	msg := fmt.Sprintf("beancs: add %s dependency %s", app.Name, dep.Name)
 	for p, content := range files {
 		if err := putFile(ctx, client, owner, repo, p, content, msg); err != nil {
 			return err
@@ -282,10 +321,11 @@ func (s *GitOpsService) RenderManifests(project *model.Project) map[string]strin
 `, project.RegistryPullSecretName)
 	}
 	ports := project.Ports
-	if len(ports) == 0 {
+	if len(ports) == 0 && project.Port > 0 && project.ExposureMode != model.ExposureInternalOnly {
 		ports = model.ProjectPorts{{Name: "http", Port: project.Port, Exposure: project.ExposureMode, Domain: project.Domain}}
 	}
-	return map[string]string{
+	volumes := project.VolumeConfig()
+	files := map[string]string{
 		path.Join(base, "base", "deployment.yaml"): fmt.Sprintf(`apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -321,16 +361,27 @@ spec:
           operator: Exists
           effect: NoExecute
           tolerationSeconds: 30
+%s
       containers:
         - name: app
           image: %s
-          ports:
 %s
           envFrom:
             - secretRef:
                 name: app-env-vars
-`, project.Name, project.Namespace, project.Name, project.Replicas, project.Name, project.Name, pullSecrets, image, renderContainerPorts(ports)),
-		path.Join(base, "base", "service.yaml"): fmt.Sprintf(`apiVersion: v1
+%s%s
+`, project.Name, project.Namespace, project.Name, project.Replicas, project.Name, project.Name, pullSecrets, renderPodVolumesBlock(volumes, project.Name), image, renderContainerPortsBlock(ports), renderProbeBlock(project.HealthCheckConfig(), ports), renderContainerVolumeMountsBlock(volumes)),
+		path.Join(base, "base", "kustomization.yaml"): renderBaseKustomization(ports, volumes),
+		path.Join(base, "overlays", "dev", "kustomization.yaml"): fmt.Sprintf(`resources:
+  - ../../base
+images:
+  - name: %s
+    newName: %s
+    newTag: %s
+`, imageName, imageName, imageTag),
+	}
+	if len(ports) > 0 {
+		files[path.Join(base, "base", "service.yaml")] = fmt.Sprintf(`apiVersion: v1
 kind: Service
 metadata:
   name: %s
@@ -344,19 +395,276 @@ spec:
     managed-by: beancs
   ports:
 %s
-`, project.Name, project.Namespace, project.Name, project.Name, renderServicePorts(ports)),
-		path.Join(base, "base", "kustomization.yaml"): `resources:
-  - deployment.yaml
-  - service.yaml
-`,
-		path.Join(base, "overlays", "dev", "kustomization.yaml"): fmt.Sprintf(`resources:
-  - ../../base
-images:
-  - name: %s
-    newName: %s
-    newTag: %s
-`, imageName, imageName, imageTag),
+`, project.Name, project.Namespace, project.Name, project.Name, renderServicePorts(ports))
 	}
+	for _, volume := range volumes {
+		if strings.EqualFold(volume.Type, "pvc") {
+			files[path.Join(base, "base", "pvc-"+volume.Name+".yaml")] = renderPVCManifest(project, volume)
+		}
+	}
+	return files
+}
+
+func (s *GitOpsService) RenderDependencyManifests(app model.Application, dep model.ManagedDependency, def DependencyDefinition) map[string]string {
+	base := path.Join("apps", app.Name, "dependencies", dep.Name)
+	values := renderDependencyHelmValues(dep)
+	return map[string]string{
+		path.Join(base, "application.yaml"): renderDependencyArgoApplication(app, dep, def, values),
+		path.Join(base, "values.yaml"):      values,
+		path.Join(base, "kustomization.yaml"): `resources:
+  - application.yaml
+`,
+	}
+}
+
+func renderContainerPortsBlock(ports model.ProjectPorts) string {
+	if len(ports) == 0 {
+		return ""
+	}
+	return "          ports:\n" + renderContainerPorts(ports)
+}
+
+func renderDependencyArgoApplication(app model.Application, dep model.ManagedDependency, def DependencyDefinition, values string) string {
+	appName := dependencyArgoApplicationName(app.Name, dep.Name)
+	chartRepo := strings.TrimSpace(def.Spec.Helm.Chart.Repo)
+	chartName := strings.TrimSpace(def.Spec.Helm.Chart.Name)
+	chartVersion := strings.TrimSpace(def.Spec.Helm.Chart.Version)
+	if chartVersion == "" {
+		chartVersion = "*"
+	}
+	return fmt.Sprintf(`apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: %s
+  namespace: argocd
+  labels:
+    app: %s
+    managed-by: beancs
+    beancs.io/application: %s
+    beancs.io/dependency: %s
+spec:
+  project: default
+  source:
+    repoURL: %s
+    chart: %s
+    targetRevision: %s
+    helm:
+      releaseName: %s
+      values: |
+%s
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: %s
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+`, appName, dep.Name, app.Name, dep.Name, chartRepo, chartName, chartVersion, dep.ServiceName, indentYAMLBlock(values, 8), dep.Namespace)
+}
+
+func renderDependencyHelmValues(dep model.ManagedDependency) string {
+	switch dep.Type {
+	case "rabbitmq":
+		return renderRabbitMQValues(dep)
+	case "postgresql":
+		return renderPostgreSQLValues(dep)
+	case "redis":
+		return renderRedisValues(dep)
+	default:
+		return fmt.Sprintf("fullnameOverride: %s\n", dep.ServiceName)
+	}
+}
+
+func renderRabbitMQValues(dep model.ManagedDependency) string {
+	username := dependencyOutputValue(dep, "username")
+	if username == "" {
+		username = fmt.Sprint(dep.Config["username"])
+	}
+	if username == "" {
+		username = "user"
+	}
+	return fmt.Sprintf(`fullnameOverride: %s
+auth:
+  username: %s
+  existingPasswordSecret: %s
+  existingSecretPasswordKey: password
+persistence:
+  enabled: %s
+  size: %s
+`, dep.ServiceName, yamlScalar(username), dep.SecretName, yamlBool(configBool(dep.Config, "persistence.enabled", true)), yamlScalar(configString(dep.Config, "persistence.size", "8Gi")))
+}
+
+func renderPostgreSQLValues(dep model.ManagedDependency) string {
+	username := dependencyOutputValue(dep, "username")
+	if username == "" {
+		username = fmt.Sprint(dep.Config["username"])
+	}
+	database := dependencyOutputValue(dep, "database")
+	if database == "" {
+		database = fmt.Sprint(dep.Config["database"])
+	}
+	return fmt.Sprintf(`fullnameOverride: %s
+auth:
+  username: %s
+  database: %s
+  existingSecret: %s
+primary:
+  persistence:
+    enabled: %s
+    size: %s
+`, dep.ServiceName, yamlScalar(coalesce(username, "app")), yamlScalar(coalesce(database, "app")), dep.SecretName, yamlBool(configBool(dep.Config, "persistence.enabled", true)), yamlScalar(configString(dep.Config, "persistence.size", "20Gi")))
+}
+
+func renderRedisValues(dep model.ManagedDependency) string {
+	architecture := fmt.Sprint(dep.Config["architecture"])
+	if architecture == "" {
+		architecture = "standalone"
+	}
+	return fmt.Sprintf(`fullnameOverride: %s
+architecture: %s
+auth:
+  enabled: true
+  existingSecret: %s
+  existingSecretPasswordKey: password
+master:
+  persistence:
+    enabled: %s
+    size: %s
+`, dep.ServiceName, yamlScalar(architecture), dep.SecretName, yamlBool(configBool(dep.Config, "persistence.enabled", true)), yamlScalar(configString(dep.Config, "persistence.size", "8Gi")))
+}
+
+func dependencySecretRuntimeData(dep model.ManagedDependency) map[string]string {
+	data := map[string]string{}
+	for key, raw := range dep.Outputs {
+		if m, ok := raw.(map[string]any); ok {
+			data[key] = fmt.Sprint(m["value"])
+			continue
+		}
+		data[key] = fmt.Sprint(raw)
+	}
+	if password := dependencyOutputValue(dep, "password"); password != "" {
+		data["password"] = password
+	}
+	if username := dependencyOutputValue(dep, "username"); username != "" {
+		data["username"] = username
+	}
+	if database := dependencyOutputValue(dep, "database"); database != "" {
+		data["database"] = database
+	}
+	return data
+}
+
+func dependencyOutputValue(dep model.ManagedDependency, key string) string {
+	raw, ok := dep.Outputs[key]
+	if !ok {
+		return ""
+	}
+	if m, ok := raw.(map[string]any); ok {
+		return fmt.Sprint(m["value"])
+	}
+	return fmt.Sprint(raw)
+}
+
+func configString(config model.JSONMap, path, fallback string) string {
+	value, ok := nestedConfigValue(config, path)
+	if !ok || fmt.Sprint(value) == "" {
+		return fallback
+	}
+	return fmt.Sprint(value)
+}
+
+func configBool(config model.JSONMap, path string, fallback bool) bool {
+	value, ok := nestedConfigValue(config, path)
+	if !ok {
+		return fallback
+	}
+	switch v := value.(type) {
+	case bool:
+		return v
+	case string:
+		return strings.EqualFold(v, "true")
+	default:
+		return fallback
+	}
+}
+
+func nestedConfigValue(config model.JSONMap, path string) (any, bool) {
+	var current any = config
+	for _, part := range strings.Split(path, ".") {
+		switch typed := current.(type) {
+		case map[string]any:
+			next, ok := typed[part]
+			if !ok {
+				return nil, false
+			}
+			current = next
+		case model.JSONMap:
+			next, ok := typed[part]
+			if !ok {
+				return nil, false
+			}
+			current = next
+		default:
+			return nil, false
+		}
+	}
+	return current, true
+}
+
+func yamlBool(v bool) string {
+	if v {
+		return "true"
+	}
+	return "false"
+}
+
+func yamlScalar(v string) string {
+	if v == "" {
+		return `""`
+	}
+	escaped := strings.ReplaceAll(v, `"`, `\"`)
+	return `"` + escaped + `"`
+}
+
+func indentYAMLBlock(value string, spaces int) string {
+	prefix := strings.Repeat(" ", spaces)
+	lines := strings.Split(strings.TrimRight(value, "\n"), "\n")
+	for i, line := range lines {
+		lines[i] = prefix + line
+	}
+	return strings.Join(lines, "\n")
+}
+
+func dependencyArgoApplicationName(appName, depName string) string {
+	name := appName + "-" + depName
+	if len(name) <= 63 {
+		return name
+	}
+	return name[:63]
+}
+
+func dependencyRootArgoApplicationName(appName, depName string) string {
+	name := dependencyArgoApplicationName(appName, depName) + "-root"
+	if len(name) <= 63 {
+		return name
+	}
+	return name[:63]
+}
+
+func renderBaseKustomization(ports model.ProjectPorts, volumes []model.ProjectVolume) string {
+	var b strings.Builder
+	b.WriteString("resources:\n  - deployment.yaml\n")
+	if len(ports) > 0 {
+		b.WriteString("  - service.yaml\n")
+	}
+	for _, volume := range volumes {
+		if strings.EqualFold(volume.Type, "pvc") {
+			fmt.Fprintf(&b, "  - pvc-%s.yaml\n", volume.Name)
+		}
+	}
+	return b.String()
 }
 
 func renderContainerPorts(ports model.ProjectPorts) string {
@@ -373,6 +681,134 @@ func renderServicePorts(ports model.ProjectPorts) string {
 		fmt.Fprintf(&b, "    - name: %s\n      port: %d\n      targetPort: %d\n", p.Name, p.Port, p.Port)
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+func renderProbeBlock(health *model.ProjectHealthCheck, ports model.ProjectPorts) string {
+	if health == nil {
+		if len(ports) == 0 {
+			return ""
+		}
+		health = &model.ProjectHealthCheck{Type: "http", Path: "/health", Port: ports[0].Port}
+	}
+	if strings.EqualFold(health.Type, "disabled") {
+		return ""
+	}
+	return renderOneProbe("readinessProbe", health, ports, 5, 5) + renderOneProbe("livenessProbe", health, ports, 10, 10)
+}
+
+func renderOneProbe(name string, health *model.ProjectHealthCheck, ports model.ProjectPorts, initialDelay, period int) string {
+	if health.InitialDelaySeconds != nil {
+		initialDelay = *health.InitialDelaySeconds
+	}
+	if health.PeriodSeconds != nil {
+		period = *health.PeriodSeconds
+	}
+	timeout := 0
+	if health.TimeoutSeconds != nil {
+		timeout = *health.TimeoutSeconds
+	}
+	port := renderProbePort(health.Port, ports)
+	var b strings.Builder
+	fmt.Fprintf(&b, "          %s:\n", name)
+	if strings.EqualFold(health.Type, "tcp") {
+		fmt.Fprintf(&b, "            tcpSocket:\n              port: %s\n", port)
+	} else {
+		probePath := strings.TrimSpace(health.Path)
+		if probePath == "" {
+			probePath = "/health"
+		}
+		fmt.Fprintf(&b, "            httpGet:\n              path: %s\n              port: %s\n", probePath, port)
+	}
+	fmt.Fprintf(&b, "            initialDelaySeconds: %d\n            periodSeconds: %d\n", initialDelay, period)
+	if timeout > 0 {
+		fmt.Fprintf(&b, "            timeoutSeconds: %d\n", timeout)
+	}
+	return b.String()
+}
+
+func renderProbePort(port any, ports model.ProjectPorts) string {
+	switch v := port.(type) {
+	case string:
+		v = strings.TrimSpace(v)
+		if v != "" {
+			return v
+		}
+	case float64:
+		return strconv.Itoa(int(v))
+	case int:
+		return strconv.Itoa(v)
+	case int32:
+		return strconv.Itoa(int(v))
+	case int64:
+		return strconv.Itoa(int(v))
+	}
+	if len(ports) > 0 {
+		if strings.TrimSpace(ports[0].Name) != "" {
+			return ports[0].Name
+		}
+		return strconv.Itoa(ports[0].Port)
+	}
+	return "8080"
+}
+
+func renderPodVolumesBlock(volumes []model.ProjectVolume, projectName string) string {
+	if len(volumes) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("      volumes:\n")
+	for _, volume := range volumes {
+		fmt.Fprintf(&b, "        - name: %s\n", volume.Name)
+		switch {
+		case strings.EqualFold(volume.Type, "emptyDir"):
+			b.WriteString("          emptyDir: {}\n")
+		case strings.EqualFold(volume.Type, "pvc"):
+			fmt.Fprintf(&b, "          persistentVolumeClaim:\n            claimName: %s\n", projectVolumeClaimName(projectName, volume.Name))
+		}
+	}
+	return b.String()
+}
+
+func renderContainerVolumeMountsBlock(volumes []model.ProjectVolume) string {
+	if len(volumes) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("          volumeMounts:\n")
+	for _, volume := range volumes {
+		fmt.Fprintf(&b, "            - name: %s\n              mountPath: %s\n", volume.Name, volume.MountPath)
+	}
+	return b.String()
+}
+
+func renderPVCManifest(project *model.Project, volume model.ProjectVolume) string {
+	accessModes := volume.AccessModes
+	if len(accessModes) == 0 {
+		accessModes = []string{"ReadWriteOnce"}
+	}
+	var modes strings.Builder
+	for _, mode := range accessModes {
+		fmt.Fprintf(&modes, "    - %s\n", mode)
+	}
+	return fmt.Sprintf(`apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: %s
+  namespace: %s
+  labels:
+    app: %s
+    managed-by: beancs
+spec:
+  accessModes:
+%s
+  resources:
+    requests:
+      storage: %s
+`, projectVolumeClaimName(project.Name, volume.Name), project.Namespace, project.Name, strings.TrimRight(modes.String(), "\n"), volume.Size)
+}
+
+func projectVolumeClaimName(projectName, volumeName string) string {
+	return projectName + "-" + volumeName
 }
 
 func putFile(ctx context.Context, client *github.Client, owner, repo, p, content, msg string) error {

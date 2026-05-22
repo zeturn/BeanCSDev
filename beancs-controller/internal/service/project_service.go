@@ -10,16 +10,19 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	appspec "github.com/zeturn/beancs-controller/internal/application/spec"
 	"github.com/zeturn/beancs-controller/internal/basaltpass"
 	"github.com/zeturn/beancs-controller/internal/config"
 	cryptoutil "github.com/zeturn/beancs-controller/internal/crypto"
 	"github.com/zeturn/beancs-controller/internal/dto"
 	"github.com/zeturn/beancs-controller/internal/k8s"
 	"github.com/zeturn/beancs-controller/internal/model"
+	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
 )
 
@@ -126,13 +129,136 @@ func (s *ProjectService) AnalyzeRepository(ctx context.Context, userID string, r
 	return out, nil
 }
 
+func (s *ProjectService) AnalyzeMonorepoRepository(ctx context.Context, userID string, req dto.AnalyzeProjectRepositoryRequest) (*dto.AnalyzeMonorepoRepositoryResponse, error) {
+	if err := s.credentials.RequireAccess(userID, model.CredentialTypeGitHub, req.GitHubCredentialID, false); err != nil {
+		return nil, err
+	}
+	var ghCred model.GitHubCredential
+	if err := s.db.WithContext(ctx).First(&ghCred, req.GitHubCredentialID).Error; err != nil {
+		return nil, err
+	}
+	token, err := s.credentials.GitHubToken(ctx, ghCred)
+	if err != nil {
+		return nil, err
+	}
+	owner, repo, ok := splitRepo(req.GitHubRepo)
+	if !ok {
+		return nil, fmt.Errorf("github_repo must be in owner/repo format")
+	}
+	branch := strings.TrimSpace(req.GitHubBranch)
+	if branch == "" {
+		branch = "main"
+	}
+	files, err := githubRepositoryTreeFiles(ctx, token, owner, repo, branch)
+	if err != nil {
+		return nil, err
+	}
+	fileSet := map[string]bool{}
+	for _, file := range files {
+		fileSet[file] = true
+	}
+	out := &dto.AnalyzeMonorepoRepositoryResponse{}
+	if specPath, doc, ok, err := githubApplicationSpec(ctx, token, owner, repo, branch); err != nil {
+		return nil, err
+	} else if ok {
+		out.Source = "beancs_spec"
+		out.ConfigPath = specPath
+		out.IsMonorepo = doc.Spec.Type == model.ApplicationTypeMonorepo || len(doc.Spec.Components) > 1
+		out.Deployable = len(doc.Spec.Components) > 0
+		out.Signals = append(out.Signals, specPath+" found")
+		for _, component := range doc.Spec.Components {
+			if component.Build == nil {
+				out.Warnings = append(out.Warnings, component.Name+" has no build block")
+				continue
+			}
+			out.Components = append(out.Components, dto.MonorepoComponentAnalysis{
+				Name:           component.Name,
+				Path:           strings.Trim(strings.TrimSpace(component.Build.Context), "/"),
+				DockerfilePath: component.Build.Dockerfile,
+				BuildContext:   coalesce(component.Build.Context, "."),
+				SuggestedPort:  firstSpecPort(component),
+				Kind:           component.Kind,
+			})
+		}
+		return out, nil
+	}
+	out.PackageManager = detectPackageManager(fileSet)
+	for _, signal := range []string{"pnpm-workspace.yaml", "turbo.json", "nx.json", "lerna.json"} {
+		if fileSet[signal] {
+			out.Signals = append(out.Signals, signal+" found")
+		}
+	}
+	if fileSet["package.json"] && repositoryPackageJSONHasWorkspaces(ctx, token, owner, repo, branch) {
+		out.Signals = append(out.Signals, "package.json workspaces found")
+	}
+	meta, metaOK, err := githubProjectMeta(ctx, token, owner, repo, branch)
+	if err != nil {
+		return nil, err
+	}
+	if metaOK {
+		out.Signals = append(out.Signals, "project.meta.json found")
+	}
+	seen := map[string]bool{}
+	for _, composePath := range composeFileCandidates() {
+		if !fileSet[composePath] {
+			continue
+		}
+		components, err := githubComposeComponents(ctx, token, owner, repo, branch, composePath, meta)
+		if err != nil {
+			return nil, err
+		}
+		if len(components) > 0 {
+			out.Signals = append(out.Signals, composePath+" build services found")
+			for _, component := range components {
+				if seen[component.Path] {
+					continue
+				}
+				seen[component.Path] = true
+				out.Components = append(out.Components, component)
+			}
+			break
+		}
+	}
+	for _, file := range files {
+		if !isDockerfileName(pathBase(file)) {
+			continue
+		}
+		dir := dockerfileComponentPath(file)
+		seenKey := dir
+		if seenKey == "" {
+			seenKey = file
+		}
+		if !isMonorepoComponentPath(dir) || seen[seenKey] {
+			continue
+		}
+		seen[seenKey] = true
+		out.Components = append(out.Components, dto.MonorepoComponentAnalysis{
+			Name:           componentNameFromDockerfile(file),
+			Path:           dir,
+			DockerfilePath: file,
+			BuildContext:   ".",
+			SuggestedPort:  suggestedComponentPortWithMeta(fileSet, dir, meta),
+			Kind:           componentKind(dir),
+		})
+	}
+	out.IsMonorepo = len(out.Components) > 1 || len(out.Signals) > 0
+	out.Deployable = len(out.Components) > 0
+	if len(out.Components) == 0 {
+		out.Warnings = append(out.Warnings, "No component Dockerfiles were found from .beancs config, Docker Compose build services, *.Dockerfile, or component Dockerfile paths.")
+	}
+	return out, nil
+}
+
 func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID, tenantCode string, req dto.CreateProjectRequest) (*model.Project, error) {
 	normalizeProjectRequest(&req)
-	if err := validateProjectPorts(req.Name, req.Ports); err != nil {
+	if err := validateProjectPorts(req.Name, req.ExposureMode, req.Ports); err != nil {
 		return nil, err
 	}
 	req.ExposureMode = aggregateExposureMode(req.Ports)
-	primaryPort := req.Ports[0]
+	primaryPort := model.ProjectPort{Port: req.Port}
+	if len(req.Ports) > 0 {
+		primaryPort = req.Ports[0]
+	}
 	if err := validateProjectSource(&req); err != nil {
 		return nil, err
 	}
@@ -248,6 +374,8 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID, te
 		TeamID:                 req.TeamID,
 		TenantID:               tenantID,
 		TenantCode:             tenantCode,
+		DependsOn:              req.DependsOn,
+		EnvFromDependencies:    req.EnvFromDependencies,
 		BuildSource:            req.BuildSource,
 		ImageReference:         req.ImageReference,
 		SourceArchiveName:      req.SourceArchiveName,
@@ -258,6 +386,11 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID, te
 		GitHubRepoID:           ghRepoMeta.ID,
 		GitHubRepoFullName:     coalesce(ghRepoMeta.FullName, req.GitHubRepo),
 		DockerfilePath:         req.DockerfilePath,
+		BuildContext:           req.BuildContext,
+		BuildArgs:              req.BuildArgs,
+		HealthCheck:            req.HealthCheck,
+		Volumes:                req.Volumes,
+		WatchPaths:             req.WatchPaths,
 		AutoDeploy:             req.AutoDeploy == nil || *req.AutoDeploy,
 		BasaltPassInstanceID:   req.BasaltPassInstanceID,
 		CloudflareCredentialID: req.CloudflareCredentialID,
@@ -351,9 +484,11 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID, te
 		rollback()
 		return nil, err
 	}
-	if err := s.k8s.ApplyServicePorts(ctx, project.Namespace, project.Name, project.Ports); err != nil {
-		rollback()
-		return nil, err
+	if len(project.Ports) > 0 {
+		if err := s.k8s.ApplyServicePorts(ctx, project.Namespace, project.Name, project.Ports); err != nil {
+			rollback()
+			return nil, err
+		}
 	}
 	if hasPublicPorts(project.Ports) {
 		if err := s.k8s.ApplyProjectCertificateIssuer(ctx, project.Namespace, project.Name, cfToken); err != nil {
@@ -380,9 +515,11 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID, te
 		})
 	}
 
-	if err := s.k8s.ApplyIngressPorts(ctx, project.Namespace, project.Name, project.Ports); err != nil {
-		rollback()
-		return nil, err
+	if len(project.Ports) > 0 {
+		if err := s.k8s.ApplyIngressPorts(ctx, project.Namespace, project.Name, project.Ports); err != nil {
+			rollback()
+			return nil, err
+		}
 	}
 	if project.ImageReference != "" && project.BuildSource != model.BuildSourceGitHub {
 		resources := model.ResourcePresets[project.ResourcePreset]
@@ -643,6 +780,10 @@ func normalizeProjectRequest(req *dto.CreateProjectRequest) {
 	if req.DockerfilePath == "" {
 		req.DockerfilePath = "Dockerfile"
 	}
+	req.BuildContext = strings.TrimSpace(req.BuildContext)
+	if req.BuildContext == "" {
+		req.BuildContext = "."
+	}
 	req.Namespace = strings.TrimSpace(req.Namespace)
 	if req.ResourcePreset == "" {
 		req.ResourcePreset = "small"
@@ -853,9 +994,12 @@ func pathCandidates(names []string) []string {
 	return out
 }
 
-func validateProjectPorts(projectName string, ports model.ProjectPorts) error {
+func validateProjectPorts(projectName, exposureMode string, ports model.ProjectPorts) error {
 	if len(ports) == 0 {
-		return fmt.Errorf("ports json is required")
+		if exposureMode == model.ExposureInternalOnly {
+			return nil
+		}
+		return fmt.Errorf("ports json is required unless exposure_mode is internal-only")
 	}
 	names := map[string]bool{}
 	numbers := map[int]bool{}
@@ -975,6 +1119,35 @@ type basaltAppMeta struct {
 	ServicePorts []int `json:"service_ports"`
 }
 
+type repositoryProjectMeta struct {
+	ServicePorts []repositoryProjectPort `json:"service_ports"`
+	HealthChecks []struct {
+		Service string `json:"service"`
+		Path    string `json:"path"`
+	} `json:"health_checks"`
+}
+
+type repositoryProjectPort struct {
+	Service  string `json:"service"`
+	Port     int    `json:"port"`
+	Protocol string `json:"protocol"`
+}
+
+type composeDocument struct {
+	Services map[string]composeService `yaml:"services"`
+}
+
+type composeService struct {
+	Build any      `yaml:"build"`
+	Ports []string `yaml:"ports"`
+}
+
+type composeBuildSpec struct {
+	Context    string         `yaml:"context"`
+	Dockerfile string         `yaml:"dockerfile"`
+	Args       map[string]any `yaml:"args"`
+}
+
 func githubBasaltAppMeta(ctx context.Context, token, owner, repo, ref string) (basaltAppMeta, bool, error) {
 	body, ok, err := githubContentRead(ctx, token, owner, repo, ".basalt/app.json", ref)
 	if err != nil || !ok {
@@ -1001,6 +1174,153 @@ func githubBasaltAppMeta(ctx context.Context, token, owner, repo, ref string) (b
 	return meta, true, nil
 }
 
+func githubApplicationSpec(ctx context.Context, token, owner, repo, ref string) (string, *appspec.ApplicationSpecDocument, bool, error) {
+	for _, candidate := range []string{".beancs/app.yaml", ".beancs/application.yaml", "beancs.yaml"} {
+		content, ok, err := githubTextFile(ctx, token, owner, repo, candidate, ref)
+		if err != nil || !ok {
+			if err != nil {
+				return "", nil, false, err
+			}
+			continue
+		}
+		doc, err := appspec.Parse(content)
+		if err != nil {
+			return candidate, nil, false, err
+		}
+		return candidate, doc, true, nil
+	}
+	return "", nil, false, nil
+}
+
+func githubProjectMeta(ctx context.Context, token, owner, repo, ref string) (repositoryProjectMeta, bool, error) {
+	content, ok, err := githubTextFile(ctx, token, owner, repo, "project.meta.json", ref)
+	if err != nil || !ok {
+		return repositoryProjectMeta{}, ok, err
+	}
+	var meta repositoryProjectMeta
+	if err := json.Unmarshal(content, &meta); err != nil {
+		return repositoryProjectMeta{}, false, fmt.Errorf("project.meta.json was invalid JSON")
+	}
+	return meta, true, nil
+}
+
+func githubComposeComponents(ctx context.Context, token, owner, repo, ref, composePath string, meta repositoryProjectMeta) ([]dto.MonorepoComponentAnalysis, error) {
+	content, ok, err := githubTextFile(ctx, token, owner, repo, composePath, ref)
+	if err != nil || !ok {
+		return nil, err
+	}
+	components, err := composeComponents(content, meta)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", composePath, err)
+	}
+	return components, nil
+}
+
+func composeComponents(content []byte, meta repositoryProjectMeta) ([]dto.MonorepoComponentAnalysis, error) {
+	var doc composeDocument
+	if err := yaml.Unmarshal(content, &doc); err != nil {
+		return nil, fmt.Errorf("parse compose yaml: %w", err)
+	}
+	names := make([]string, 0, len(doc.Services))
+	for name := range doc.Services {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := make([]dto.MonorepoComponentAnalysis, 0, len(names))
+	for _, serviceName := range names {
+		build, ok := composeBuild(doc.Services[serviceName].Build)
+		if !ok {
+			continue
+		}
+		contextPath := normalizeRepoPath(coalesce(build.Context, "."))
+		dockerfile := normalizeRepoPath(build.Dockerfile)
+		if dockerfile == "" {
+			dockerfile = joinRepoPath(contextPath, "Dockerfile")
+		} else if !strings.Contains(dockerfile, "/") && contextPath != "." {
+			dockerfile = joinRepoPath(contextPath, dockerfile)
+		}
+		out = append(out, dto.MonorepoComponentAnalysis{
+			Name:           harborName(serviceName),
+			Path:           contextPath,
+			DockerfilePath: dockerfile,
+			BuildContext:   contextPath,
+			SuggestedPort:  composeServicePort(serviceName, doc.Services[serviceName], meta),
+			Kind:           componentKind(serviceName),
+		})
+	}
+	return out, nil
+}
+
+func composeBuild(raw any) (composeBuildSpec, bool) {
+	switch value := raw.(type) {
+	case string:
+		return composeBuildSpec{Context: value, Dockerfile: "Dockerfile"}, true
+	case map[string]any:
+		build := composeBuildSpec{}
+		if contextValue, ok := value["context"]; ok {
+			build.Context = strings.TrimSpace(fmt.Sprint(contextValue))
+		}
+		if dockerfileValue, ok := value["dockerfile"]; ok {
+			build.Dockerfile = strings.TrimSpace(fmt.Sprint(dockerfileValue))
+		}
+		return build, true
+	default:
+		return composeBuildSpec{}, false
+	}
+}
+
+func composeServicePort(serviceName string, service composeService, meta repositoryProjectMeta) int {
+	for _, value := range service.Ports {
+		if port := parseComposeContainerPort(value); port > 0 {
+			return port
+		}
+	}
+	return metaPortForService(meta, serviceName)
+}
+
+func parseComposeContainerPort(value string) int {
+	value = strings.TrimSpace(strings.Trim(value, `"'`))
+	if value == "" {
+		return 0
+	}
+	if slash := strings.Index(value, "/"); slash >= 0 {
+		value = value[:slash]
+	}
+	parts := strings.Split(value, ":")
+	target := parts[len(parts)-1]
+	if dash := strings.Index(target, "-"); dash >= 0 {
+		target = target[:dash]
+	}
+	port, _ := strconv.Atoi(strings.TrimSpace(target))
+	return port
+}
+
+func metaPortForService(meta repositoryProjectMeta, component string) int {
+	component = strings.ToLower(strings.ReplaceAll(component, "-", "_"))
+	for _, item := range meta.ServicePorts {
+		service := strings.ToLower(strings.ReplaceAll(item.Service, "-", "_"))
+		if service == component || strings.Contains(service, component) || strings.Contains(component, service) {
+			return item.Port
+		}
+		if component == "backend" && strings.Contains(service, "backend") {
+			return item.Port
+		}
+		if component == "frontend" && strings.Contains(service, "frontend") {
+			return item.Port
+		}
+	}
+	return 0
+}
+
+func firstSpecPort(component appspec.ComponentSpec) int {
+	for _, port := range component.Ports {
+		if port.Port > 0 {
+			return port.Port
+		}
+	}
+	return 0
+}
+
 func githubContentRead(ctx context.Context, token, owner, repo, filePath, ref string) ([]byte, bool, error) {
 	endpoint := fmt.Sprintf("https://api.github.com/repos/%s/%s/contents/%s?ref=%s", url.PathEscape(owner), url.PathEscape(repo), strings.TrimLeft(filePath, "/"), url.QueryEscape(ref))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
@@ -1023,4 +1343,211 @@ func githubContentRead(ctx context.Context, token, owner, repo, filePath, ref st
 		return nil, false, fmt.Errorf("GitHub content check failed: %s", strings.TrimSpace(string(body)))
 	}
 	return body, true, nil
+}
+
+func githubRepositoryTreeFiles(ctx context.Context, token, owner, repo, ref string) ([]string, error) {
+	endpoint := fmt.Sprintf("https://api.github.com/repos/%s/%s/git/trees/%s?recursive=1", url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(ref))
+	var payload struct {
+		Tree []struct {
+			Path string `json:"path"`
+			Type string `json:"type"`
+		} `json:"tree"`
+		Truncated bool `json:"truncated"`
+	}
+	if err := githubJSON(ctx, http.MethodGet, endpoint, token, &payload); err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(payload.Tree))
+	for _, item := range payload.Tree {
+		if item.Type == "blob" && strings.TrimSpace(item.Path) != "" {
+			out = append(out, item.Path)
+		}
+	}
+	if payload.Truncated {
+		return out, fmt.Errorf("GitHub tree response was truncated; narrow the repository or add explicit component paths")
+	}
+	return out, nil
+}
+
+func repositoryPackageJSONHasWorkspaces(ctx context.Context, token, owner, repo, ref string) bool {
+	body, ok, err := githubContentRead(ctx, token, owner, repo, "package.json", ref)
+	if err != nil || !ok {
+		return false
+	}
+	var payload struct {
+		Type    string `json:"type"`
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil || payload.Type != "file" {
+		return false
+	}
+	decoded, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(payload.Content, "\n", ""))
+	if err != nil {
+		return false
+	}
+	var pkg map[string]any
+	if err := json.Unmarshal(decoded, &pkg); err != nil {
+		return false
+	}
+	_, ok = pkg["workspaces"]
+	return ok
+}
+
+func detectPackageManager(files map[string]bool) string {
+	switch {
+	case files["pnpm-lock.yaml"] || files["pnpm-workspace.yaml"]:
+		return "pnpm"
+	case files["yarn.lock"]:
+		return "yarn"
+	case files["package-lock.json"]:
+		return "npm"
+	case files["go.work"]:
+		return "go-workspace"
+	default:
+		return ""
+	}
+}
+
+func isMonorepoComponentPath(dir string) bool {
+	parts := strings.Split(strings.Trim(dir, "/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
+		return false
+	}
+	switch parts[0] {
+	case "apps", "services", "workers", "packages":
+		return len(parts) >= 2
+	default:
+		return len(parts) == 1
+	}
+}
+
+func componentNameFromPath(dir string) string {
+	parts := strings.Split(strings.Trim(dir, "/"), "/")
+	if len(parts) == 0 {
+		return "component"
+	}
+	return harborName(parts[len(parts)-1])
+}
+
+func componentKind(dir string) string {
+	parts := strings.Split(strings.Trim(dir, "/"), "/")
+	if len(parts) == 0 {
+		return "service"
+	}
+	lower := strings.ToLower(strings.Join(parts, "/"))
+	if strings.Contains(lower, "worker") {
+		return "worker"
+	}
+	if strings.Contains(lower, "frontend") || strings.Contains(lower, "front") || strings.Contains(lower, "web") {
+		return "frontend"
+	}
+	switch parts[0] {
+	case "apps":
+		return "frontend"
+	case "workers":
+		return "worker"
+	default:
+		return "service"
+	}
+}
+
+func suggestedComponentPort(files map[string]bool, dir string) int {
+	if files[dir+"/vite.config.ts"] || files[dir+"/vite.config.js"] || strings.Contains(strings.ToLower(dir), "web") || strings.Contains(strings.ToLower(dir), "front") {
+		return 3000
+	}
+	if strings.Contains(strings.ToLower(dir), "api") {
+		return 8080
+	}
+	if strings.Contains(strings.ToLower(dir), "worker") {
+		return 0
+	}
+	return 8080
+}
+
+func suggestedComponentPortWithMeta(files map[string]bool, dir string, meta repositoryProjectMeta) int {
+	if port := metaPortForService(meta, componentNameFromPath(dir)); port > 0 {
+		return port
+	}
+	return suggestedComponentPort(files, dir)
+}
+
+func pathBase(value string) string {
+	value = strings.TrimRight(value, "/")
+	if value == "" {
+		return ""
+	}
+	if idx := strings.LastIndex(value, "/"); idx >= 0 {
+		return value[idx+1:]
+	}
+	return value
+}
+
+func isDockerfileName(name string) bool {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	return lower == "dockerfile" || lower == "containerfile" || strings.HasSuffix(lower, ".dockerfile")
+}
+
+func dockerfileComponentPath(file string) string {
+	file = normalizeRepoPath(file)
+	base := pathBase(file)
+	dir := ""
+	if strings.Contains(file, "/") {
+		dir = strings.Trim(strings.TrimSuffix(file, "/"+base), "/")
+	}
+	if dir != "" {
+		return dir
+	}
+	name := trimDockerfileSuffix(base)
+	if strings.EqualFold(name, "Dockerfile") || strings.EqualFold(name, "Containerfile") {
+		return ""
+	}
+	return harborName(name)
+}
+
+func componentNameFromDockerfile(file string) string {
+	dir := dockerfileComponentPath(file)
+	if dir != "" {
+		return componentNameFromPath(dir)
+	}
+	base := pathBase(file)
+	name := trimDockerfileSuffix(base)
+	if name == "" || strings.EqualFold(name, "Dockerfile") || strings.EqualFold(name, "Containerfile") {
+		return "app"
+	}
+	return harborName(name)
+}
+
+func trimDockerfileSuffix(value string) string {
+	lower := strings.ToLower(value)
+	if strings.HasSuffix(lower, ".dockerfile") {
+		return value[:len(value)-len(".dockerfile")]
+	}
+	return value
+}
+
+func normalizeRepoPath(value string) string {
+	value = strings.TrimSpace(strings.ReplaceAll(value, "\\", "/"))
+	value = strings.Trim(value, "/")
+	if value == "" {
+		return "."
+	}
+	if strings.HasPrefix(value, "./") {
+		value = strings.TrimPrefix(value, "./")
+	}
+	if value == "" {
+		return "."
+	}
+	return value
+}
+
+func joinRepoPath(base, name string) string {
+	base = normalizeRepoPath(base)
+	name = normalizeRepoPath(name)
+	if base == "." {
+		return name
+	}
+	if name == "." {
+		return base
+	}
+	return strings.Trim(base+"/"+name, "/")
 }

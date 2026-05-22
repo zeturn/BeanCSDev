@@ -14,6 +14,8 @@ type CreateProjectRequest struct {
 	GitHubRepo             string             `json:"github_repo" validate:"omitempty,max=256"`
 	GitHubBranch           string             `json:"github_branch" validate:"omitempty,max=128"`
 	DockerfilePath         string             `json:"dockerfile_path" validate:"omitempty,max=512"`
+	BuildContext           string             `json:"build_context" validate:"omitempty,max=512"`
+	BuildArgs              model.JSONMap      `json:"build_args" validate:"omitempty"`
 	AutoDeploy             *bool              `json:"auto_deploy" validate:"omitempty"`
 	Namespace              string             `json:"namespace" validate:"omitempty,hostname_rfc1123,max=63"`
 	BasaltPassInstanceID   *uint              `json:"basaltpass_instance_id"`
@@ -26,6 +28,11 @@ type CreateProjectRequest struct {
 	Ports                  model.ProjectPorts `json:"ports" validate:"required,min=1"`
 	Replicas               int                `json:"replicas" validate:"omitempty,min=1,max=20"`
 	Env                    map[string]string  `json:"env" validate:"omitempty"`
+	DependsOn              []string           `json:"depends_on" validate:"omitempty,dive,max=128"`
+	EnvFromDependencies    model.JSONMap      `json:"env_from_dependencies" validate:"omitempty"`
+	HealthCheck            model.JSONMap      `json:"health_check" validate:"omitempty"`
+	Volumes                model.JSONMap      `json:"volumes" validate:"omitempty"`
+	WatchPaths             []string           `json:"watch_paths" validate:"omitempty,dive,max=512"`
 }
 
 type AnalyzeProjectRepositoryRequest struct {
@@ -44,6 +51,26 @@ type AnalyzeProjectRepositoryResponse struct {
 	Ports          []int    `json:"ports,omitempty"`
 	Signals        []string `json:"signals"`
 	Warnings       []string `json:"warnings"`
+}
+
+type AnalyzeMonorepoRepositoryResponse struct {
+	IsMonorepo     bool                        `json:"is_monorepo"`
+	Deployable     bool                        `json:"deployable"`
+	Source         string                      `json:"source,omitempty"`
+	ConfigPath     string                      `json:"config_path,omitempty"`
+	PackageManager string                      `json:"package_manager,omitempty"`
+	Components     []MonorepoComponentAnalysis `json:"components"`
+	Signals        []string                    `json:"signals,omitempty"`
+	Warnings       []string                    `json:"warnings,omitempty"`
+}
+
+type MonorepoComponentAnalysis struct {
+	Name           string `json:"name"`
+	Path           string `json:"path"`
+	DockerfilePath string `json:"dockerfile_path"`
+	BuildContext   string `json:"build_context"`
+	SuggestedPort  int    `json:"suggested_port,omitempty"`
+	Kind           string `json:"kind"`
 }
 
 type UpdateProjectRequest struct {

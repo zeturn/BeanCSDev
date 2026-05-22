@@ -391,7 +391,7 @@ button.ghost:hover,
 
 .wizard-step-labels {
   display: grid;
-  grid-template-columns: repeat(9, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(76px, 1fr));
   gap: 6px;
 }
 
@@ -733,6 +733,195 @@ button.ghost:hover,
 .readiness-card {
   display: grid;
   gap: 12px;
+}
+
+.component-list {
+  display: grid;
+  gap: 10px;
+  grid-column: 1 / -1;
+}
+
+.component-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #dbe4ed;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.component-card.active {
+  border-color: rgba(37, 99, 235, 0.38);
+  background: #ffffff;
+}
+
+.component-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.component-card-head span {
+  color: #64748b;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+
+.checkbox-label input {
+  width: 16px;
+  min-height: 16px;
+  padding: 0;
+}
+
+.component-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  align-items: end;
+}
+
+.dependency-list {
+  display: grid;
+  gap: 10px;
+}
+
+.spec-plan-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.spec-plan-summary span,
+.spec-component-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  border: 1px solid #dbe4ed;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #334155;
+  padding: 7px 9px;
+  font-size: 12px;
+}
+
+.spec-component-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.dependency-card {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--bc-border);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.dependency-config-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  align-items: end;
+}
+
+.dependency-config-group {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.dependency-config-group b {
+  font-size: 12px;
+  color: #334155;
+}
+
+.dependency-secret-toggle {
+  min-height: 34px;
+  align-items: center;
+  margin: 0;
+}
+
+.dependency-link-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.dependency-link-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(180px, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.application-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+.application-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--bc-border);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.application-card > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.application-card b,
+.application-card small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.application-card small,
+.dependency-summary-list small {
+  color: var(--bc-muted);
+}
+
+.status-chip {
+  width: fit-content;
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: rgba(16, 185, 129, 0.14);
+  color: var(--bc-success);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.dependency-summary-list {
+  display: grid;
+  gap: 6px;
+}
+
+.dependency-summary-list span {
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+  border-radius: 7px;
+  background: #f8fafc;
 }
 
 .stack {
@@ -3153,7 +3342,7 @@ textarea {
 }
 
 .project-table-row {
-  grid-template-columns: minmax(150px, 1fr) minmax(220px, 1.4fr) minmax(180px, 1.1fr) minmax(90px, 0.7fr) minmax(360px, auto);
+  grid-template-columns: minmax(150px, 1fr) minmax(220px, 1.35fr) minmax(160px, 1fr) minmax(110px, 0.75fr) minmax(90px, 0.65fr) minmax(360px, auto);
 }
 
 .deployments-page {

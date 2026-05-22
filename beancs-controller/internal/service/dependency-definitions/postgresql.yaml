@@ -1,0 +1,79 @@
+apiVersion: beancs.io/v1
+kind: DependencyDefinition
+metadata:
+  name: postgresql
+  displayName: PostgreSQL
+  category: database
+spec:
+  type: postgresql
+  supportedDeployMethods: [helm, external]
+  defaultDeployMethod: helm
+  helm:
+    chart:
+      repo: oci://registry-1.docker.io/bitnamicharts
+      name: postgresql
+      version: "*"
+    valuesTemplate: postgresql.values.yaml
+  configSchema:
+    type: object
+    properties:
+      database:
+        type: string
+        default: app
+      username:
+        type: string
+        default: app
+      password:
+        type: string
+        secret: true
+        generate:
+          length: 32
+      persistence:
+        type: object
+        properties:
+          enabled:
+            type: boolean
+            default: true
+          size:
+            type: string
+            default: 20Gi
+  services:
+    - name: postgres
+      port: 5432
+      protocol: tcp
+      default: true
+  outputs:
+    host:
+      valueFrom:
+        serviceHost: postgres
+    port:
+      value: "5432"
+    database:
+      valueFrom:
+        config: database
+    username:
+      valueFrom:
+        secretKey: username
+    password:
+      valueFrom:
+        secretKey: password
+    url:
+      secretTemplate: "postgresql://{{username}}:{{password}}@{{host}}:{{port}}/{{database}}"
+  envPresets:
+    postgres_default:
+      env:
+        POSTGRES_HOST:
+          output: host
+        POSTGRES_PORT:
+          output: port
+        POSTGRES_DATABASE:
+          output: database
+        POSTGRES_USERNAME:
+          output: username
+          secret: true
+        POSTGRES_PASSWORD:
+          output: password
+          secret: true
+        DATABASE_URL:
+          output: url
+          secret: true

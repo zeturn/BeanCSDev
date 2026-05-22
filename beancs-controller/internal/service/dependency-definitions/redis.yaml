@@ -1,0 +1,66 @@
+apiVersion: beancs.io/v1
+kind: DependencyDefinition
+metadata:
+  name: redis
+  displayName: Redis
+  category: cache
+spec:
+  type: redis
+  supportedDeployMethods: [helm, external]
+  defaultDeployMethod: helm
+  helm:
+    chart:
+      repo: oci://registry-1.docker.io/bitnamicharts
+      name: redis
+      version: "*"
+    valuesTemplate: redis.values.yaml
+  configSchema:
+    type: object
+    properties:
+      architecture:
+        type: string
+        enum: [standalone, replication]
+        default: standalone
+      password:
+        type: string
+        secret: true
+        generate:
+          length: 32
+      persistence:
+        type: object
+        properties:
+          enabled:
+            type: boolean
+            default: true
+          size:
+            type: string
+            default: 8Gi
+  services:
+    - name: redis
+      port: 6379
+      protocol: tcp
+      default: true
+  outputs:
+    host:
+      valueFrom:
+        serviceHost: redis
+    port:
+      value: "6379"
+    password:
+      valueFrom:
+        secretKey: password
+    url:
+      secretTemplate: "redis://:{{password}}@{{host}}:{{port}}/0"
+  envPresets:
+    redis_default:
+      env:
+        REDIS_HOST:
+          output: host
+        REDIS_PORT:
+          output: port
+        REDIS_PASSWORD:
+          output: password
+          secret: true
+        REDIS_URL:
+          output: url
+          secret: true

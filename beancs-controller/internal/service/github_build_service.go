@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -187,7 +188,8 @@ func (s *GitHubBuildService) dispatchWorkflow(ctx context.Context, token, owner,
 		"image":           image,
 		"ghcr_image":      ghcrDispatchImage(project, image),
 		"dockerfile_path": coalesce(project.DockerfilePath, "Dockerfile"),
-		"context":         ".",
+		"context":         coalesce(project.BuildContext, "."),
+		"build_args":      encodeBuildArgs(project.BuildArgs),
 	}
 	body, _ := json.Marshal(map[string]any{"ref": branch, "inputs": inputs})
 	workflowFile := beancsBuildWorkflowFile(project)
@@ -582,13 +584,18 @@ func beancsBuildWorkflow(project *model.Project, callbackEnabled bool) string {
         description: Docker build context
         required: false
         default: .
+      build_args:
+        description: Docker build arguments as KEY=VALUE lines
+        required: false
+        default: ""
 `
 	if project.AutoDeploy {
 		trigger += fmt.Sprintf(`  push:
+%s
     tags:
       - '%s-v*'
       - 'all-v*'
-`, workflowSlug)
+%s`, renderWorkflowBranches(project), workflowSlug, renderWorkflowPaths(project))
 	}
 	callback := ""
 	if callbackEnabled {
@@ -664,14 +671,94 @@ jobs:
           password: ${{ secrets.BEANCS_REGISTRY_TOKEN }}
       - uses: docker/build-push-action@v6
         with:
-          context: ${{ github.event_name == 'workflow_dispatch' && inputs.context || '.' }}
+          context: ${{ github.event_name == 'workflow_dispatch' && inputs.context || '%s' }}
           file: ${{ github.event_name == 'workflow_dispatch' && inputs.dockerfile_path || '%s' }}
+          build-args: ${{ github.event_name == 'workflow_dispatch' && inputs.build_args || '%s' }}
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
             ${{ steps.meta.outputs.image }}
             ${{ steps.meta.outputs.ghcr_image }}
-%s`, projectName, trigger, projectName, imageBase, ghcrBase, coalesce(project.DockerfilePath, "Dockerfile"), callback)
+%s`, projectName, trigger, projectName, imageBase, ghcrBase, coalesce(project.BuildContext, "."), coalesce(project.DockerfilePath, "Dockerfile"), yamlSingleLine(encodeBuildArgs(project.BuildArgs)), callback)
+}
+
+func encodeBuildArgs(args model.JSONMap) string {
+	if len(args) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(args))
+	for key := range args {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	lines := make([]string, 0, len(keys))
+	for _, key := range keys {
+		value := strings.TrimSpace(fmt.Sprint(args[key]))
+		if strings.TrimSpace(key) == "" || strings.ContainsAny(key, "\r\n=") {
+			continue
+		}
+		lines = append(lines, key+"="+value)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func renderWorkflowBranches(project *model.Project) string {
+	branch := strings.TrimSpace(project.GitHubBranch)
+	if branch == "" {
+		branch = "main"
+	}
+	return fmt.Sprintf("    branches:\n      - '%s'\n", yamlSingleQuoted(branch))
+}
+
+func renderWorkflowPaths(project *model.Project) string {
+	paths := workflowWatchPaths(project)
+	if len(paths) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("    paths:\n")
+	for _, watchPath := range paths {
+		fmt.Fprintf(&b, "      - '%s'\n", yamlSingleQuoted(watchPath))
+	}
+	return b.String()
+}
+
+func workflowWatchPaths(project *model.Project) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(value string) {
+		value = strings.TrimSpace(strings.ReplaceAll(value, "\\", "/"))
+		if value == "" || seen[value] {
+			return
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	for _, value := range project.WatchPaths {
+		add(value)
+	}
+	if len(out) == 0 {
+		context := strings.Trim(strings.TrimSpace(project.BuildContext), "/")
+		switch context {
+		case "", ".":
+			add("**")
+		default:
+			add(context + "/**")
+		}
+	}
+	add(".beancs/app.yaml")
+	add(".beancs/application.yaml")
+	add("beancs.yaml")
+	sort.Strings(out)
+	return out
+}
+
+func yamlSingleQuoted(value string) string {
+	return strings.ReplaceAll(value, "'", "''")
+}
+
+func yamlSingleLine(value string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(value, "\r", ""), "\n", "\\n")
 }
 
 func beancsWorkflowSlug(project *model.Project) string {
