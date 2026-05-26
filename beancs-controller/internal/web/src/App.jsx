@@ -165,6 +165,7 @@ function App() {
   const [deployForm, setDeployForm] = useState(defaultDeployForm());
   const [editingProject, setEditingProject] = useState(null);
   const [deletingProject, setDeletingProject] = useState(null);
+  const [deletingApplication, setDeletingApplication] = useState(null);
   const [trackingProject, setTrackingProject] = useState(null);
   const [projectTracking, setProjectTracking] = useState(null);
   const [trackingLoading, setTrackingLoading] = useState(false);
@@ -1337,6 +1338,7 @@ function App() {
       basaltpass_instance_id: deployForm.basaltpass_instance_id ? Number(deployForm.basaltpass_instance_id) : undefined,
       cloudflare_credential_id: deployForm.cloudflare_credential_id ? Number(deployForm.cloudflare_credential_id) : undefined,
       cloudflare_zone_id: deployForm.cloudflare_zone_id || undefined,
+      component_domains: monorepoComponentDomainOverrides(deployForm, {...credentials, domains}),
     };
     setLoading(true);
     setError("");
@@ -1538,6 +1540,26 @@ function App() {
     }
   }
 
+  async function deleteApplication(application) {
+    setDeletingApplication(application);
+  }
+
+  async function confirmDeleteApplication() {
+    if (!deletingApplication) return;
+    setLoading(true);
+    setError("");
+    try {
+      await api.delete(`/applications/${deletingApplication.id}`);
+      setNotice(`${deletingApplication.name} deleted.`);
+      setDeletingApplication(null);
+      await loadWorkspace();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function scaleProject(project, replicas) {
     await api.post(`/projects/${project.id}/scale`, {replicas});
     await loadWorkspace();
@@ -1707,7 +1729,7 @@ function App() {
               />
             )}
             {view === "projects" && (
-              <ProjectsView applications={applications} projects={projects} onEdit={setEditingProject} onDelete={deleteProject} onScale={scaleProject} onRestart={restartProject} onBuild={buildProject} onTracking={openProjectTracking} onProgress={(project) => { setActiveProgressProjectID(String(project.id)); setView("progress"); }} />
+              <ProjectsView applications={applications} projects={projects} onDeleteApplication={deleteApplication} onEdit={setEditingProject} onDelete={deleteProject} onScale={scaleProject} onRestart={restartProject} onBuild={buildProject} onTracking={openProjectTracking} onProgress={(project) => { setActiveProgressProjectID(String(project.id)); setView("progress"); }} />
             )}
             {view === "deployments" && <DeploymentsView projects={projects} processes={processRecords} runtimeDeployments={runtime.deployments || []} refresh={loadWorkspace} onOpenProcess={(process) => { setActiveProcessID(String(process.id)); setActiveProgressProjectID(String(process.project_id || "")); setView("progress"); }} />}
             {view === "apiKeys" && <APIKeysView keys={apiKeys} scopeCatalog={apiKeyScopeCatalog} createdKey={createdAPIKey} onDismissCreated={() => setCreatedAPIKey(null)} onCreate={createAPIKey} onRevoke={revokeAPIKey} onRefresh={loadAPIKeys} />}
@@ -1778,6 +1800,7 @@ function App() {
       </main>
       {editingProject && <ProjectModal project={editingProject} onClose={() => setEditingProject(null)} onSubmit={updateProject} onLoadEnv={loadProjectEnv} />}
       {deletingProject && <DeleteProjectModal project={deletingProject} busy={loading} onClose={() => setDeletingProject(null)} onDelete={confirmDeleteProject} />}
+      {deletingApplication && <DeleteApplicationModal application={deletingApplication} busy={loading} onClose={() => setDeletingApplication(null)} onDelete={confirmDeleteApplication} />}
       {trackingProject && <ProjectTrackingModal project={trackingProject} tracking={projectTracking} loading={trackingLoading} onRefresh={() => openProjectTracking(trackingProject)} onClose={() => { setTrackingProject(null); setProjectTracking(null); }} />}
       {runtimeDetail && <RuntimeDetailDrawer detail={runtimeDetail} logs={runtimeLogs} logFollow={runtimeLogFollow} logStatus={runtimeLogStatus} selectedLogContainer={runtimeLogContainer} logTail={runtimeLogTail} logLoaded={runtimeLogLoaded} nodeHealth={nodeHealth} onLoadNodeHealth={loadNodeHealth} onSaveNodeLabels={saveNodeLabels} onSaveNodeTaints={saveNodeTaints} onCordonNode={cordonNode} onDrainNode={drainNode} onDeleteNode={deleteNode} onSaveResourceQuota={saveResourceQuota} onDeleteResourceQuota={deleteResourceQuota} onSaveLimitRange={saveLimitRange} onDeleteLimitRange={deleteLimitRange} onSaveNamespacePermission={saveNamespacePermission} onDeleteNamespacePermission={deleteNamespacePermission} onSaveNamespaceIsolation={saveNamespaceIsolation} onSelectLogContainer={setRuntimeLogContainer} onSetLogTail={setRuntimeLogTail} onLoadContainerLogs={loadRuntimeContainerLogs} onFollowPodLogs={startRuntimeLogFollow} onStopPodLogs={stopRuntimeLogFollow} onClose={() => { stopRuntimeLogFollow(); setRuntimeDetail(null); setRuntimeLogs(""); setRuntimeLogContainer(""); setRuntimeLogLoaded(false); setRuntimeLogStatus(""); setNodeHealth(null); }} onSaveService={saveService} onPatchNamespace={patchNamespaceLabels} />}
     </div>
@@ -2418,11 +2441,27 @@ function DeployView({credentials, domains, namespaces, selectedCredential, setSe
             {form.application_type === "monorepo" && (
               <>
                 {!(form.components || []).some((component) => component.enabled !== false && component.exposure_mode === "public") && <p className="muted">No public DNS zone is required for the selected components.</p>}
-                <div className="signal-list">
+                <div className="component-list">
                   {(form.components || []).filter((component) => component.enabled !== false && Number(component.port || 0) > 0).map((component) => (
-                    <span key={component.project_name}>
-                      {component.project_name}: {monorepoComponentHost(component, form, selectedCloudflareDomain)}
-                    </span>
+                    <div className="component-card active" key={component.project_name}>
+                      <div className="component-card-head">
+                        <b>{component.project_name}</b>
+                        <span>{component.exposure_mode || "internal-only"}</span>
+                      </div>
+                      {component.exposure_mode === "public" ? (
+                        <div className="component-grid">
+                          <Field label="Subdomain" value={component.subdomain ?? component.project_name} onChange={(v) => updateComponent(indexForComponent(form.components, component), {subdomain: slugify(v)})} />
+                          <div className="computed-host">{monorepoComponentHost(component, form, selectedCloudflareDomain)}</div>
+                        </div>
+                      ) : component.exposure_mode === "private" ? (
+                        <div className="component-grid">
+                          <Field label="Tailscale host" value={component.private_host || monorepoDefaultPrivateHost(component, form)} onChange={(v) => updateComponent(indexForComponent(form.components, component), {private_host: v.trim().toLowerCase()})} />
+                          <div className="computed-host">{monorepoComponentHost(component, form, selectedCloudflareDomain)}</div>
+                        </div>
+                      ) : (
+                        <p className="muted">Internal-only component.</p>
+                      )}
+                    </div>
                   ))}
                 </div>
               </>
@@ -3441,7 +3480,7 @@ function DeploymentsView({projects, processes, runtimeDeployments, refresh, onOp
   );
 }
 
-function ProjectsView({applications, projects, onEdit, onDelete, onScale, onRestart, onBuild, onTracking, onProgress}) {
+function ProjectsView({applications, projects, onDeleteApplication, onEdit, onDelete, onScale, onRestart, onBuild, onTracking, onProgress}) {
   const [projectSearch, setProjectSearch] = useState("");
   const visibleProjects = useMemo(() => {
     const needle = String(projectSearch || "").trim().toLowerCase();
@@ -3475,9 +3514,12 @@ function ProjectsView({applications, projects, onEdit, onDelete, onScale, onRest
         <div className="application-grid">
           {(applications || []).map((application) => (
             <div className="application-card" key={application.id}>
-              <div>
-                <b>{application.display_name || application.name}</b>
-                <small>{application.github_repo || application.type}</small>
+              <div className="component-card-head">
+                <div>
+                  <b>{application.display_name || application.name}</b>
+                  <small>{application.github_repo || application.type}</small>
+                </div>
+                <button type="button" className="danger-button" onClick={() => onDeleteApplication(application)} title="Delete application"><Trash2 size={15} /> Delete</button>
               </div>
               <span className="status-chip">{application.status || "-"}</span>
               <div className="signal-list">
@@ -3587,6 +3629,26 @@ function DeleteProjectModal({project, busy, onClose, onDelete}) {
         <div className="delete-summary">
           <span>Namespace <b>{project.namespace}</b></span>
           <span>Route <b>{project.domain || project.exposure_mode}</b></span>
+        </div>
+        <div className="modal-actions">
+          <button type="button" onClick={onClose} disabled={busy}>Cancel</button>
+          <button className="danger-button filled" type="button" onClick={onDelete} disabled={busy}><Trash2 size={15} /> Delete</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DeleteApplicationModal({application, busy, onClose, onDelete}) {
+  return (
+    <div className="modal-backdrop">
+      <div className="modal">
+        <h2>Delete {application.display_name || application.name}</h2>
+        <p className="muted">This removes the application record and any managed component/dependency records that are still attached to it.</p>
+        <div className="delete-summary">
+          <span>Projects <b>{(application.projects || []).length}</b></span>
+          <span>Dependencies <b>{(application.dependencies || []).length}</b></span>
+          <span>Status <b>{application.status || "-"}</b></span>
         </div>
         <div className="modal-actions">
           <button type="button" onClick={onClose} disabled={busy}>Cancel</button>
@@ -5079,15 +5141,42 @@ function componentFromApplicationSpec(applicationName, component) {
   };
 }
 
+function indexForComponent(components, target) {
+  return (components || []).findIndex((component) => component === target || component.project_name === target.project_name);
+}
+
 function monorepoComponentHost(component, form, selectedCloudflareDomain) {
   const exposure = component.exposure_mode || (component.port ? "private" : "internal-only");
   if (exposure === "public") {
-    return selectedCloudflareDomain?.domain ? `${component.project_name}.${selectedCloudflareDomain.domain}` : "Choose a Cloudflare zone";
+    const subdomain = slugify(component.subdomain ?? component.project_name);
+    return selectedCloudflareDomain?.domain ? `${subdomain}.${selectedCloudflareDomain.domain}` : "Choose a Cloudflare zone";
   }
   if (exposure === "private") {
-    return `${component.project_name}.${form.namespace || `proj-${component.project_name}`}.ts.net`;
+    return component.private_host || monorepoDefaultPrivateHost(component, form);
   }
   return "internal only";
+}
+
+function monorepoDefaultPrivateHost(component, form) {
+  return `${component.project_name}.${form.namespace || `proj-${component.project_name}`}.ts.net`;
+}
+
+function monorepoComponentDomainOverrides(form, credentials) {
+  const selectedCF = (credentials.domains || []).find((domain) => String(domain.credential_id) === String(form.cloudflare_credential_id) && String(domain.zone_id) === String(form.cloudflare_zone_id))
+    || credentials.cloudflare.find((cred) => String(cred.id) === String(form.cloudflare_credential_id));
+  const out = {};
+  for (const component of form.components || []) {
+    if (component.enabled === false || Number(component.port || 0) <= 0) continue;
+    const exposure = component.exposure_mode || "internal-only";
+    let host = "";
+    if (exposure === "public" && selectedCF?.domain) {
+      host = `${slugify(component.subdomain ?? component.project_name)}.${selectedCF.domain}`;
+    } else if (exposure === "private") {
+      host = component.private_host || monorepoDefaultPrivateHost(component, form);
+    }
+    if (host) out[component.project_name] = host;
+  }
+  return out;
 }
 
 function buildMonorepoApplicationPayload(form, githubCredentialID, credentials) {
@@ -5115,7 +5204,7 @@ function buildMonorepoApplicationPayload(form, githubCredentialID, credentials) 
     components: (form.components || []).filter((component) => component.enabled !== false).map((component) => {
       const exposure = component.exposure_mode || (component.port ? "private" : "internal-only");
       const port = Number(component.port || 0);
-      const domain = exposure === "public" && selectedCF ? `${component.project_name}.${selectedCF.domain}` : exposure === "private" ? `${component.project_name}.${form.namespace || `proj-${component.project_name}`}.ts.net` : "";
+      const domain = exposure === "public" && selectedCF ? `${slugify(component.subdomain ?? component.project_name)}.${selectedCF.domain}` : exposure === "private" ? component.private_host || monorepoDefaultPrivateHost(component, form) : "";
       return {
         name: component.name,
         kind: component.kind || "service",

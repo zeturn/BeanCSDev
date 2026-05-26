@@ -193,7 +193,7 @@ func (s *ApplicationSpecService) specToMonorepoRequest(ctx context.Context, user
 	componentSecrets := map[string]map[string]string{}
 	for _, component := range doc.Spec.Components {
 		componentReq := specComponentToRequest(component)
-		applyComponentDomains(&componentReq, req.Namespace, publicDomain)
+		applyComponentDomains(&componentReq, req.Namespace, publicDomain, applyReq.ComponentDomains)
 		secrets := resolveComponentSecrets(component, componentSecrets)
 		if len(secrets) > 0 {
 			if componentReq.Env == nil {
@@ -223,9 +223,13 @@ func (s *ApplicationSpecService) cloudflareDomainForSpec(ctx context.Context, us
 	return strings.Trim(strings.ToLower(cred.Domain), ".")
 }
 
-func applyComponentDomains(component *dto.MonorepoComponentRequest, namespace, publicDomain string) {
+func applyComponentDomains(component *dto.MonorepoComponentRequest, namespace, publicDomain string, overrides map[string]string) {
+	override := componentDomainOverride(component.Name, component.ProjectName, overrides)
 	for i := range component.Ports {
 		port := &component.Ports[i]
+		if override != "" && (port.Exposure == model.ExposurePublic || port.Exposure == model.ExposurePrivate) {
+			port.Domain = override
+		}
 		if port.Exposure == model.ExposurePublic && port.Domain == "" && publicDomain != "" {
 			port.Domain = component.ProjectName + "." + publicDomain
 		}
@@ -236,6 +240,15 @@ func applyComponentDomains(component *dto.MonorepoComponentRequest, namespace, p
 			port.Protocol = ""
 		}
 	}
+}
+
+func componentDomainOverride(componentName, projectName string, overrides map[string]string) string {
+	for _, key := range []string{projectName, componentName} {
+		if value := strings.Trim(strings.ToLower(overrides[key]), "."); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func specComponentToRequest(component appspec.ComponentSpec) dto.MonorepoComponentRequest {

@@ -174,7 +174,15 @@ func (s *ApplicationService) Delete(ctx context.Context, userID string, id uint)
 		_ = s.db.WithContext(ctx).Model(&app).Update("status", model.ApplicationStatusPartialDeleted).Error
 		return fmt.Errorf("application partially deleted: %s", strings.Join(failures, "; "))
 	}
-	return s.db.WithContext(ctx).Delete(&app).Error
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("application_id = ?", app.ID).Delete(&model.ApplicationComponent{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("application_id = ?", app.ID).Delete(&model.ManagedDependency{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&app).Error
+	})
 }
 
 func normalizeMonorepoApplicationRequest(req *dto.CreateMonorepoApplicationRequest) {

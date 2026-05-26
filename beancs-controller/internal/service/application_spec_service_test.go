@@ -62,7 +62,7 @@ func TestApplyComponentDomainsFillsRoutableHosts(t *testing.T) {
 		},
 	}
 
-	applyComponentDomains(&component, "app-araneae", "hollowdata.com")
+	applyComponentDomains(&component, "app-araneae", "hollowdata.com", nil)
 
 	if got := component.Ports[0].Domain; got != "araneae-control.hollowdata.com" {
 		t.Fatalf("public domain = %q", got)
@@ -72,5 +72,23 @@ func TestApplyComponentDomainsFillsRoutableHosts(t *testing.T) {
 	}
 	if got := component.Ports[1].Protocol; got != "" {
 		t.Fatalf("expected unsupported project protocol to be cleared, got %q", got)
+	}
+}
+
+func TestApplyComponentDomainsUsesOverrides(t *testing.T) {
+	component := dto.MonorepoComponentRequest{
+		Name:        "front",
+		ProjectName: "araneae-front",
+		Ports: model.ProjectPorts{
+			{Name: "http", Port: 80, Protocol: "http", Exposure: model.ExposurePublic},
+		},
+	}
+
+	applyComponentDomains(&component, "app-araneae", "hollowdata.com", map[string]string{
+		"araneae-front": "spider.hollowdata.com",
+	})
+
+	if got := component.Ports[0].Domain; got != "spider.hollowdata.com" {
+		t.Fatalf("override domain = %q", got)
 	}
 }
