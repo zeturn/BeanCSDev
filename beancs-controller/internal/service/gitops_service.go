@@ -498,7 +498,7 @@ image:
 auth:
   username: %s
   existingPasswordSecret: %s
-  existingSecretPasswordKey: password
+  existingSecretPasswordKey: rabbitmq-password
 persistence:
   enabled: %s
   size: %s
@@ -519,6 +519,8 @@ auth:
   username: %s
   database: %s
   existingSecret: %s
+  customPasswordFiles:
+    user: mysql-password
 primary:
   persistence:
     enabled: %s
@@ -576,6 +578,17 @@ func dependencySecretRuntimeData(dep model.ManagedDependency) map[string]string 
 	}
 	if password := dependencyOutputValue(dep, "password"); password != "" {
 		data["password"] = password
+		switch dep.Type {
+		case "mysql":
+			data["mysql-password"] = password
+			data["mysql-root-password"] = password
+			data["mysql-replication-password"] = password
+		case "rabbitmq":
+			data["rabbitmq-password"] = password
+		case "postgresql":
+			data["postgres-password"] = password
+			data["replication-password"] = password
+		}
 	}
 	if username := dependencyOutputValue(dep, "username"); username != "" {
 		data["username"] = username
