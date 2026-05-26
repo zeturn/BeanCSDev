@@ -70,8 +70,8 @@ func (s *ApplicationService) CreateMonorepo(ctx context.Context, userID, tenantI
 			"build_args":            projectReq.BuildArgs,
 			"health_check":          projectReq.HealthCheck,
 			"volumes":               projectReq.Volumes,
-			"watch_paths":           projectReq.WatchPaths,
-			"depends_on":            component.DependsOn,
+			"watch_paths":           model.StringList(projectReq.WatchPaths),
+			"depends_on":            model.StringList(component.DependsOn),
 			"env_from_dependencies": projectReq.EnvFromDependencies,
 		}
 		if err := s.db.WithContext(ctx).Model(project).Updates(updates).Error; err != nil {
