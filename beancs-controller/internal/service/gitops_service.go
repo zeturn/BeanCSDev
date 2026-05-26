@@ -432,6 +432,10 @@ func renderDependencyArgoApplication(app model.Application, dep model.ManagedDep
 	if chartVersion == "" {
 		chartVersion = "*"
 	}
+	targetRevision := chartVersion
+	if strings.Contains(chartVersion, "*") {
+		targetRevision = yamlScalar(chartVersion)
+	}
 	return fmt.Sprintf(`apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -461,7 +465,7 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
-`, appName, dep.Name, app.Name, dep.Name, chartRepo, chartName, chartVersion, dep.ServiceName, indentYAMLBlock(values, 8), dep.Namespace)
+`, appName, dep.Name, app.Name, dep.Name, chartRepo, chartName, targetRevision, dep.ServiceName, indentYAMLBlock(values, 8), dep.Namespace)
 }
 
 func renderDependencyHelmValues(dep model.ManagedDependency) string {
