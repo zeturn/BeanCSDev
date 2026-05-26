@@ -12,7 +12,7 @@ spec:
     chart:
       repo: https://charts.bitnami.com/bitnami
       name: mysql
-      version: "*"
+      version: "14.0.3"
     valuesTemplate: mysql.values.yaml
   configSchema:
     type: object
