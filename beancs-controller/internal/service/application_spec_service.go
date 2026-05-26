@@ -170,6 +170,7 @@ func (s *ApplicationSpecService) specToMonorepoRequest(ctx context.Context, user
 		Name:                   doc.Metadata.Name,
 		DisplayName:            doc.Metadata.DisplayName,
 		Description:            doc.Metadata.Description,
+		GitHubCredentialID:     applyReq.GitHubCredentialID,
 		GitHubRepo:             doc.Spec.Repo.Name,
 		GitHubBranch:           doc.Spec.Repo.Branch,
 		AutoDeploy:             &autoDeploy,
@@ -227,7 +228,7 @@ func applyComponentDomains(component *dto.MonorepoComponentRequest, namespace, p
 	override := componentDomainOverride(component.Name, component.ProjectName, overrides)
 	for i := range component.Ports {
 		port := &component.Ports[i]
-		if override != "" && (port.Exposure == model.ExposurePublic || port.Exposure == model.ExposurePrivate) {
+		if override != "" && shouldApplyDomainOverride(port.Exposure, override) {
 			port.Domain = override
 		}
 		if port.Exposure == model.ExposurePublic && port.Domain == "" && publicDomain != "" {
@@ -240,6 +241,19 @@ func applyComponentDomains(component *dto.MonorepoComponentRequest, namespace, p
 			port.Protocol = ""
 		}
 	}
+}
+
+func shouldApplyDomainOverride(exposure, override string) bool {
+	if override == "" {
+		return false
+	}
+	if exposure == model.ExposurePublic {
+		return !strings.HasSuffix(override, ".ts.net")
+	}
+	if exposure == model.ExposurePrivate {
+		return strings.HasSuffix(override, ".ts.net")
+	}
+	return false
 }
 
 func componentDomainOverride(componentName, projectName string, overrides map[string]string) string {

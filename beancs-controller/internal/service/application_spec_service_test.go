@@ -39,7 +39,10 @@ func TestSpecToMonorepoRequestResolvesGeneratedComponentSecrets(t *testing.T) {
 		},
 	}
 
-	req := (&ApplicationSpecService{}).specToMonorepoRequest(nil, "", doc, dto.ApplicationSpecRepoRequest{})
+	req := (&ApplicationSpecService{}).specToMonorepoRequest(nil, "", doc, dto.ApplicationSpecRepoRequest{GitHubCredentialID: 42})
+	if req.GitHubCredentialID != 42 {
+		t.Fatalf("github credential id = %d", req.GitHubCredentialID)
+	}
 	if len(req.Components) != 2 {
 		t.Fatalf("expected 2 components, got %d", len(req.Components))
 	}
@@ -90,5 +93,27 @@ func TestApplyComponentDomainsUsesOverrides(t *testing.T) {
 
 	if got := component.Ports[0].Domain; got != "spider.hollowdata.com" {
 		t.Fatalf("override domain = %q", got)
+	}
+}
+
+func TestApplyComponentDomainsDoesNotReusePublicOverrideForPrivatePort(t *testing.T) {
+	component := dto.MonorepoComponentRequest{
+		Name:        "control",
+		ProjectName: "araneae-control",
+		Ports: model.ProjectPorts{
+			{Name: "http", Port: 8180, Protocol: "http", Exposure: model.ExposurePublic},
+			{Name: "grpc", Port: 9190, Protocol: "grpc", Exposure: model.ExposurePrivate},
+		},
+	}
+
+	applyComponentDomains(&component, "app-araneae", "hollowdata.com", map[string]string{
+		"araneae-control": "araneae-control.hollowdata.com",
+	})
+
+	if got := component.Ports[0].Domain; got != "araneae-control.hollowdata.com" {
+		t.Fatalf("public override domain = %q", got)
+	}
+	if got := component.Ports[1].Domain; got != "araneae-control.app-araneae.ts.net" {
+		t.Fatalf("private fallback domain = %q", got)
 	}
 }
