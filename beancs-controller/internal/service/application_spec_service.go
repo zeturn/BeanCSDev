@@ -184,11 +184,15 @@ func (s *ApplicationSpecService) specToMonorepoRequest(ctx context.Context, user
 	publicDomain := s.cloudflareDomainForSpec(ctx, userID, applyReq)
 	for _, dep := range doc.Spec.Dependencies {
 		req.Dependencies = append(req.Dependencies, dto.CreateManagedDependencyRequest{
-			Name:         dep.Name,
-			Type:         dep.Type,
-			DeployMethod: dep.DeployMethod,
-			Version:      dep.Version,
-			Config:       model.JSONMap(dep.Config),
+			Name:                 dep.Name,
+			Type:                 dep.Type,
+			DeployMethod:         dep.DeployMethod,
+			Version:              dep.Version,
+			Config:               model.JSONMap(dep.Config),
+			Shared:               dep.Shared,
+			External:             dep.External,
+			ExistingDependencyID: dep.ExistingDependencyID,
+			Credential:           dependencyCredentialToRequest(dep.Credential),
 		})
 	}
 	componentSecrets := map[string]map[string]string{}
@@ -299,9 +303,23 @@ func specComponentToRequest(component appspec.ComponentSpec) dto.MonorepoCompone
 		req.ExposureMode = model.ExposureInternalOnly
 	}
 	for _, ref := range component.EnvFromDependencies {
-		req.EnvFromDependencies = append(req.EnvFromDependencies, dto.EnvFromDependencyRequest{Dependency: ref.Dependency, Preset: ref.Preset, Mappings: envMappingsToAny(ref.Mappings)})
+		req.EnvFromDependencies = append(req.EnvFromDependencies, dto.EnvFromDependencyRequest{
+			Dependency:   ref.Dependency,
+			DependencyID: ref.DependencyID,
+			Credential:   ref.Credential,
+			CredentialID: ref.CredentialID,
+			Preset:       ref.Preset,
+			Mappings:     envMappingsToAny(ref.Mappings),
+		})
 	}
 	return req
+}
+
+func dependencyCredentialToRequest(in *appspec.DependencyCredentialSpec) *dto.CreateDependencyCredentialRequest {
+	if in == nil {
+		return nil
+	}
+	return &dto.CreateDependencyCredentialRequest{Name: in.Name, Description: in.Description, Config: model.JSONMap(in.Config)}
 }
 
 func resolveComponentSecrets(component appspec.ComponentSpec, existing map[string]map[string]string) map[string]string {

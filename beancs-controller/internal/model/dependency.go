@@ -47,8 +47,22 @@ type ManagedDependency struct {
 	Config            JSONMap   `gorm:"type:jsonb" json:"config,omitempty"`
 	Outputs           JSONMap   `gorm:"type:jsonb" json:"outputs,omitempty"`
 	Status            string    `gorm:"size:32;not null;default:'creating'" json:"status"`
+	Shared            bool      `gorm:"not null;default:false" json:"shared"`
+	External          bool      `gorm:"not null;default:false" json:"external"`
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
+}
+
+type DependencyCredential struct {
+	ID           uint      `gorm:"primaryKey" json:"id"`
+	DependencyID uint      `gorm:"not null;index" json:"dependency_id"`
+	Name         string    `gorm:"size:128;not null;index" json:"name"`
+	Description  string    `gorm:"size:512" json:"description,omitempty"`
+	Config       JSONMap   `gorm:"type:jsonb" json:"config,omitempty"`
+	Outputs      JSONMap   `gorm:"type:jsonb" json:"outputs,omitempty"`
+	Status       string    `gorm:"size:32;not null;default:'ready'" json:"status"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 type DependencyDefinitionRecord struct {

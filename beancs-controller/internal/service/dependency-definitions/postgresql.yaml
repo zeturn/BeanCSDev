@@ -20,6 +20,11 @@ spec:
       database:
         type: string
         default: app
+      host:
+        type: string
+      port:
+        type: string
+        default: "5432"
       username:
         type: string
         default: app
@@ -47,7 +52,8 @@ spec:
       valueFrom:
         serviceHost: postgres
     port:
-      value: "5432"
+      valueFrom:
+        config: port
     database:
       valueFrom:
         config: database

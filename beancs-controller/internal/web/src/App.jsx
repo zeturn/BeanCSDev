@@ -76,6 +76,7 @@ const navSections = [
       {id: "deployments", label: "Deployments", icon: Box},
       {id: "pods", label: "Pods", icon: Layers3},
       {id: "services", label: "Services", icon: Database},
+      {id: "dependencies", label: "Dependencies", icon: Database},
       {id: "ingresses", label: "Ingresses", icon: Network},
       {id: "workloadImage", label: "Image", icon: ImageIcon},
     ],
@@ -141,6 +142,7 @@ function App() {
   const [projects, setProjects] = useState([]);
   const [applications, setApplications] = useState([]);
   const [dependencyDefinitions, setDependencyDefinitions] = useState([]);
+  const [reusableDependencies, setReusableDependencies] = useState([]);
   const [credentials, setCredentials] = useState({github: [], cloudflare: [], basaltpass: []});
   const [apiKeys, setAPIKeys] = useState([]);
   const [apiKeyScopeCatalog, setAPIKeyScopeCatalog] = useState({scopes: [], presets: []});
@@ -314,11 +316,12 @@ function App() {
     setLoading(true);
     setError("");
     try {
-      const [runtimeData, projectData, applicationData, dependencyDefinitionData, apiKeyData, githubData, cloudflareData, domainsData, basaltpassData, processData] = await Promise.all([
+      const [runtimeData, projectData, applicationData, dependencyDefinitionData, reusableDependencyData, apiKeyData, githubData, cloudflareData, domainsData, basaltpassData, processData] = await Promise.all([
         api.get("/runtime/overview"),
         api.get("/projects"),
         api.get("/applications"),
         api.get("/dependency-definitions"),
+        api.get("/dependencies"),
         api.get("/api-keys"),
         api.get("/credentials/github/"),
         api.get("/credentials/cloudflare/"),
@@ -332,6 +335,7 @@ function App() {
       const definitionSummaries = dependencyDefinitionData.data || [];
       const definitions = await Promise.all(definitionSummaries.map((definition) => api.get(`/dependency-definitions/${definition.name}`)));
       setDependencyDefinitions(definitions.map(normalizeDependencyDefinition));
+      setReusableDependencies(reusableDependencyData.data || []);
       setAPIKeys(apiKeyData.data || []);
       setCredentials({
         github: githubData.data || [],
@@ -472,6 +476,39 @@ function App() {
       await loadWorkspace();
     } catch (err) {
       setError(err.message);
+    }
+  }
+
+  async function createStandaloneDependency(payload) {
+    try {
+      await api.post("/dependencies", payload);
+      await loadWorkspace();
+      setNotice("Dependency application created.");
+      return true;
+    } catch (err) {
+      setError(err.message);
+      return false;
+    }
+  }
+
+  async function loadDependencyCredentials(id) {
+    try {
+      const data = await api.get(`/dependencies/${id}/credentials`);
+      return data.data || [];
+    } catch (err) {
+      setError(err.message);
+      return [];
+    }
+  }
+
+  async function createDependencyCredential(id, payload) {
+    try {
+      await api.post(`/dependencies/${id}/credentials`, payload);
+      setNotice("Dependency credential created.");
+      return true;
+    } catch (err) {
+      setError(err.message);
+      return false;
     }
   }
 
@@ -1704,6 +1741,7 @@ function App() {
                 containerRegistries={containerRegistries}
                 containerImages={containerImages}
                 dependencyDefinitions={dependencyDefinitions}
+                reusableDependencies={reusableDependencies}
                 createTrackedImageFromDeploy={createTrackedImageFromDeploy}
                 onConnectGitHub={connectGitHubApp}
                 reposLoading={reposLoading}
@@ -1732,6 +1770,7 @@ function App() {
               <ProjectsView applications={applications} projects={projects} onDeleteApplication={deleteApplication} onEdit={setEditingProject} onDelete={deleteProject} onScale={scaleProject} onRestart={restartProject} onBuild={buildProject} onTracking={openProjectTracking} onProgress={(project) => { setActiveProgressProjectID(String(project.id)); setView("progress"); }} />
             )}
             {view === "deployments" && <DeploymentsView projects={projects} processes={processRecords} runtimeDeployments={runtime.deployments || []} refresh={loadWorkspace} onOpenProcess={(process) => { setActiveProcessID(String(process.id)); setActiveProgressProjectID(String(process.project_id || "")); setView("progress"); }} />}
+            {view === "dependencies" && <DependenciesView dependencies={reusableDependencies} definitions={dependencyDefinitions} githubCredentials={credentials.github} onCreate={createStandaloneDependency} onLoadCredentials={loadDependencyCredentials} onCreateCredential={createDependencyCredential} refresh={loadWorkspace} />}
             {view === "apiKeys" && <APIKeysView keys={apiKeys} scopeCatalog={apiKeyScopeCatalog} createdKey={createdAPIKey} onDismissCreated={() => setCreatedAPIKey(null)} onCreate={createAPIKey} onRevoke={revokeAPIKey} onRefresh={loadAPIKeys} />}
             {view === "registries" && (
               <ContainerRegistriesView
@@ -1913,7 +1952,7 @@ function shouldShowSkeleton(view, dashboard, network) {
   return false;
 }
 
-function DeployView({credentials, domains, namespaces, selectedCredential, setSelectedCredential, repos, selectedRepo, analysis, setAnalysis, form, setForm, loadRepos, analyzeRepo, checkInstallSource, deployProject, containerRegistries, containerImages, dependencyDefinitions, createTrackedImageFromDeploy, onConnectGitHub, reposLoading}) {
+function DeployView({credentials, domains, namespaces, selectedCredential, setSelectedCredential, repos, selectedRepo, analysis, setAnalysis, form, setForm, loadRepos, analyzeRepo, checkInstallSource, deployProject, containerRegistries, containerImages, dependencyDefinitions, reusableDependencies, createTrackedImageFromDeploy, onConnectGitHub, reposLoading}) {
   const [stepIndex, setStepIndex] = useState(0);
   const [creatingImage, setCreatingImage] = useState(false);
   const [checkingInstall, setCheckingInstall] = useState(false);
@@ -2018,10 +2057,13 @@ function DeployView({credentials, domains, namespaces, selectedCredential, setSe
         ...(form.dependencies || []),
         {
           name,
+          source: "new",
           type: definition.name,
           deploy_method: definition.default_deploy_method || "helm",
           version: "",
           config: dependencyDefaultConfig(definition),
+          shared: false,
+          credential: {name: "default", config: {}},
         },
       ],
     });
@@ -2349,8 +2391,33 @@ function DeployView({credentials, domains, namespaces, selectedCredential, setSe
                         </div>
                         <div className="component-grid">
                           <Field label="Name" value={dependency.name} onChange={(v) => updateDependency(index, {...dependency, name: slugify(v)})} required />
+                          <label>Source</label>
+                          <select value={dependency.source || "new"} onChange={(event) => {
+                            const source = event.target.value;
+                            const existing = reusableDependencies?.[0];
+                            updateDependency(index, {
+                              source,
+                              existing_dependency_id: source === "existing" && existing ? existing.id : undefined,
+                              type: source === "existing" && existing ? existing.type : dependency.type,
+                              deploy_method: source === "existing" ? "external" : dependency.deploy_method || definition?.default_deploy_method || "helm",
+                            });
+                          }}>
+                            <option value="new">Create new</option>
+                            <option value="existing" disabled={!reusableDependencies?.length}>Reuse registered</option>
+                          </select>
+                          {dependency.source === "existing" && (
+                            <>
+                              <label>Registered dependency</label>
+                              <select value={dependency.existing_dependency_id || ""} onChange={(event) => {
+                                const existing = (reusableDependencies || []).find((item) => String(item.id) === event.target.value);
+                                updateDependency(index, {existing_dependency_id: Number(event.target.value), type: existing?.type || dependency.type});
+                              }}>
+                                {(reusableDependencies || []).map((item) => <option key={item.id} value={item.id}>{item.name} · {item.type}</option>)}
+                              </select>
+                            </>
+                          )}
                           <label>Type</label>
-                          <select value={dependency.type} onChange={(event) => {
+                          <select value={dependency.type} disabled={dependency.source === "existing"} onChange={(event) => {
                             const nextDefinition = definitionForDependency(dependencyDefinitions, event.target.value);
                             updateDependency(index, {
                               type: event.target.value,
@@ -2362,12 +2429,29 @@ function DeployView({credentials, domains, namespaces, selectedCredential, setSe
                             {dependencyDefinitions.map((definition) => <option key={definition.name} value={definition.name}>{definition.display_name || definition.name}</option>)}
                           </select>
                           <label>Deploy method</label>
-                          <select value={dependency.deploy_method || definition?.default_deploy_method || "helm"} onChange={(event) => updateDependency(index, {deploy_method: event.target.value})}>
+                          <select value={dependency.deploy_method || definition?.default_deploy_method || "helm"} disabled={dependency.source === "existing"} onChange={(event) => updateDependency(index, {deploy_method: event.target.value})}>
                             {(definition?.supported_deploy_methods || ["helm"]).map((method) => <option key={method} value={method}>{method}</option>)}
                           </select>
                           <Field label="Version" value={dependency.version || ""} onChange={(v) => updateDependency(index, {version: v.trim()})} />
                         </div>
-                        <DependencyConfigEditor definition={definition} value={dependency.config || {}} onChange={(config) => updateDependency(index, {config})} />
+                        {dependency.source !== "existing" && (
+                          <>
+                            <div className="component-grid">
+                              <label className="checkbox-label dependency-secret-toggle">
+                                <input type="checkbox" checked={Boolean(dependency.shared)} onChange={(event) => updateDependency(index, {shared: event.target.checked})} />
+                                <span>Allow other applications to reuse this instance</span>
+                              </label>
+                            </div>
+                            <DependencyConfigEditor definition={definition} value={dependency.config || {}} onChange={(config) => updateDependency(index, {config})} />
+                            <div className="dependency-config-group">
+                              <b>Initial credential</b>
+                              <div className="component-grid">
+                                <Field label="Credential name" value={dependency.credential?.name || "default"} onChange={(v) => updateDependency(index, {credential: {...(dependency.credential || {}), name: slugify(v) || "default"}})} />
+                              </div>
+                              <DependencyConfigEditor definition={definition} value={dependency.credential?.config || {}} onChange={(config) => updateDependency(index, {credential: {...(dependency.credential || {name: "default"}), config}})} />
+                            </div>
+                          </>
+                        )}
                       </div>
                     );
                   })}
@@ -2631,6 +2715,9 @@ function DependencyLinksEditor({component, dependencies, definitions, onChange})
   const updatePreset = (dependencyName, preset) => {
     onChange(links.map((link) => link.dependency === dependencyName ? {...link, preset} : link));
   };
+  const updateCredential = (dependencyName, credential) => {
+    onChange(links.map((link) => link.dependency === dependencyName ? {...link, credential} : link));
+  };
   return (
     <div className="component-card">
       <div className="component-card-head">
@@ -2651,12 +2738,188 @@ function DependencyLinksEditor({component, dependencies, definitions, onChange})
               <select value={link?.preset || firstEnvPreset(definition)} onChange={(event) => updatePreset(dependency.name, event.target.value)} disabled={!link}>
                 {presets.map((preset) => <option key={preset} value={preset}>{preset}</option>)}
               </select>
+              <select value={link?.credential || dependency.credential?.name || ""} onChange={(event) => updateCredential(dependency.name, event.target.value)} disabled={!link}>
+                <option value="">default credential</option>
+                {dependency.credential?.name && <option value={dependency.credential.name}>{dependency.credential.name}</option>}
+              </select>
             </div>
           );
         })}
       </div>
     </div>
   );
+}
+
+function DependenciesView({dependencies, definitions, githubCredentials, onCreate, onLoadCredentials, onCreateCredential, refresh}) {
+  const firstDefinition = definitions?.[0];
+  const [form, setForm] = useState(() => standaloneDependencyForm(firstDefinition));
+  const [selected, setSelected] = useState(null);
+  const [credentials, setCredentials] = useState([]);
+  const selectedDefinition = definitionForDependency(definitions, form.type);
+  useEffect(() => {
+    if (!selected && dependencies?.length) setSelected(dependencies[0]);
+  }, [dependencies?.length]);
+  useEffect(() => {
+    if (!selected?.id) {
+      setCredentials([]);
+      return;
+    }
+    onLoadCredentials(selected.id).then(setCredentials);
+  }, [selected?.id]);
+  const updateConfig = (config) => setForm({...form, config});
+  const submit = async (event) => {
+    event.preventDefault();
+    const ok = await onCreate({
+      application_name: form.application_name || `dep-${form.name}`,
+      display_name: form.display_name || form.name,
+      namespace: form.namespace || undefined,
+      github_credential_id: form.deploy_method === "external" ? undefined : Number(form.github_credential_id || 0) || undefined,
+      name: form.name,
+      type: form.type,
+      deploy_method: form.deploy_method,
+      version: form.version || undefined,
+      shared: true,
+      external: form.deploy_method === "external",
+      config: form.config || {},
+      credential: form.credential_name ? {name: form.credential_name, config: form.credential_config || {}} : undefined,
+    });
+    if (ok) setForm(standaloneDependencyForm(selectedDefinition || firstDefinition));
+  };
+  const addCredential = async (event) => {
+    event.preventDefault();
+    if (!selected?.id) return;
+    const data = new FormData(event.currentTarget);
+    const name = String(data.get("name") || "").trim();
+    if (!name) return;
+    const ok = await onCreateCredential(selected.id, {name, config: credentialConfigFromForm(data)});
+    if (ok) {
+      event.currentTarget.reset();
+      const rows = await onLoadCredentials(selected.id);
+      setCredentials(rows);
+    }
+  };
+  return (
+    <div className="dependencies-page">
+      <section className="panel">
+        <div className="panel-heading-inline">
+          <h2><Database size={18} /> Dependency applications</h2>
+          <button type="button" onClick={refresh}><RefreshCw size={15} /> Refresh</button>
+        </div>
+        <div className="dependency-list">
+          {(dependencies || []).map((dependency) => (
+            <button key={dependency.id} type="button" className={selected?.id === dependency.id ? "dependency-card active" : "dependency-card"} onClick={() => setSelected(dependency)}>
+              <b>{dependency.name}</b>
+              <span>{dependency.type} · {dependency.deploy_method}</span>
+              <small>{dependency.external ? "external" : "managed"} · {dependency.shared ? "shared" : "private"}</small>
+            </button>
+          ))}
+          {(!dependencies || dependencies.length === 0) && <div className="empty">No reusable dependencies registered.</div>}
+        </div>
+      </section>
+      <section className="panel">
+        <h2><Plus size={18} /> Deploy or register dependency</h2>
+        <form className="form-grid" onSubmit={submit}>
+          <Field label="Dependency name" value={form.name} onChange={(v) => setForm({...form, name: slugify(v), application_name: form.application_name || `dep-${slugify(v)}`})} required />
+          <Field label="Application name" value={form.application_name} onChange={(v) => setForm({...form, application_name: slugify(v)})} required />
+          <label>Type</label>
+          <select value={form.type} onChange={(event) => {
+            const definition = definitionForDependency(definitions, event.target.value);
+            setForm({...form, type: event.target.value, deploy_method: definition?.default_deploy_method || "helm", config: dependencyDefaultConfig(definition), credential_config: {}});
+          }}>
+            {(definitions || []).map((definition) => <option key={definition.name} value={definition.name}>{definition.display_name || definition.name}</option>)}
+          </select>
+          <label>Deploy method</label>
+          <select value={form.deploy_method} onChange={(event) => setForm({...form, deploy_method: event.target.value})}>
+            {(selectedDefinition?.supported_deploy_methods || ["helm", "external"]).map((method) => <option key={method} value={method}>{method}</option>)}
+          </select>
+          {form.deploy_method !== "external" && (
+            <>
+              <label>GitOps credential</label>
+              <select value={form.github_credential_id || ""} onChange={(event) => setForm({...form, github_credential_id: event.target.value})}>
+                <option value="">Register only</option>
+                {(githubCredentials || []).map((cred) => <option key={cred.id} value={cred.id}>{cred.account_login || cred.name}</option>)}
+              </select>
+            </>
+          )}
+          <Field label="Namespace" value={form.namespace} onChange={(v) => setForm({...form, namespace: slugify(v)})} />
+          <Field label="Version" value={form.version} onChange={(v) => setForm({...form, version: v.trim()})} />
+          <DependencyConfigEditor definition={selectedDefinition} value={form.config || {}} onChange={updateConfig} />
+          <div className="dependency-config-group">
+            <b>Initial credential</b>
+            <div className="component-grid">
+              <Field label="Credential name" value={form.credential_name} onChange={(v) => setForm({...form, credential_name: slugify(v) || "default"})} />
+            </div>
+            <DependencyConfigEditor definition={selectedDefinition} value={form.credential_config || {}} onChange={(credential_config) => setForm({...form, credential_config})} />
+          </div>
+          <button className="primary" type="submit"><Database size={15} /> Create dependency</button>
+        </form>
+      </section>
+      <section className="panel">
+        <h2><KeyRound size={18} /> Credentials</h2>
+        {selected ? (
+          <>
+            <div className="dependency-summary-list">
+              <span>{selected.name}</span>
+              <small>{selected.type}</small>
+            </div>
+            <div className="dependency-link-grid">
+              {credentials.map((credential) => (
+                <div className="dependency-link-row" key={credential.id}>
+                  <b>{credential.name}</b>
+                  <span>{credential.status}</span>
+                </div>
+              ))}
+              {credentials.length === 0 && <div className="empty">No credentials registered.</div>}
+            </div>
+            <form className="form-grid" onSubmit={addCredential}>
+              <Field label="New credential name" name="name" required />
+              <DependencyCredentialFields definition={definitionForDependency(definitions, selected.type)} />
+              <button type="submit"><Plus size={15} /> Add credential</button>
+            </form>
+          </>
+        ) : <div className="empty">Select a dependency to manage credentials.</div>}
+      </section>
+    </div>
+  );
+}
+
+function DependencyCredentialFields({definition}) {
+  const properties = definition?.config_schema?.properties || {};
+  return (
+    <div className="dependency-config-grid">
+      {Object.keys(properties).filter((key) => key !== "persistence" && key !== "architecture").map((key) => (
+        <Field key={key} label={labelize(key)} name={`config.${key}`} />
+      ))}
+    </div>
+  );
+}
+
+function standaloneDependencyForm(definition) {
+  const name = definition?.name || "mysql";
+  return {
+    name,
+    application_name: `dep-${name}`,
+    display_name: name,
+    namespace: "",
+    type: name,
+    deploy_method: definition?.default_deploy_method || "helm",
+    github_credential_id: "",
+    version: "",
+    config: dependencyDefaultConfig(definition),
+    credential_name: "default",
+    credential_config: {},
+  };
+}
+
+function credentialConfigFromForm(data) {
+  const out = {};
+  for (const [key, value] of data.entries()) {
+    if (!key.startsWith("config.")) continue;
+    const clean = String(value || "").trim();
+    if (clean === "") continue;
+    out[key.slice("config.".length)] = clean;
+  }
+  return out;
 }
 
 function ProgressView({projects, processes, activeProcessID, setActiveProcessID, activeProjectID, setActiveProjectID, progress, installProgress, refresh, refreshList, logFollow, liveLogs, logStatus, onStartLogFollow, onStopLogFollow}) {
@@ -4962,11 +5225,14 @@ function ProjectModal({project, onClose, onSubmit, onLoadEnv}) {
   );
 }
 
-function Field({label, value, onChange, type = "text", required = false}) {
+function Field({label, value, onChange, type = "text", required = false, name}) {
+  const inputProps = onChange
+    ? {value: value ?? "", onChange: (event) => onChange(event.target.value)}
+    : {defaultValue: value ?? ""};
   return (
     <>
       <label>{label}</label>
-      <input type={type} value={value ?? ""} required={required} onChange={(event) => onChange(event.target.value)} />
+      <input type={type} name={name} required={required} {...inputProps} />
     </>
   );
 }
@@ -5109,10 +5375,14 @@ function deployFormFromApplicationSpec(current, repoFullName, branch, data) {
     components: (spec.components || []).map((component) => componentFromApplicationSpec(metadata.name || plan.application?.name || repoFullName, component)),
     dependencies: (spec.dependencies || []).map((dependency) => ({
       name: dependency.name,
+      source: dependency.existingDependencyID ? "existing" : "new",
+      existing_dependency_id: dependency.existingDependencyID || undefined,
       type: dependency.type,
       deploy_method: dependency.deployMethod || "helm",
       version: dependency.version || "",
       config: dependency.config || {},
+      shared: Boolean(dependency.shared),
+      credential: dependency.credential ? {name: dependency.credential.name || "default", config: dependency.credential.config || {}} : {name: "default", config: {}},
     })),
   };
 }
@@ -5137,7 +5407,7 @@ function componentFromApplicationSpec(applicationName, component) {
     volumes: component.volumes || [],
     watch_paths: component.watchPaths || [],
     env_entries: envEntriesFromObject(component.env || {}),
-    dependency_links: (component.envFromDependencies || []).map((ref) => ({dependency: ref.dependency, preset: ref.preset || ""})),
+    dependency_links: (component.envFromDependencies || []).map((ref) => ({dependency: ref.dependency, dependency_id: ref.dependencyID, credential: ref.credential || "", credential_id: ref.credentialID, preset: ref.preset || ""})),
   };
 }
 
@@ -5196,10 +5466,14 @@ function buildMonorepoApplicationPayload(form, githubCredentialID, credentials) 
     resource_preset: form.resource_preset || "small",
     dependencies: (form.dependencies || []).map((dependency) => ({
       name: dependency.name,
-      type: dependency.type,
+      type: dependency.source === "existing" ? undefined : dependency.type,
       version: dependency.version || undefined,
-      deploy_method: dependency.deploy_method || "helm",
-      config: dependency.config || {},
+      deploy_method: dependency.source === "existing" ? undefined : dependency.deploy_method || "helm",
+      config: dependency.source === "existing" ? undefined : dependency.config || {},
+      shared: Boolean(dependency.shared),
+      external: dependency.deploy_method === "external",
+      existing_dependency_id: dependency.source === "existing" ? Number(dependency.existing_dependency_id || 0) : undefined,
+      credential: dependency.source === "existing" ? undefined : dependency.credential?.name ? dependency.credential : undefined,
     })),
     components: (form.components || []).filter((component) => component.enabled !== false).map((component) => {
       const exposure = component.exposure_mode || (component.port ? "private" : "internal-only");
@@ -5221,7 +5495,10 @@ function buildMonorepoApplicationPayload(form, githubCredentialID, credentials) 
         depends_on: (component.dependency_links || []).map((link) => link.dependency),
         env_from_dependencies: (component.dependency_links || []).map((link) => ({
           dependency: link.dependency,
+          dependency_id: link.dependency_id || undefined,
           preset: link.preset,
+          credential: link.credential || undefined,
+          credential_id: link.credential_id || undefined,
         })),
       };
     }),

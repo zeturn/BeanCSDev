@@ -53,6 +53,7 @@ func (s *ApplicationService) CreateMonorepo(ctx context.Context, userID, tenantI
 		}
 		createdDeps = append(createdDeps, *dep)
 		depsByName[dep.Name] = *dep
+		depsByName[dependency.Name] = *dep
 	}
 	for _, component := range req.Components {
 		component.Env = s.componentEnvWithDependencies(component, depsByName)
@@ -122,7 +123,8 @@ func (s *ApplicationService) List(ctx context.Context, userID string) ([]dto.App
 		var projects []model.Project
 		_ = s.db.WithContext(ctx).Where("application_id = ?", app.ID).Order("name asc").Find(&projects).Error
 		var deps []model.ManagedDependency
-		_ = s.db.WithContext(ctx).Where("application_id = ?", app.ID).Order("name asc").Find(&deps).Error
+		ids := s.dependencies.dependencyIDsForApplication(ctx, app.ID)
+		_ = s.db.WithContext(ctx).Where("id IN ?", ids).Order("name asc").Find(&deps).Error
 		var components []model.ApplicationComponent
 		_ = s.db.WithContext(ctx).Where("application_id = ?", app.ID).Order("kind asc, name asc").Find(&components).Error
 		out = append(out, dto.ApplicationResponse{Application: app, Projects: projects, Dependencies: s.dependencies.MaskList(deps), Components: components})
@@ -140,7 +142,8 @@ func (s *ApplicationService) Get(ctx context.Context, userID string, id uint) (*
 		return nil, err
 	}
 	var deps []model.ManagedDependency
-	if err := s.db.WithContext(ctx).Where("application_id = ?", app.ID).Order("name asc").Find(&deps).Error; err != nil {
+	ids := s.dependencies.dependencyIDsForApplication(ctx, app.ID)
+	if err := s.db.WithContext(ctx).Where("id IN ?", ids).Order("name asc").Find(&deps).Error; err != nil {
 		return nil, err
 	}
 	var components []model.ApplicationComponent
@@ -273,7 +276,7 @@ func (s *ApplicationService) componentEnvWithDependencies(component dto.Monorepo
 		if !ok {
 			continue
 		}
-		depEnv, err := s.dependencies.EnvForDependency(dep, ref.Preset, ref.Mappings)
+		depEnv, err := s.dependencies.EnvForDependencyCredential(context.Background(), dep, ref.CredentialID, ref.Credential, ref.Preset, ref.Mappings)
 		if err != nil {
 			continue
 		}
@@ -288,6 +291,15 @@ func envFromDependencyJSON(items []dto.EnvFromDependencyRequest) model.JSONMap {
 	out := make([]any, 0, len(items))
 	for _, item := range items {
 		entry := map[string]any{"dependency": item.Dependency}
+		if item.DependencyID != 0 {
+			entry["dependency_id"] = item.DependencyID
+		}
+		if item.Credential != "" {
+			entry["credential"] = item.Credential
+		}
+		if item.CredentialID != 0 {
+			entry["credential_id"] = item.CredentialID
+		}
 		if item.Preset != "" {
 			entry["preset"] = item.Preset
 		}

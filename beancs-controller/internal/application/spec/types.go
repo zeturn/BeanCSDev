@@ -84,12 +84,16 @@ type HealthCheckSpec struct {
 }
 
 type DependencySpec struct {
-	Name         string                 `yaml:"name" json:"name"`
-	Type         string                 `yaml:"type" json:"type"`
-	DeployMethod string                 `yaml:"deployMethod,omitempty" json:"deployMethod,omitempty"`
-	Version      string                 `yaml:"version,omitempty" json:"version,omitempty"`
-	Config       map[string]any         `yaml:"config,omitempty" json:"config,omitempty"`
-	Outputs      *DependencyOutputsSpec `yaml:"outputs,omitempty" json:"outputs,omitempty"`
+	Name                 string                    `yaml:"name" json:"name"`
+	Type                 string                    `yaml:"type,omitempty" json:"type,omitempty"`
+	DeployMethod         string                    `yaml:"deployMethod,omitempty" json:"deployMethod,omitempty"`
+	Version              string                    `yaml:"version,omitempty" json:"version,omitempty"`
+	Config               map[string]any            `yaml:"config,omitempty" json:"config,omitempty"`
+	Shared               bool                      `yaml:"shared,omitempty" json:"shared,omitempty"`
+	External             bool                      `yaml:"external,omitempty" json:"external,omitempty"`
+	ExistingDependencyID uint                      `yaml:"existingDependencyID,omitempty" json:"existingDependencyID,omitempty"`
+	Credential           *DependencyCredentialSpec `yaml:"credential,omitempty" json:"credential,omitempty"`
+	Outputs              *DependencyOutputsSpec    `yaml:"outputs,omitempty" json:"outputs,omitempty"`
 }
 
 type DependencyOutputsSpec struct {
@@ -97,9 +101,18 @@ type DependencyOutputsSpec struct {
 }
 
 type EnvFromDependencySpec struct {
-	Dependency string                `yaml:"dependency" json:"dependency"`
-	Preset     string                `yaml:"preset,omitempty" json:"preset,omitempty"`
-	Mappings   map[string]EnvMapping `yaml:"mappings,omitempty" json:"mappings,omitempty"`
+	Dependency   string                `yaml:"dependency" json:"dependency"`
+	DependencyID uint                  `yaml:"dependencyID,omitempty" json:"dependencyID,omitempty"`
+	Credential   string                `yaml:"credential,omitempty" json:"credential,omitempty"`
+	CredentialID uint                  `yaml:"credentialID,omitempty" json:"credentialID,omitempty"`
+	Preset       string                `yaml:"preset,omitempty" json:"preset,omitempty"`
+	Mappings     map[string]EnvMapping `yaml:"mappings,omitempty" json:"mappings,omitempty"`
+}
+
+type DependencyCredentialSpec struct {
+	Name        string         `yaml:"name" json:"name"`
+	Description string         `yaml:"description,omitempty" json:"description,omitempty"`
+	Config      map[string]any `yaml:"config,omitempty" json:"config,omitempty"`
 }
 
 type EnvMapping struct {

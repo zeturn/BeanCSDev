@@ -470,6 +470,8 @@ func renderDependencyHelmValues(dep model.ManagedDependency) string {
 		return renderRabbitMQValues(dep)
 	case "postgresql":
 		return renderPostgreSQLValues(dep)
+	case "mysql":
+		return renderMySQLValues(dep)
 	case "redis":
 		return renderRedisValues(dep)
 	default:
@@ -504,6 +506,27 @@ persistence:
 }
 
 func renderPostgreSQLValues(dep model.ManagedDependency) string {
+	username := dependencyOutputValue(dep, "username")
+	if username == "" {
+		username = fmt.Sprint(dep.Config["username"])
+	}
+	database := dependencyOutputValue(dep, "database")
+	if database == "" {
+		database = fmt.Sprint(dep.Config["database"])
+	}
+	return fmt.Sprintf(`fullnameOverride: %s
+auth:
+  username: %s
+  database: %s
+  existingSecret: %s
+primary:
+  persistence:
+    enabled: %s
+    size: %s
+`, dep.ServiceName, yamlScalar(coalesce(username, "app")), yamlScalar(coalesce(database, "app")), dep.SecretName, yamlBool(configBool(dep.Config, "persistence.enabled", true)), yamlScalar(configString(dep.Config, "persistence.size", "20Gi")))
+}
+
+func renderMySQLValues(dep model.ManagedDependency) string {
 	username := dependencyOutputValue(dep, "username")
 	if username == "" {
 		username = fmt.Sprint(dep.Config["username"])
