@@ -113,6 +113,7 @@ func (s *DependencyService) Create(ctx context.Context, userID string, applicati
 	if !ok {
 		return nil, fmt.Errorf("unknown dependency type %q", req.Type)
 	}
+	req.Type = def.Spec.Type
 	if req.DeployMethod == "" {
 		req.DeployMethod = def.Spec.DefaultDeployMethod
 	}
