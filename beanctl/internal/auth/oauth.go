@@ -41,6 +41,10 @@ func Login(ctx context.Context, opts LoginOptions) (*oauth2.Token, error) {
 	if err != nil {
 		return nil, err
 	}
+	nonce, err := randomVerifier()
+	if err != nil {
+		return nil, err
+	}
 	redirectURL := fmt.Sprintf("http://127.0.0.1:%d/callback", opts.Port)
 	authBaseURL := oauthAPIBaseURL(opts.AuthURL)
 	conf := oauth2.Config{
@@ -58,6 +62,7 @@ func Login(ctx context.Context, opts LoginOptions) (*oauth2.Token, error) {
 	authURL := conf.AuthCodeURL(
 		state,
 		oauth2.AccessTypeOffline,
+		oauth2.SetAuthURLParam("nonce", nonce),
 		oauth2.SetAuthURLParam("code_challenge", codeChal),
 		oauth2.SetAuthURLParam("code_challenge_method", "S256"),
 	)

@@ -19,8 +19,8 @@ func NewProcessHandler(db *gorm.DB, svc *service.ProcessService) *ProcessHandler
 }
 
 func (h *ProcessHandler) Register(r fiber.Router) {
-	r.Get("/processes", h.list)
-	r.Get("/processes/:id", h.get)
+	r.Get("/processes", middleware.RequireAPIScope(service.ScopeProcessesRead), h.list)
+	r.Get("/processes/:id", middleware.RequireAPIScope(service.ScopeProcessesRead), h.get)
 }
 
 func (h *ProcessHandler) list(c *fiber.Ctx) error {

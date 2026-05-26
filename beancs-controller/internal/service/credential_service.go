@@ -153,12 +153,31 @@ func (s *CredentialService) createGitHubCredential(ctx context.Context, userID s
 }
 
 func (s *CredentialService) CreateBasaltPass(ctx context.Context, userID string, req dto.CreateBasaltPassCredentialRequest) (*model.BasaltPassInstance, error) {
+	req.BaseURL = strings.TrimRight(strings.TrimSpace(req.BaseURL), "/")
+	req.Name = strings.TrimSpace(req.Name)
+	req.TenantID = strings.TrimSpace(req.TenantID)
+	req.TenantCode = strings.TrimSpace(req.TenantCode)
+	req.ClientID = strings.TrimSpace(req.ClientID)
 	if err := validateExternalHTTPSURL(req.BaseURL); err != nil {
 		return nil, err
 	}
-	enc, err := s.cipher.EncryptString(req.ClientSecret)
-	if err != nil {
-		return nil, err
+	if req.TenantID == "" && req.TenantCode == "" {
+		return nil, fmt.Errorf("tenant_id or tenant_code is required")
+	}
+	var clientSecretEnc []byte
+	var automationTokenEnc []byte
+	var err error
+	if strings.TrimSpace(req.AutomationToken) != "" {
+		automationTokenEnc, err = s.cipher.EncryptString(strings.TrimSpace(req.AutomationToken))
+		if err != nil {
+			return nil, err
+		}
+	}
+	if strings.TrimSpace(req.ClientSecret) != "" {
+		clientSecretEnc, err = s.cipher.EncryptString(req.ClientSecret)
+		if err != nil {
+			return nil, err
+		}
 	}
 	var serviceTokenEnc []byte
 	if strings.TrimSpace(req.ServiceToken) != "" {
@@ -167,7 +186,21 @@ func (s *CredentialService) CreateBasaltPass(ctx context.Context, userID string,
 			return nil, err
 		}
 	}
-	cred := &model.BasaltPassInstance{Name: req.Name, BaseURL: req.BaseURL, ClientID: req.ClientID, ClientSecretEnc: enc, ServiceTokenEnc: serviceTokenEnc, IsActive: true, CreatedBy: userID}
+	if len(automationTokenEnc) == 0 && (strings.TrimSpace(req.ClientID) == "" || len(clientSecretEnc) == 0) && len(serviceTokenEnc) == 0 {
+		return nil, fmt.Errorf("automation_token is required unless client_id/client_secret or service_token are provided")
+	}
+	cred := &model.BasaltPassInstance{
+		Name:               req.Name,
+		BaseURL:            req.BaseURL,
+		TenantID:           req.TenantID,
+		TenantCode:         req.TenantCode,
+		ClientID:           req.ClientID,
+		ClientSecretEnc:    clientSecretEnc,
+		ServiceTokenEnc:    serviceTokenEnc,
+		AutomationTokenEnc: automationTokenEnc,
+		IsActive:           true,
+		CreatedBy:          userID,
+	}
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(cred).Error; err != nil {
 			return err
@@ -925,23 +958,45 @@ func (s *CredentialService) UpdateBasaltPass(ctx context.Context, id uint, req d
 		return nil, err
 	}
 	if req.Name != nil {
-		cred.Name = *req.Name
+		cred.Name = strings.TrimSpace(*req.Name)
 	}
 	if req.BaseURL != nil {
-		if err := validateExternalHTTPSURL(*req.BaseURL); err != nil {
+		baseURL := strings.TrimRight(strings.TrimSpace(*req.BaseURL), "/")
+		if err := validateExternalHTTPSURL(baseURL); err != nil {
 			return nil, err
 		}
-		cred.BaseURL = *req.BaseURL
+		cred.BaseURL = baseURL
+	}
+	if req.TenantID != nil {
+		cred.TenantID = strings.TrimSpace(*req.TenantID)
+	}
+	if req.TenantCode != nil {
+		cred.TenantCode = strings.TrimSpace(*req.TenantCode)
+	}
+	if req.AutomationToken != nil {
+		if strings.TrimSpace(*req.AutomationToken) == "" {
+			cred.AutomationTokenEnc = nil
+		} else {
+			enc, err := s.cipher.EncryptString(strings.TrimSpace(*req.AutomationToken))
+			if err != nil {
+				return nil, err
+			}
+			cred.AutomationTokenEnc = enc
+		}
 	}
 	if req.ClientID != nil {
-		cred.ClientID = *req.ClientID
+		cred.ClientID = strings.TrimSpace(*req.ClientID)
 	}
 	if req.ClientSecret != nil {
-		enc, err := s.cipher.EncryptString(*req.ClientSecret)
-		if err != nil {
-			return nil, err
+		if strings.TrimSpace(*req.ClientSecret) == "" {
+			cred.ClientSecretEnc = nil
+		} else {
+			enc, err := s.cipher.EncryptString(*req.ClientSecret)
+			if err != nil {
+				return nil, err
+			}
+			cred.ClientSecretEnc = enc
 		}
-		cred.ClientSecretEnc = enc
 	}
 	if req.ServiceToken != nil {
 		if strings.TrimSpace(*req.ServiceToken) == "" {
@@ -956,6 +1011,12 @@ func (s *CredentialService) UpdateBasaltPass(ctx context.Context, id uint, req d
 	}
 	if req.IsActive != nil {
 		cred.IsActive = *req.IsActive
+	}
+	if strings.TrimSpace(cred.TenantID) == "" && strings.TrimSpace(cred.TenantCode) == "" {
+		return nil, fmt.Errorf("tenant_id or tenant_code is required")
+	}
+	if len(cred.AutomationTokenEnc) == 0 && (strings.TrimSpace(cred.ClientID) == "" || len(cred.ClientSecretEnc) == 0) && len(cred.ServiceTokenEnc) == 0 {
+		return nil, fmt.Errorf("automation_token is required unless client_id/client_secret or service_token are provided")
 	}
 	return &cred, s.db.WithContext(ctx).Save(&cred).Error
 }

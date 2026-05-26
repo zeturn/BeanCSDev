@@ -139,8 +139,11 @@ function App() {
   const [dashboard, setDashboard] = useState(null);
   const [network, setNetwork] = useState(null);
   const [projects, setProjects] = useState([]);
+  const [applications, setApplications] = useState([]);
+  const [dependencyDefinitions, setDependencyDefinitions] = useState([]);
   const [credentials, setCredentials] = useState({github: [], cloudflare: [], basaltpass: []});
   const [apiKeys, setAPIKeys] = useState([]);
+  const [apiKeyScopeCatalog, setAPIKeyScopeCatalog] = useState({scopes: [], presets: []});
   const [registryPresets, setRegistryPresets] = useState([]);
   const [containerRegistries, setContainerRegistries] = useState([]);
   const [containerImages, setContainerImages] = useState([]);
@@ -162,6 +165,10 @@ function App() {
   const [deployForm, setDeployForm] = useState(defaultDeployForm());
   const [editingProject, setEditingProject] = useState(null);
   const [deletingProject, setDeletingProject] = useState(null);
+  const [deletingApplication, setDeletingApplication] = useState(null);
+  const [trackingProject, setTrackingProject] = useState(null);
+  const [projectTracking, setProjectTracking] = useState(null);
+  const [trackingLoading, setTrackingLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarQuery, setSidebarQuery] = useState("");
   const [activeProgressProjectID, setActiveProgressProjectID] = useState("");
@@ -262,6 +269,11 @@ function App() {
   }, [token, view]);
 
   useEffect(() => {
+    if (!token || view !== "apiKeys") return;
+    loadAPIKeys();
+  }, [token, view]);
+
+  useEffect(() => {
     if (!token || !["deploy", "registries", "workloadImage"].includes(view)) return;
     loadRegistriesPage();
     const timer = setInterval(() => {
@@ -302,9 +314,11 @@ function App() {
     setLoading(true);
     setError("");
     try {
-      const [runtimeData, projectData, apiKeyData, githubData, cloudflareData, domainsData, basaltpassData, processData] = await Promise.all([
+      const [runtimeData, projectData, applicationData, dependencyDefinitionData, apiKeyData, githubData, cloudflareData, domainsData, basaltpassData, processData] = await Promise.all([
         api.get("/runtime/overview"),
         api.get("/projects"),
+        api.get("/applications"),
+        api.get("/dependency-definitions"),
         api.get("/api-keys"),
         api.get("/credentials/github/"),
         api.get("/credentials/cloudflare/"),
@@ -314,6 +328,10 @@ function App() {
       ]);
       setRuntime(runtimeData.data || emptyRuntime);
       setProjects(projectData.data || []);
+      setApplications(applicationData.data || []);
+      const definitionSummaries = dependencyDefinitionData.data || [];
+      const definitions = await Promise.all(definitionSummaries.map((definition) => api.get(`/dependency-definitions/${definition.name}`)));
+      setDependencyDefinitions(definitions.map(normalizeDependencyDefinition));
       setAPIKeys(apiKeyData.data || []);
       setCredentials({
         github: githubData.data || [],
@@ -383,14 +401,17 @@ function App() {
     const verifier = randomString(64);
     const challenge = await codeChallenge(verifier);
     const authState = randomString(32);
+    const nonce = randomString(32);
     sessionStorage.setItem("beancs.pkceVerifier", verifier);
     sessionStorage.setItem("beancs.oauthState", authState);
+    sessionStorage.setItem("beancs.oauthNonce", nonce);
     const params = new URLSearchParams({
       response_type: "code",
       client_id: config.client_id,
       redirect_uri: browserRedirectURI(),
       scope: "openid profile email",
       state: authState,
+      nonce,
       code_challenge: challenge,
       code_challenge_method: "S256",
     });
@@ -403,6 +424,8 @@ function App() {
     setBasaltProfile(null);
     setRuntime(emptyRuntime);
     setProjects([]);
+    setApplications([]);
+    setDependencyDefinitions([]);
   }
 
   async function connectGitHubApp(event, gitopsRepo) {
@@ -458,10 +481,10 @@ function App() {
     setNotice("");
     const form = event.currentTarget;
     const data = new FormData(form);
-    const scopes = ["beancs.api"];
-    if (data.get("admin_scope") === "on") scopes.push("beancs.admin");
+    const scopes = data.getAll("scopes").map((scope) => String(scope || "").trim()).filter(Boolean);
     const body = {
       name: String(data.get("name") || "").trim(),
+      preset: String(data.get("preset") || "").trim(),
       scopes,
       expires_at: localDateTimeToRFC3339(data.get("expires_at")),
     };
@@ -470,14 +493,17 @@ function App() {
       setCreatedAPIKey(out);
       form.reset();
       await loadAPIKeys();
+      return true;
     } catch (err) {
       setError(err.message);
+      return false;
     }
   }
 
   async function loadAPIKeys() {
-    const data = await api.get("/api-keys");
-    setAPIKeys(data.data || []);
+    const [keyData, scopeData] = await Promise.all([api.get("/api-keys"), api.get("/api-keys/scopes")]);
+    setAPIKeys(keyData.data || []);
+    setAPIKeyScopeCatalog(scopeData || {scopes: [], presets: []});
   }
 
   async function loadRegistriesPage() {
@@ -1092,7 +1118,10 @@ function App() {
 	setNotice("");
 	const branch = branchOverride || deployForm.github_branch || "main";
 	try {
-	  const data = await api.post("/projects/analyze", {
+      const specAnalysis = await analyzeApplicationSpec(repoFullName, branch);
+      if (specAnalysis) return specAnalysis;
+	  const endpoint = deployForm.application_type === "monorepo" ? "/repositories/analyze-monorepo" : "/projects/analyze";
+	  const data = await api.post(endpoint, {
 	    github_credential_id: Number(selectedCredential),
 	    github_repo: repoFullName,
 	    github_branch: branch,
@@ -1104,8 +1133,9 @@ function App() {
 	    name: current.name || slugify(repoFullName.split("/")[1] || repoFullName),
 	    github_repo: repoFullName,
 	    github_branch: branch,
-	    dockerfile_path: data.dockerfile_path || "",
-	    port: data.default_port || 8080,
+	    dockerfile_path: data.dockerfile_path || current.dockerfile_path || "",
+	    port: data.default_port || current.port || 8080,
+	    components: data.components?.length ? monorepoComponentsFromAnalysis(slugify(repoFullName.split("/")[1] || repoFullName), data.components) : current.components,
 	  }));
       return data;
 	} catch (err) {
@@ -1113,6 +1143,40 @@ function App() {
 	  setError(`Repository analysis failed: ${err.message}`);
 	  return null;
 	}
+  }
+
+  async function analyzeApplicationSpec(repoFullName, branch) {
+    try {
+      const data = await api.post("/application-specs/plan", {
+        github_credential_id: Number(selectedCredential),
+        github_repo: repoFullName,
+        github_branch: branch,
+      });
+      const specAnalysis = applicationSpecAnalysis(data);
+      setAnalysis(specAnalysis);
+      setSelectedRepo(repoFullName);
+      setDeployForm((current) => deployFormFromApplicationSpec(current, repoFullName, branch, data));
+      return specAnalysis;
+    } catch (err) {
+      const message = String(err.message || "");
+      if (message.includes("application spec config not found")) return false;
+      const specAnalysis = {
+        source: "beancs_spec",
+        is_monorepo: false,
+        deployable: false,
+        spec_error: message,
+        warnings: [message],
+      };
+      setAnalysis(specAnalysis);
+      setDeployForm((current) => ({
+        ...current,
+        application_type: "monorepo",
+        github_repo: repoFullName,
+        github_branch: branch,
+      }));
+      setError(`Application spec check failed: ${message}`);
+      return specAnalysis;
+    }
   }
 
   function checkInstallSource(nextForm = deployForm) {
@@ -1144,6 +1208,10 @@ function App() {
 
   async function deployProject(event) {
     event.preventDefault();
+    if (deployForm.application_type === "monorepo") {
+      if (!analysis?.is_monorepo || analysis?.deployable === false || !(deployForm.components || []).some((component) => component.enabled)) return;
+      return deployMonorepoApplication();
+    }
     if (!analysis?.deployable) return;
     const payload = buildProjectPayload(deployForm, selectedCredential, {...credentials, domains});
     setLoading(true);
@@ -1185,6 +1253,136 @@ function App() {
       await loadWorkspace();
       await loadProcesses();
       await loadProjectProgress(String(created.id));
+    } catch (err) {
+      setError(err.message);
+      setInstallProgress((current) => current ? {
+        ...current,
+        logs: [...(current.logs || []), `ERROR: ${err.message}`],
+        steps: current.steps.map((step) => step.state === "running" ? {...step, state: "failed", log: err.message} : step),
+      } : null);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function deployMonorepoApplication() {
+    if (analysis?.source === "beancs_spec") {
+      return deployApplicationFromRepoConfig();
+    }
+    const payload = buildMonorepoApplicationPayload(deployForm, selectedCredential, {...credentials, domains});
+    if (!payload.components.length) {
+      setError("Select at least one monorepo component.");
+      return;
+    }
+    setLoading(true);
+    setError("");
+    setInstallProgress({
+      project: payload.name,
+      started_at: new Date().toISOString(),
+      logs: [
+        `Starting monorepo deploy for ${payload.name}`,
+        `Repository: ${payload.github_repo} @ ${payload.github_branch}`,
+        `Dependencies: ${(payload.dependencies || []).map((dep) => dep.name).join(", ") || "none"}`,
+        `Components: ${payload.components.map((component) => component.project_name).join(", ")}`,
+      ],
+      steps: [
+        {label: "Create application record", state: "running"},
+        {label: "Create dependency components", state: (payload.dependencies || []).length ? "pending" : "done"},
+        {label: "Create component projects", state: "pending"},
+        {label: "Queue component deployments", state: "pending"},
+        {label: "Wait for GitOps and runtime status", state: "pending"},
+      ],
+    });
+    setView("progress");
+    try {
+      const created = await api.post("/applications/monorepo", payload);
+      const projects = created.projects || created.data?.projects || [];
+      const dependencies = created.dependencies || created.data?.dependencies || [];
+      const firstProject = projects[0];
+      setNotice(`Application ${payload.name} created with ${projects.length} components and ${dependencies.length} dependencies.`);
+      if (firstProject?.id) setActiveProgressProjectID(String(firstProject.id));
+      setInstallProgress((current) => current ? {
+        ...current,
+        logs: [
+          ...(current.logs || []),
+          `Application created with id ${created.id || created.data?.id || "-"}`,
+          `${dependencies.length} dependency component(s) created.`,
+          `${projects.length} component project(s) created.`,
+        ],
+        steps: current.steps.map((step) => ({...step, state: step.state === "running" || step.state === "pending" ? "done" : step.state})),
+      } : null);
+      setDeployForm(defaultDeployForm());
+      setAnalysis(null);
+      setSelectedRepo("");
+      await loadWorkspace();
+      await loadProcesses();
+      if (firstProject?.id) await loadProjectProgress(String(firstProject.id));
+    } catch (err) {
+      setError(err.message);
+      setInstallProgress((current) => current ? {
+        ...current,
+        logs: [...(current.logs || []), `ERROR: ${err.message}`],
+        steps: current.steps.map((step) => step.state === "running" ? {...step, state: "failed", log: err.message} : step),
+      } : null);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function deployApplicationFromRepoConfig() {
+    const payload = {
+      github_credential_id: Number(selectedCredential),
+      github_repo: deployForm.github_repo,
+      github_branch: deployForm.github_branch || "main",
+      config_path: analysis?.config_path || ".beancs/app.yaml",
+      basaltpass_instance_id: deployForm.basaltpass_instance_id ? Number(deployForm.basaltpass_instance_id) : undefined,
+      cloudflare_credential_id: deployForm.cloudflare_credential_id ? Number(deployForm.cloudflare_credential_id) : undefined,
+      cloudflare_zone_id: deployForm.cloudflare_zone_id || undefined,
+      component_domains: monorepoComponentDomainOverrides(deployForm, {...credentials, domains}),
+    };
+    setLoading(true);
+    setError("");
+    setInstallProgress({
+      project: deployForm.name || analysis?.plan?.application?.name || payload.github_repo,
+      started_at: new Date().toISOString(),
+      logs: [
+        `Starting .beancs application deploy for ${deployForm.name || analysis?.plan?.application?.name || payload.github_repo}`,
+        `Repository: ${payload.github_repo} @ ${payload.github_branch}`,
+        `Config: ${payload.config_path}`,
+      ],
+      steps: [
+        {label: "Read .beancs/app.yaml", state: "done"},
+        {label: "Validate application spec", state: "done"},
+        {label: "Apply application plan", state: "running"},
+        {label: "Create dependencies and projects", state: "pending"},
+        {label: "Wait for GitOps and runtime status", state: "pending"},
+      ],
+    });
+    setView("progress");
+    try {
+      const created = await api.post("/applications/from-repo-config", payload);
+      const app = created.application || {};
+      const projects = app.projects || [];
+      const dependencies = app.dependencies || [];
+      const firstProject = projects[0];
+      setNotice(`Application ${app.name || deployForm.name} applied from ${payload.config_path}.`);
+      if (firstProject?.id) setActiveProgressProjectID(String(firstProject.id));
+      setInstallProgress((current) => current ? {
+        ...current,
+        logs: [
+          ...(current.logs || []),
+          `Application applied with id ${app.id || "-"}.`,
+          `${dependencies.length} dependency component(s) created.`,
+          `${projects.length} project component(s) created.`,
+        ],
+        steps: current.steps.map((step) => ({...step, state: step.state === "running" || step.state === "pending" ? "done" : step.state})),
+      } : null);
+      setDeployForm(defaultDeployForm());
+      setAnalysis(null);
+      setSelectedRepo("");
+      await loadWorkspace();
+      await loadProcesses();
+      if (firstProject?.id) await loadProjectProgress(String(firstProject.id));
     } catch (err) {
       setError(err.message);
       setInstallProgress((current) => current ? {
@@ -1299,12 +1497,21 @@ function App() {
     setProjectLogStatus("");
   }
 
-  async function updateProject(event) {
+  async function loadProjectEnv(project) {
+    const data = await api.get(`/projects/${project.id}/env`);
+    return data.data || {};
+  }
+
+  async function updateProject(event, envData) {
     event.preventDefault();
     const body = Object.fromEntries(new FormData(event.currentTarget).entries());
     body.replicas = Number(body.replicas || 1);
     body.auto_deploy = body.auto_deploy === "on";
     await api.patch(`/projects/${editingProject.id}`, body);
+    if (envData) {
+      await api.put(`/projects/${editingProject.id}/env`, envData);
+      setNotice(`${editingProject.name} updated and restarted.`);
+    }
     setEditingProject(null);
     await loadWorkspace();
   }
@@ -1325,6 +1532,26 @@ function App() {
         setActiveProgressProjectID("");
         setProjectProgress(null);
       }
+      await loadWorkspace();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function deleteApplication(application) {
+    setDeletingApplication(application);
+  }
+
+  async function confirmDeleteApplication() {
+    if (!deletingApplication) return;
+    setLoading(true);
+    setError("");
+    try {
+      await api.delete(`/applications/${deletingApplication.id}`);
+      setNotice(`${deletingApplication.name} deleted.`);
+      setDeletingApplication(null);
       await loadWorkspace();
     } catch (err) {
       setError(err.message);
@@ -1354,6 +1581,21 @@ function App() {
       await loadProjectProgress(String(project.id));
     } catch (err) {
       setError(err.message);
+    }
+  }
+
+  async function openProjectTracking(project) {
+    setTrackingProject(project);
+    setProjectTracking(null);
+    setTrackingLoading(true);
+    setError("");
+    try {
+      const data = await api.get(`/projects/${project.id}/tracking?limit=100`);
+      setProjectTracking(data);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setTrackingLoading(false);
     }
   }
 
@@ -1461,6 +1703,7 @@ function App() {
                 deployProject={deployProject}
                 containerRegistries={containerRegistries}
                 containerImages={containerImages}
+                dependencyDefinitions={dependencyDefinitions}
                 createTrackedImageFromDeploy={createTrackedImageFromDeploy}
                 onConnectGitHub={connectGitHubApp}
                 reposLoading={reposLoading}
@@ -1486,10 +1729,10 @@ function App() {
               />
             )}
             {view === "projects" && (
-              <ProjectsView projects={projects} onEdit={setEditingProject} onDelete={deleteProject} onScale={scaleProject} onRestart={restartProject} onBuild={buildProject} onProgress={(project) => { setActiveProgressProjectID(String(project.id)); setView("progress"); }} />
+              <ProjectsView applications={applications} projects={projects} onDeleteApplication={deleteApplication} onEdit={setEditingProject} onDelete={deleteProject} onScale={scaleProject} onRestart={restartProject} onBuild={buildProject} onTracking={openProjectTracking} onProgress={(project) => { setActiveProgressProjectID(String(project.id)); setView("progress"); }} />
             )}
             {view === "deployments" && <DeploymentsView projects={projects} processes={processRecords} runtimeDeployments={runtime.deployments || []} refresh={loadWorkspace} onOpenProcess={(process) => { setActiveProcessID(String(process.id)); setActiveProgressProjectID(String(process.project_id || "")); setView("progress"); }} />}
-            {view === "apiKeys" && <APIKeysView keys={apiKeys} createdKey={createdAPIKey} onDismissCreated={() => setCreatedAPIKey(null)} onCreate={createAPIKey} onRevoke={revokeAPIKey} onRefresh={loadAPIKeys} isAdmin={userProfile.scopes.includes("beancs.admin")} />}
+            {view === "apiKeys" && <APIKeysView keys={apiKeys} scopeCatalog={apiKeyScopeCatalog} createdKey={createdAPIKey} onDismissCreated={() => setCreatedAPIKey(null)} onCreate={createAPIKey} onRevoke={revokeAPIKey} onRefresh={loadAPIKeys} />}
             {view === "registries" && (
               <ContainerRegistriesView
                 presets={registryPresets}
@@ -1555,8 +1798,10 @@ function App() {
           </>
         )}
       </main>
-      {editingProject && <ProjectModal project={editingProject} onClose={() => setEditingProject(null)} onSubmit={updateProject} />}
+      {editingProject && <ProjectModal project={editingProject} onClose={() => setEditingProject(null)} onSubmit={updateProject} onLoadEnv={loadProjectEnv} />}
       {deletingProject && <DeleteProjectModal project={deletingProject} busy={loading} onClose={() => setDeletingProject(null)} onDelete={confirmDeleteProject} />}
+      {deletingApplication && <DeleteApplicationModal application={deletingApplication} busy={loading} onClose={() => setDeletingApplication(null)} onDelete={confirmDeleteApplication} />}
+      {trackingProject && <ProjectTrackingModal project={trackingProject} tracking={projectTracking} loading={trackingLoading} onRefresh={() => openProjectTracking(trackingProject)} onClose={() => { setTrackingProject(null); setProjectTracking(null); }} />}
       {runtimeDetail && <RuntimeDetailDrawer detail={runtimeDetail} logs={runtimeLogs} logFollow={runtimeLogFollow} logStatus={runtimeLogStatus} selectedLogContainer={runtimeLogContainer} logTail={runtimeLogTail} logLoaded={runtimeLogLoaded} nodeHealth={nodeHealth} onLoadNodeHealth={loadNodeHealth} onSaveNodeLabels={saveNodeLabels} onSaveNodeTaints={saveNodeTaints} onCordonNode={cordonNode} onDrainNode={drainNode} onDeleteNode={deleteNode} onSaveResourceQuota={saveResourceQuota} onDeleteResourceQuota={deleteResourceQuota} onSaveLimitRange={saveLimitRange} onDeleteLimitRange={deleteLimitRange} onSaveNamespacePermission={saveNamespacePermission} onDeleteNamespacePermission={deleteNamespacePermission} onSaveNamespaceIsolation={saveNamespaceIsolation} onSelectLogContainer={setRuntimeLogContainer} onSetLogTail={setRuntimeLogTail} onLoadContainerLogs={loadRuntimeContainerLogs} onFollowPodLogs={startRuntimeLogFollow} onStopPodLogs={stopRuntimeLogFollow} onClose={() => { stopRuntimeLogFollow(); setRuntimeDetail(null); setRuntimeLogs(""); setRuntimeLogContainer(""); setRuntimeLogLoaded(false); setRuntimeLogStatus(""); setNodeHealth(null); }} onSaveService={saveService} onPatchNamespace={patchNamespaceLabels} />}
     </div>
   );
@@ -1668,7 +1913,7 @@ function shouldShowSkeleton(view, dashboard, network) {
   return false;
 }
 
-function DeployView({credentials, domains, namespaces, selectedCredential, setSelectedCredential, repos, selectedRepo, analysis, setAnalysis, form, setForm, loadRepos, analyzeRepo, checkInstallSource, deployProject, containerRegistries, containerImages, createTrackedImageFromDeploy, onConnectGitHub, reposLoading}) {
+function DeployView({credentials, domains, namespaces, selectedCredential, setSelectedCredential, repos, selectedRepo, analysis, setAnalysis, form, setForm, loadRepos, analyzeRepo, checkInstallSource, deployProject, containerRegistries, containerImages, dependencyDefinitions, createTrackedImageFromDeploy, onConnectGitHub, reposLoading}) {
   const [stepIndex, setStepIndex] = useState(0);
   const [creatingImage, setCreatingImage] = useState(false);
   const [checkingInstall, setCheckingInstall] = useState(false);
@@ -1702,6 +1947,10 @@ function DeployView({credentials, domains, namespaces, selectedCredential, setSe
   const setRepoType = (repoType) => {
     setAnalysis(null);
     setForm({...form, repo_type: repoType, github_repo: "", git_url: "", update_mode: repoType === "github" ? form.update_mode || "argocd" : "passive"});
+  };
+  const setApplicationType = (applicationType) => {
+    setAnalysis(null);
+    setForm({...form, application_type: applicationType, components: [], name: applicationType === "monorepo" ? form.name : form.name});
   };
   const setUpdateMode = (updateMode) => {
     setForm({...form, update_mode: form.deploy_source === "registry" ? "passive" : updateMode, auto_deploy: updateMode === "argocd"});
@@ -1753,6 +2002,47 @@ function DeployView({credentials, domains, namespaces, selectedCredential, setSe
     if (stepIndex < deploySteps.length - 1) setStepIndex(stepIndex + 1);
   };
   const back = () => setStepIndex(Math.max(0, stepIndex - 1));
+  const updateComponent = (index, patch) => {
+    setForm({
+      ...form,
+      components: (form.components || []).map((component, i) => i === index ? {...component, ...patch} : component),
+    });
+  };
+  const addDependency = () => {
+    const definition = dependencyDefinitions[0];
+    if (!definition) return;
+    const name = uniqueDependencyName(form.dependencies || [], definition.name);
+    setForm({
+      ...form,
+      dependencies: [
+        ...(form.dependencies || []),
+        {
+          name,
+          type: definition.name,
+          deploy_method: definition.default_deploy_method || "helm",
+          version: "",
+          config: dependencyDefaultConfig(definition),
+        },
+      ],
+    });
+  };
+  const updateDependency = (index, patch) => {
+    setForm({
+      ...form,
+      dependencies: (form.dependencies || []).map((dependency, i) => i === index ? {...dependency, ...patch} : dependency),
+    });
+  };
+  const deleteDependency = (index) => {
+    const removed = (form.dependencies || [])[index]?.name;
+    setForm({
+      ...form,
+      dependencies: (form.dependencies || []).filter((_, i) => i !== index),
+      components: (form.components || []).map((component) => ({
+        ...component,
+        dependency_links: (component.dependency_links || []).filter((link) => link.dependency !== removed),
+      })),
+    });
+  };
   return (
     <div className="deploy-wizard">
       <section className="panel wizard-progress-panel">
@@ -1793,6 +2083,11 @@ function DeployView({credentials, domains, namespaces, selectedCredential, setSe
                 <div className="segmented-control">
                   <button type="button" className={form.repo_type === "github" ? "active" : ""} onClick={() => setRepoType("github")}><Github size={15} /> GitHub</button>
                   <button type="button" className={form.repo_type === "git-url" ? "active" : ""} onClick={() => setRepoType("git-url")}><GitBranch size={15} /> Git link</button>
+                </div>
+                <label>Repository layout</label>
+                <div className="segmented-control">
+                  <button type="button" className={form.application_type !== "monorepo" ? "active" : ""} onClick={() => setApplicationType("single")}><Box size={15} /> Single service</button>
+                  <button type="button" className={form.application_type === "monorepo" ? "active" : ""} onClick={() => setApplicationType("monorepo")}><Layers3 size={15} /> Monorepo</button>
                 </div>
                 {form.repo_type === "github" && (
                   <>
@@ -1933,12 +2228,25 @@ function DeployView({credentials, domains, namespaces, selectedCredential, setSe
         )}
         {step.id === "check" && (
           <div className="readiness-card">
-            <button type="button" className="primary" onClick={runInstallCheck} disabled={checkingInstall}>
-              {checkingInstall ? <LoaderCircle className="spin" size={16} /> : <Shield size={16} />}
-              {checkingInstall ? "Checking..." : "Check installability"}
-            </button>
-            {!analysis && <p className="muted">BeanCS will verify repository signals or image/source inputs before continuing.</p>}
-            {analysis && (
+            {!analysis && (
+              <p className="muted">
+                {checkingInstall ? "Checking installability..." : "BeanCS will verify repository signals or image/source inputs before continuing."}
+              </p>
+            )}
+            {analysis && form.application_type === "monorepo" && (
+              <>
+                <div className={analysis.is_monorepo ? "status good" : "status bad"}>
+                  {analysis.source === "beancs_spec" ? `.beancs spec found: ${analysis.config_path}` : analysis.is_monorepo ? `${analysis.components?.length || 0} components detected` : "No components detected"}
+                </div>
+                {analysis.source === "beancs_spec" && <ApplicationSpecPlanSummary analysis={analysis} />}
+                <div className="signal-list">
+                  {analysis.package_manager && <span>Package manager: {analysis.package_manager}</span>}
+                  {(analysis.signals || []).map((signal) => <span key={signal}>{signal}</span>)}
+                  {(analysis.warnings || []).map((warning) => <span className="warning" key={warning}>{warning}</span>)}
+                </div>
+              </>
+            )}
+            {analysis && form.application_type !== "monorepo" && (
               <>
                 <div className={analysis.deployable ? "status good" : "status bad"}>{analysis.containerized ? "Deployable" : analysis.scaffoldable ? "Source detected" : "Needs containerization"}</div>
                 <div className="signal-list">
@@ -1953,9 +2261,13 @@ function DeployView({credentials, domains, namespaces, selectedCredential, setSe
         )}
         {step.id === "params" && (
           <div className="form-grid">
-            <Field label="Project name" value={form.name} onChange={(v) => setForm({...form, name: slugify(v)})} required />
-            <Field label="Port" type="number" value={form.port} onChange={(v) => setForm({...form, port: Number(v)})} />
-            <Field label="Replicas" type="number" value={form.replicas} onChange={(v) => setForm({...form, replicas: Number(v)})} />
+            <Field label={form.application_type === "monorepo" ? "Application name" : "Project name"} value={form.name} onChange={(v) => setForm({...form, name: slugify(v)})} required />
+            {form.application_type !== "monorepo" && (
+              <>
+                <Field label="Port" type="number" value={form.port} onChange={(v) => setForm({...form, port: Number(v)})} />
+                <Field label="Replicas" type="number" value={form.replicas} onChange={(v) => setForm({...form, replicas: Number(v)})} />
+              </>
+            )}
             <label>Resource preset</label>
             <select value={form.resource_preset} onChange={(event) => setForm({...form, resource_preset: event.target.value})}>
               <option value="nano">Nano</option>
@@ -1963,11 +2275,119 @@ function DeployView({credentials, domains, namespaces, selectedCredential, setSe
               <option value="medium">Medium</option>
               <option value="large">Large</option>
             </select>
-            <label>BasaltPass optional</label>
+            <label>BasaltPass tenant</label>
             <select value={form.basaltpass_instance_id} onChange={(event) => setForm({...form, basaltpass_instance_id: event.target.value})}>
               <option value="">Do not register OAuth app</option>
-              {credentials.basaltpass.map((cred) => <option key={cred.id} value={cred.id}>{cred.name}</option>)}
+              {credentials.basaltpass.map((cred) => (
+                <option key={cred.id} value={cred.id}>
+                  {[cred.name, cred.tenant_code || cred.tenant_id].filter(Boolean).join(" / ")}
+                </option>
+              ))}
             </select>
+            {form.application_type === "monorepo" && (
+              <div className="component-list">
+                {analysis?.source === "beancs_spec" && <p className="muted">These components are declared by repo config. Edit <span className="mono">{analysis.config_path}</span> in the repository to change build args, health checks, volumes, or dependency bindings.</p>}
+                {(form.components || []).map((component, index) => (
+                  <div key={`${component.path}-${index}`} className={component.enabled ? "component-card active" : "component-card"}>
+                    <div className="component-card-head">
+                      <label className="checkbox-label">
+                        <input type="checkbox" checked={component.enabled !== false} onChange={(event) => updateComponent(index, {enabled: event.target.checked})} />
+                        <b>{component.name}</b>
+                      </label>
+                      <span>{component.kind || "service"}</span>
+                    </div>
+                    <div className="component-grid">
+                      <Field label="Project name" value={component.project_name} onChange={(v) => updateComponent(index, {project_name: slugify(v)})} required />
+                      <Field label="Component path" value={component.component_path || component.path} onChange={(v) => updateComponent(index, {component_path: v.trim()})} />
+                      <Field label="Dockerfile" value={component.dockerfile_path} onChange={(v) => updateComponent(index, {dockerfile_path: v.trim()})} required />
+                      <Field label="Build context" value={component.build_context || "."} onChange={(v) => updateComponent(index, {build_context: v.trim() || "."})} />
+                      <Field label="Port" type="number" value={component.port || ""} onChange={(v) => updateComponent(index, {port: Number(v || 0), exposure_mode: Number(v || 0) > 0 ? component.exposure_mode || "private" : "internal-only"})} />
+                      <Field label="Replicas" type="number" value={component.replicas || 1} onChange={(v) => updateComponent(index, {replicas: Number(v || 1)})} />
+                      <label>Exposure</label>
+                      <select value={component.exposure_mode || (component.port ? "private" : "internal-only")} onChange={(event) => updateComponent(index, {exposure_mode: event.target.value})}>
+                        <option value="public">Public</option>
+                        <option value="private">Private</option>
+                        <option value="internal-only">Internal only</option>
+                      </select>
+                    </div>
+                    {analysis?.source === "beancs_spec" && (
+                      <div className="spec-component-meta">
+                        {(component.build_args && Object.keys(component.build_args).length > 0) && <span>Build args: {Object.entries(component.build_args).map(([key, value]) => `${key}=${value}`).join(", ")}</span>}
+                        {component.health_check?.type && <span>Health: {component.health_check.type}{component.health_check.path ? ` ${component.health_check.path}` : ""}</span>}
+                        {(component.volumes || []).length > 0 && <span>Volumes: {(component.volumes || []).map((volume) => `${volume.name}:${volume.mountPath || volume.mount_path}`).join(", ")}</span>}
+                        {(component.watch_paths || []).length > 0 && <span>Watch: {component.watch_paths.join(", ")}</span>}
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {(form.components || []).length === 0 && <div className="empty">Run repository analysis to detect deployable components.</div>}
+              </div>
+            )}
+          </div>
+        )}
+        {step.id === "dependencies" && (
+          <div className="form-grid">
+            {form.application_type !== "monorepo" && <p className="muted">Managed dependency components are currently available for monorepo applications.</p>}
+            {form.application_type === "monorepo" && (
+              <>
+                <div className="section-head">
+                  <div>
+                    <h3>Dependency components</h3>
+                    <p className="muted">Definitions drive config, outputs, and env presets for application components.</p>
+                  </div>
+                  <button type="button" onClick={addDependency} disabled={!dependencyDefinitions.length}><Plus size={15} /> Add dependency</button>
+                </div>
+                  <div className="dependency-list">
+                  {analysis?.source === "beancs_spec" && <p className="muted">Dependencies are declared by repo config and will be created from the spec during deploy.</p>}
+                  {(form.dependencies || []).map((dependency, index) => {
+                    const definition = definitionForDependency(dependencyDefinitions, dependency.type);
+                    return (
+                      <div className="dependency-card" key={`${dependency.name}-${index}`}>
+                        <div className="component-card-head">
+                          <b>{dependency.name || "dependency"}</b>
+                          <button type="button" className="danger-button" onClick={() => deleteDependency(index)} title="Remove dependency"><Trash2 size={15} /></button>
+                        </div>
+                        <div className="component-grid">
+                          <Field label="Name" value={dependency.name} onChange={(v) => updateDependency(index, {...dependency, name: slugify(v)})} required />
+                          <label>Type</label>
+                          <select value={dependency.type} onChange={(event) => {
+                            const nextDefinition = definitionForDependency(dependencyDefinitions, event.target.value);
+                            updateDependency(index, {
+                              type: event.target.value,
+                              name: uniqueDependencyName((form.dependencies || []).filter((_, i) => i !== index), event.target.value),
+                              deploy_method: nextDefinition?.default_deploy_method || "helm",
+                              config: dependencyDefaultConfig(nextDefinition),
+                            });
+                          }}>
+                            {dependencyDefinitions.map((definition) => <option key={definition.name} value={definition.name}>{definition.display_name || definition.name}</option>)}
+                          </select>
+                          <label>Deploy method</label>
+                          <select value={dependency.deploy_method || definition?.default_deploy_method || "helm"} onChange={(event) => updateDependency(index, {deploy_method: event.target.value})}>
+                            {(definition?.supported_deploy_methods || ["helm"]).map((method) => <option key={method} value={method}>{method}</option>)}
+                          </select>
+                          <Field label="Version" value={dependency.version || ""} onChange={(v) => updateDependency(index, {version: v.trim()})} />
+                        </div>
+                        <DependencyConfigEditor definition={definition} value={dependency.config || {}} onChange={(config) => updateDependency(index, {config})} />
+                      </div>
+                    );
+                  })}
+                  {(form.dependencies || []).length === 0 && <div className="empty">No managed dependencies selected.</div>}
+                </div>
+                {(form.dependencies || []).length > 0 && (
+                  <div className="component-list">
+                    {(form.components || []).map((component, index) => (
+                      <DependencyLinksEditor
+                        key={`${component.project_name}-${index}`}
+                        component={component}
+                        dependencies={form.dependencies || []}
+                        definitions={dependencyDefinitions}
+                        onChange={(dependency_links) => updateComponent(index, {dependency_links})}
+                      />
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
           </div>
         )}
         {step.id === "namespace" && (
@@ -1982,17 +2402,71 @@ function DeployView({credentials, domains, namespaces, selectedCredential, setSe
         )}
         {step.id === "ingress" && (
           <div className="form-grid">
-            <label>Traffic</label>
-            <select value={form.exposure_mode} onChange={(event) => setForm({...form, exposure_mode: event.target.value})}>
-              <option value="public">Traefik public ingress</option>
-              <option value="private">Tailscale private ingress</option>
-              <option value="internal-only">Cluster internal only</option>
-            </select>
+            {form.application_type === "monorepo" ? (
+              <>
+                <p className="muted">Traffic mode is configured per component in the parameters step.</p>
+                <div className="signal-list">
+                  {(form.components || []).filter((component) => component.enabled !== false).map((component) => (
+                    <span key={component.project_name}>{component.project_name}: {component.port ? component.exposure_mode : "internal-only"}</span>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <>
+                <label>Traffic</label>
+                <select value={form.exposure_mode} onChange={(event) => setForm({...form, exposure_mode: event.target.value})}>
+                  <option value="public">Traefik public ingress</option>
+                  <option value="private">Tailscale private ingress</option>
+                  <option value="internal-only">Cluster internal only</option>
+                </select>
+              </>
+            )}
           </div>
         )}
         {step.id === "domain" && (
           <div className="form-grid">
-            {form.exposure_mode === "public" && (
+            {form.application_type === "monorepo" && (form.components || []).some((component) => component.enabled !== false && component.exposure_mode === "public") && (
+              <>
+                <label>Cloudflare credential</label>
+                <select value={form.cloudflare_zone_id ? `${form.cloudflare_credential_id}:${form.cloudflare_zone_id}` : ""} onChange={(event) => {
+                  const [credentialID, zoneID] = event.target.value.split(":");
+                  setForm({...form, cloudflare_credential_id: credentialID || "", cloudflare_zone_id: zoneID || ""});
+                }} required>
+                  <option value="">Choose Cloudflare zone</option>
+                  {(domains || []).map((domain) => <option key={`${domain.credential_id}:${domain.zone_id}`} value={`${domain.credential_id}:${domain.zone_id}`}>{domain.credential} · {domain.domain}</option>)}
+                </select>
+                <p className="muted">Public component hostnames use the component project name under the selected zone.</p>
+              </>
+            )}
+            {form.application_type === "monorepo" && (
+              <>
+                {!(form.components || []).some((component) => component.enabled !== false && component.exposure_mode === "public") && <p className="muted">No public DNS zone is required for the selected components.</p>}
+                <div className="component-list">
+                  {(form.components || []).filter((component) => component.enabled !== false && Number(component.port || 0) > 0).map((component) => (
+                    <div className="component-card active" key={component.project_name}>
+                      <div className="component-card-head">
+                        <b>{component.project_name}</b>
+                        <span>{component.exposure_mode || "internal-only"}</span>
+                      </div>
+                      {component.exposure_mode === "public" ? (
+                        <div className="component-grid">
+                          <Field label="Subdomain" value={component.subdomain ?? component.project_name} onChange={(v) => updateComponent(indexForComponent(form.components, component), {subdomain: slugify(v)})} />
+                          <div className="computed-host">{monorepoComponentHost(component, form, selectedCloudflareDomain)}</div>
+                        </div>
+                      ) : component.exposure_mode === "private" ? (
+                        <div className="component-grid">
+                          <Field label="Tailscale host" value={component.private_host || monorepoDefaultPrivateHost(component, form)} onChange={(v) => updateComponent(indexForComponent(form.components, component), {private_host: v.trim().toLowerCase()})} />
+                          <div className="computed-host">{monorepoComponentHost(component, form, selectedCloudflareDomain)}</div>
+                        </div>
+                      ) : (
+                        <p className="muted">Internal-only component.</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+            {form.application_type !== "monorepo" && form.exposure_mode === "public" && (
               <>
                 <label>Cloudflare credential</label>
                 <select value={form.cloudflare_zone_id ? `${form.cloudflare_credential_id}:${form.cloudflare_zone_id}` : ""} onChange={(event) => {
@@ -2006,19 +2480,29 @@ function DeployView({credentials, domains, namespaces, selectedCredential, setSe
                 <div className="computed-host">{publicHost || "Subdomain preview"}</div>
               </>
             )}
-            {form.exposure_mode === "private" && <Field label="Tailscale host" value={form.private_host} onChange={(v) => setForm({...form, private_host: v.trim().toLowerCase()})} required />}
-            {form.exposure_mode === "internal-only" && <p className="muted">No domain is required for internal-only projects.</p>}
+            {form.application_type !== "monorepo" && form.exposure_mode === "private" && <Field label="Tailscale host" value={form.private_host} onChange={(v) => setForm({...form, private_host: v.trim().toLowerCase()})} required />}
+            {form.application_type !== "monorepo" && form.exposure_mode === "internal-only" && <p className="muted">No domain is required for internal-only projects.</p>}
           </div>
+        )}
+        {step.id === "env" && (
+          <EnvEditor
+            entries={form.env_entries || []}
+            onChange={(entries) => setForm({...form, env_entries: entries})}
+            masked={false}
+            title="Runtime environment"
+          />
         )}
         {step.id === "confirm" && (
           <div className="detail-list">
             <span>Install method <b>{sourceLabel(form.build_source)}</b></span>
             <span>Source <b>{sourceSummary(form)}</b></span>
-            <span>Project <b>{form.name || "-"}</b></span>
+            <span>{form.application_type === "monorepo" ? "Application" : "Project"} <b>{form.name || "-"}</b></span>
             <span>Namespace <b>{form.namespace || (form.name ? `proj-${form.name}` : "-")}</b></span>
             <span>Ingress <b>{form.exposure_mode}</b></span>
             <span>Domain <b>{publicHost || form.private_host || "internal only"}</b></span>
-            <span>Port <b>{form.port}</b></span>
+            {form.application_type === "monorepo" ? <span>Components <b>{(form.components || []).filter((component) => component.enabled !== false).length}</b></span> : <span>Port <b>{form.port}</b></span>}
+            {form.application_type === "monorepo" && <span>Dependencies <b>{(form.dependencies || []).length}</b></span>}
+            <span>Runtime variables <b>{(form.env_entries || []).filter((entry) => entry.key.trim()).length}</b></span>
             <span>Update mode <b>{form.deploy_source === "registry" ? "Passive" : form.update_mode === "argocd" ? "Argo CD" : "Passive"}</b></span>
             {form.deploy_source === "gitops" && form.update_mode === "argocd" && <span>Future GHCR image <b>{ghcrPreview}</b></span>}
           </div>
@@ -2027,13 +2511,150 @@ function DeployView({credentials, domains, namespaces, selectedCredential, setSe
           <div className="wizard-actions">
             <button type="button" onClick={back} disabled={stepIndex === 0}>Back</button>
             {step.id === "confirm" ? (
-              <button className="primary" disabled={!analysis?.deployable} type="submit"><Play size={16} /> Build</button>
+              <button className="primary" disabled={form.application_type === "monorepo" ? !(analysis?.is_monorepo && analysis?.deployable !== false) : !analysis?.deployable} type="submit"><Play size={16} /> Build</button>
             ) : (
               <button className="primary" type="button" disabled={!canContinue || checkingInstall} onClick={next}>{checkingInstall ? <LoaderCircle className="spin" size={16} /> : null} Next</button>
             )}
           </div>
         )}
       </form>
+    </div>
+  );
+}
+
+function ApplicationSpecPlanSummary({analysis}) {
+  const plan = analysis?.plan || {};
+  const projects = plan.willCreateProjects || [];
+  const dependencies = plan.willCreateDependencies || [];
+  const injections = plan.willInjectEnv || [];
+  return (
+    <div className="spec-plan-summary">
+      <span><FileText size={15} /> Application <b>{plan.application?.name || "-"}</b></span>
+      <span><Layers3 size={15} /> Projects <b>{projects.length}</b></span>
+      <span><Database size={15} /> Dependencies <b>{dependencies.length}</b></span>
+      <span><KeyRound size={15} /> Env injections <b>{injections.length}</b></span>
+    </div>
+  );
+}
+
+function DependencyConfigEditor({definition, value, onChange}) {
+  const properties = definition?.config_schema?.properties || {};
+  const keys = Object.keys(properties);
+  if (!definition || keys.length === 0) return null;
+  const update = (path, nextValue) => {
+    const next = {...value};
+    if (path.length === 1) {
+      next[path[0]] = nextValue;
+    } else {
+      const [head, tail] = path;
+      next[head] = {...(next[head] || {}), [tail]: nextValue};
+    }
+    onChange(next);
+  };
+  return (
+    <div className="dependency-config-grid">
+      {keys.map((key) => {
+        const schema = properties[key] || {};
+        if (schema.type === "object") {
+          const nested = schema.properties || {};
+          return (
+            <div className="dependency-config-group" key={key}>
+              <b>{labelize(key)}</b>
+              <div className="component-grid">
+                {Object.keys(nested).map((nestedKey) => (
+                  <DependencyConfigField
+                    key={`${key}.${nestedKey}`}
+                    label={labelize(nestedKey)}
+                    schema={nested[nestedKey] || {}}
+                    value={(value[key] || {})[nestedKey]}
+                    onChange={(nextValue) => update([key, nestedKey], nextValue)}
+                  />
+                ))}
+              </div>
+            </div>
+          );
+        }
+        return (
+          <DependencyConfigField
+            key={key}
+            label={labelize(key)}
+            schema={schema}
+            value={value[key]}
+            onChange={(nextValue) => update([key], nextValue)}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function DependencyConfigField({label, schema, value, onChange}) {
+  if (schema.secret && schema.generate) {
+    return (
+      <label className="checkbox-label dependency-secret-toggle">
+        <input type="checkbox" checked={value !== ""} onChange={(event) => onChange(event.target.checked ? String(value || "") : "")} />
+        <span>{label}: auto generated</span>
+      </label>
+    );
+  }
+  if (schema.type === "boolean") {
+    return (
+      <label className="checkbox-label dependency-secret-toggle">
+        <input type="checkbox" checked={Boolean(value)} onChange={(event) => onChange(event.target.checked)} />
+        <span>{label}</span>
+      </label>
+    );
+  }
+  if (Array.isArray(schema.enum)) {
+    return (
+      <>
+        <label>{label}</label>
+        <select value={value ?? schema.default ?? ""} onChange={(event) => onChange(event.target.value)}>
+          {schema.enum.map((item) => <option key={item} value={item}>{item}</option>)}
+        </select>
+      </>
+    );
+  }
+  return <Field label={label} value={value ?? schema.default ?? ""} onChange={(nextValue) => onChange(nextValue)} />;
+}
+
+function DependencyLinksEditor({component, dependencies, definitions, onChange}) {
+  const links = component.dependency_links || [];
+  const toggle = (dependency, checked) => {
+    if (!checked) {
+      onChange(links.filter((link) => link.dependency !== dependency.name));
+      return;
+    }
+    const definition = definitionForDependency(definitions, dependency.type);
+    onChange([...links, {dependency: dependency.name, preset: firstEnvPreset(definition)}]);
+  };
+  const updatePreset = (dependencyName, preset) => {
+    onChange(links.map((link) => link.dependency === dependencyName ? {...link, preset} : link));
+  };
+  return (
+    <div className="component-card">
+      <div className="component-card-head">
+        <b>{component.project_name || component.name}</b>
+        <span>{links.length} linked</span>
+      </div>
+      <div className="dependency-link-grid">
+        {dependencies.map((dependency) => {
+          const link = links.find((item) => item.dependency === dependency.name);
+          const definition = definitionForDependency(definitions, dependency.type);
+          const presets = Object.keys(definition?.env_presets || {});
+          return (
+            <div className="dependency-link-row" key={`${component.project_name}-${dependency.name}`}>
+              <label className="checkbox-label">
+                <input type="checkbox" checked={Boolean(link)} onChange={(event) => toggle(dependency, event.target.checked)} />
+                <span>{dependency.name}</span>
+              </label>
+              <select value={link?.preset || firstEnvPreset(definition)} onChange={(event) => updatePreset(dependency.name, event.target.value)} disabled={!link}>
+                {presets.map((preset) => <option key={preset} value={preset}>{preset}</option>)}
+              </select>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -2737,9 +3358,11 @@ const deploySteps = [
   {id: "update", label: "Update", title: "Choose update mode"},
   {id: "check", label: "Check", title: "Check installability"},
   {id: "params", label: "Params", title: "Configure parameters"},
+  {id: "dependencies", label: "Dependencies", title: "Configure dependencies"},
   {id: "namespace", label: "Namespace", title: "Choose namespace"},
   {id: "ingress", label: "Ingress", title: "Choose ingress mode"},
   {id: "domain", label: "Domain", title: "Choose domain"},
+  {id: "env", label: "Env", title: "Add runtime variables"},
   {id: "confirm", label: "Confirm", title: "Confirm and build"},
 ];
 
@@ -2764,9 +3387,19 @@ function canContinueDeployStep(stepID, form, selectedCredential, analysis) {
     return Boolean(form.image_reference);
   }
   if (stepID === "update") return form.deploy_source === "registry" || Boolean(form.update_mode);
-  if (stepID === "check") return Boolean(analysis?.deployable);
-  if (stepID === "params") return Boolean(form.name && Number(form.port || 0) > 0 && Number(form.replicas || 0) > 0);
+  if (stepID === "check") return form.application_type === "monorepo" ? Boolean(analysis?.is_monorepo && analysis?.deployable !== false) : Boolean(analysis?.deployable);
+  if (stepID === "params") {
+    if (form.application_type === "monorepo") {
+      return Boolean(form.name && (form.components || []).some((component) => component.enabled !== false && component.project_name && component.dockerfile_path));
+    }
+    return Boolean(form.name && Number(form.port || 0) > 0 && Number(form.replicas || 0) > 0);
+  }
+  if (stepID === "dependencies") return true;
   if (stepID === "domain") {
+    if (form.application_type === "monorepo") {
+      const publicComponents = (form.components || []).some((component) => component.enabled !== false && component.exposure_mode === "public");
+      return publicComponents ? Boolean(form.cloudflare_credential_id && form.cloudflare_zone_id) : true;
+    }
     if (form.exposure_mode === "public") return Boolean(form.cloudflare_credential_id && form.cloudflare_zone_id && form.subdomain);
     if (form.exposure_mode === "private") return Boolean(form.private_host);
   }
@@ -2847,7 +3480,7 @@ function DeploymentsView({projects, processes, runtimeDeployments, refresh, onOp
   );
 }
 
-function ProjectsView({projects, onEdit, onDelete, onScale, onRestart, onBuild, onProgress}) {
+function ProjectsView({applications, projects, onDeleteApplication, onEdit, onDelete, onScale, onRestart, onBuild, onTracking, onProgress}) {
   const [projectSearch, setProjectSearch] = useState("");
   const visibleProjects = useMemo(() => {
     const needle = String(projectSearch || "").trim().toLowerCase();
@@ -2872,31 +3505,118 @@ function ProjectsView({projects, onEdit, onDelete, onScale, onRestart, onBuild, 
   }, [projects, projectSearch]);
 
   return (
-    <section className="panel">
-      <div className="project-search">
-        <Search size={18} />
-        <input value={projectSearch} onChange={(event) => setProjectSearch(event.target.value)} placeholder="Search projects" />
-      </div>
-      <div className="table">
-        <div className="tr head project-table-row"><span>Name</span><span>Repo</span><span>Route</span><span>Status</span><span>Actions</span></div>
-        {visibleProjects.map((project) => (
-          <div className="tr project-table-row" key={project.id}>
-            <ExpandableCell className="strong" value={project.display_name || project.name} max={32} />
-            <ExpandableCell value={project.github_repo || project.image_reference || project.source_archive_name || project.build_source} max={42} />
-            <ExpandableCell value={project.domain || project.exposure_mode} max={36} />
-            <ExpandableCell value={project.status} max={24} />
-            <span className="row-actions">
-              <button onClick={() => onProgress(project)} title="Progress"><LoaderCircle size={15} /> Progress</button>
-              <button onClick={() => onBuild(project)} title="Rebuild"><Play size={15} /> Rebuild</button>
-              <button onClick={() => onRestart(project)} title="Restart"><RotateCcw size={15} /></button>
-              <button onClick={() => onEdit(project)} title="Edit"><Edit3 size={15} /></button>
-              <button className="danger-button" onClick={() => onDelete(project)} title="Delete"><Trash2 size={15} /> Delete</button>
-            </span>
+    <div className="stack">
+      <section className="panel">
+        <div className="section-head">
+          <h2><Layers3 size={16} /> Applications</h2>
+          <span className="muted">{(applications || []).length} total</span>
+        </div>
+        <div className="application-grid">
+          {(applications || []).map((application) => (
+            <div className="application-card" key={application.id}>
+              <div className="component-card-head">
+                <div>
+                  <b>{application.display_name || application.name}</b>
+                  <small>{application.github_repo || application.type}</small>
+                </div>
+                <button type="button" className="danger-button" onClick={() => onDeleteApplication(application)} title="Delete application"><Trash2 size={15} /> Delete</button>
+              </div>
+              <span className="status-chip">{application.status || "-"}</span>
+              <div className="signal-list">
+                <span>{(application.projects || []).length} projects</span>
+                <span>{(application.dependencies || []).length} dependencies</span>
+              </div>
+              {(application.dependencies || []).length > 0 && (
+                <div className="dependency-summary-list">
+                  {(application.dependencies || []).map((dependency) => (
+                    <span key={dependency.id}>{dependency.name}<small>{dependency.type} · {dependency.status}</small></span>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+          {(applications || []).length === 0 && <div className="empty">No applications yet.</div>}
+        </div>
+      </section>
+      <section className="panel">
+        <div className="project-search">
+          <Search size={18} />
+          <input value={projectSearch} onChange={(event) => setProjectSearch(event.target.value)} placeholder="Search projects" />
+        </div>
+        <div className="table">
+          <div className="tr head project-table-row"><span>Name</span><span>Repo</span><span>Route</span><span>Deps</span><span>Status</span><span>Actions</span></div>
+          {visibleProjects.map((project) => (
+            <div className="tr project-table-row" key={project.id}>
+              <ExpandableCell className="strong" value={project.display_name || project.name} max={32} />
+              <ExpandableCell value={project.github_repo || project.image_reference || project.source_archive_name || project.build_source} max={42} />
+              <ExpandableCell value={project.domain || project.exposure_mode} max={36} />
+              <ExpandableCell value={(project.depends_on || []).join(", ") || "-"} max={24} />
+              <ExpandableCell value={project.status} max={24} />
+              <span className="row-actions">
+                <button onClick={() => onTracking(project)} title="Release history"><ScrollText size={15} /> History</button>
+                <button onClick={() => onProgress(project)} title="Progress"><LoaderCircle size={15} /> Progress</button>
+                <button onClick={() => onBuild(project)} title="Rebuild"><Play size={15} /> Rebuild</button>
+                <button onClick={() => onRestart(project)} title="Restart"><RotateCcw size={15} /></button>
+                <button onClick={() => onEdit(project)} title="Edit"><Edit3 size={15} /></button>
+                <button className="danger-button" onClick={() => onDelete(project)} title="Delete"><Trash2 size={15} /> Delete</button>
+              </span>
+            </div>
+          ))}
+          {visibleProjects.length === 0 && <div className="empty">{projectSearch ? "No projects match this search." : "No projects yet."}</div>}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ProjectTrackingModal({project, tracking, loading, onRefresh, onClose}) {
+  const history = tracking?.history || [];
+  const current = tracking?.running_deployment || tracking?.latest_deployment;
+  return (
+    <div className="modal-backdrop">
+      <div className="modal wide-modal tracking-modal">
+        <div className="side-drawer-head">
+          <div>
+            <h2><ScrollText size={18} /> {project.display_name || project.name}</h2>
+            <p>{tracking?.github_repo || project.github_repo || tracking?.current_image || project.image_reference || "Deployment tracking"}</p>
           </div>
-        ))}
-        {visibleProjects.length === 0 && <div className="empty">{projectSearch ? "No projects match this search." : "No projects yet."}</div>}
+          <button type="button" onClick={onClose} title="Close"><X size={16} /></button>
+        </div>
+        <div className="tracking-summary-grid">
+          <MetricCard icon={Rocket} label="Current" value={tracking?.current_version || current?.version || "-"} detail={tracking?.current_image || current?.image_ref || "-"} tone={current?.status === "failed" ? "warning" : "good"} />
+          <MetricCard icon={Activity} label="Latest" value={tracking?.latest_status || current?.status || "-"} detail={tracking?.latest_deployment ? formatDeploymentDate(tracking.latest_deployment.updated_at) : "-"} />
+          <MetricCard icon={Box} label="History" value={tracking?.summary?.total ?? history.length} detail={`${tracking?.summary?.failed || 0} failed, ${tracking?.summary?.deploying || 0} deploying`} />
+        </div>
+        <div className="modal-actions tracking-actions">
+          <button type="button" onClick={onRefresh} disabled={loading}><RefreshCw size={15} /> Refresh</button>
+        </div>
+        <div className="tracking-history">
+          {loading && <div className="empty">Loading release history...</div>}
+          {!loading && history.map((item) => (
+            <div className="tracking-row" key={item.id}>
+              <span className={`deploy-state ${normalizeDeploymentStatus(item.status)}`}>
+                <i />
+                <b>{item.version || item.tag || `Deployment ${item.id}`}</b>
+                <small>{item.status || "pending"}{item.process_status ? ` · process ${item.process_status}` : ""}</small>
+              </span>
+              <span>
+                <b>{truncateMiddle(item.image_ref || item.tag || "-", 54)}</b>
+                <small>{item.commit_sha ? truncateMiddle(item.commit_sha, 18) : "No commit recorded"}</small>
+              </span>
+              <span>
+                <b>{formatDeploymentDate(item.created_at)}</b>
+                <small>{item.triggered_by || "system"}</small>
+              </span>
+              <span>
+                {item.workflow_url ? <a href={item.workflow_url} target="_blank" rel="noreferrer">Workflow</a> : <small>No workflow link</small>}
+                {item.failure_reason && <small className="error-inline">{item.failure_reason}</small>}
+              </span>
+            </div>
+          ))}
+          {!loading && history.length === 0 && <div className="empty">No release history recorded for this project.</div>}
+        </div>
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -2909,6 +3629,26 @@ function DeleteProjectModal({project, busy, onClose, onDelete}) {
         <div className="delete-summary">
           <span>Namespace <b>{project.namespace}</b></span>
           <span>Route <b>{project.domain || project.exposure_mode}</b></span>
+        </div>
+        <div className="modal-actions">
+          <button type="button" onClick={onClose} disabled={busy}>Cancel</button>
+          <button className="danger-button filled" type="button" onClick={onDelete} disabled={busy}><Trash2 size={15} /> Delete</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DeleteApplicationModal({application, busy, onClose, onDelete}) {
+  return (
+    <div className="modal-backdrop">
+      <div className="modal">
+        <h2>Delete {application.display_name || application.name}</h2>
+        <p className="muted">This removes the application record and any managed component/dependency records that are still attached to it.</p>
+        <div className="delete-summary">
+          <span>Projects <b>{(application.projects || []).length}</b></span>
+          <span>Dependencies <b>{(application.dependencies || []).length}</b></span>
+          <span>Status <b>{application.status || "-"}</b></span>
         </div>
         <div className="modal-actions">
           <button type="button" onClick={onClose} disabled={busy}>Cancel</button>
@@ -3108,14 +3848,19 @@ function SettingsView({version}) {
     <div className="stack">
       <section className="panel">
         <h2><Settings size={18} /> Settings</h2>
-        <p className="muted">Controller API version: <code className="mono">{version || "—"}</code></p>
+        <div className="metric-row">
+          <MetricCard icon={Rocket} label="Deployed version" value={version || "-"} detail="Controller VERSION environment value" />
+        </div>
         <p className="muted">Authentication uses BasaltPass. Manage identity provider connections under <b>Security → Access Control</b>.</p>
       </section>
     </div>
   );
 }
 
-function APIKeysView({keys, createdKey, onDismissCreated, onCreate, onRevoke, onRefresh, isAdmin}) {
+function APIKeysView({keys, scopeCatalog, createdKey, onDismissCreated, onCreate, onRevoke, onRefresh}) {
+  const presets = scopeCatalog?.presets || [];
+  const scopes = scopeCatalog?.scopes || [];
+  const [drawerOpen, setDrawerOpen] = useState(false);
   return (
     <div className="stack">
       <section className="panel action-panel">
@@ -3123,7 +3868,10 @@ function APIKeysView({keys, createdKey, onDismissCreated, onCreate, onRevoke, on
           <h2><KeyRound size={18} /> API keys</h2>
           <p>Create keys for beanctl, scripts, and external systems that need to manage BeanCS through the API.</p>
         </div>
-        <button onClick={onRefresh}><RefreshCw size={15} /> Refresh</button>
+        <div className="row-actions">
+          <button onClick={onRefresh}><RefreshCw size={15} /> Refresh</button>
+          <button type="button" className="primary" onClick={() => setDrawerOpen(true)}><Plus size={15} /> Create key</button>
+        </div>
       </section>
       {createdKey && (
         <section className="panel api-key-created">
@@ -3133,18 +3881,6 @@ function APIKeysView({keys, createdKey, onDismissCreated, onCreate, onRevoke, on
           <div className="modal-actions"><button onClick={onDismissCreated}>I saved it</button></div>
         </section>
       )}
-      <section className="panel">
-        <h2><Plus size={18} /> Create API key</h2>
-        <form className="form-grid api-key-form" onSubmit={onCreate}>
-          <input name="name" placeholder="Key name, e.g. local beanctl" required />
-          <input name="expires_at" type="datetime-local" />
-          <label className="checkbox-row">
-            <input name="admin_scope" type="checkbox" disabled={!isAdmin} />
-            Include beancs.admin scope {isAdmin ? "" : "(admin session required)"}
-          </label>
-          <button className="primary" type="submit"><KeyRound size={15} /> Create key</button>
-        </form>
-      </section>
       <section className="panel">
         <h2><KeyRound size={18} /> Issued keys</h2>
         <div className="table api-key-table">
@@ -3164,6 +3900,64 @@ function APIKeysView({keys, createdKey, onDismissCreated, onCreate, onRevoke, on
           {keys.length === 0 && <div className="empty">No API keys issued yet.</div>}
         </div>
       </section>
+      {drawerOpen && (
+        <APIKeyDrawer
+          presets={presets}
+          scopes={scopes}
+          onClose={() => setDrawerOpen(false)}
+          onCreate={async (event) => {
+            const ok = await onCreate(event);
+            if (ok) setDrawerOpen(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function APIKeyDrawer({presets, scopes, onClose, onCreate}) {
+  const defaultPreset = presets[0]?.id || "";
+  return (
+    <div className="side-drawer-backdrop" onClick={onClose}>
+      <aside className="side-drawer api-key-drawer" onClick={(event) => event.stopPropagation()}>
+        <div className="side-drawer-head">
+          <div>
+            <h2><KeyRound size={18} /> Create API key</h2>
+            <p>Choose a preset or select exact scopes for local automation.</p>
+          </div>
+          <button type="button" className="icon-button" aria-label="Close" onClick={onClose}><X size={16} /></button>
+        </div>
+        <form className="drawer-form api-key-form" onSubmit={onCreate}>
+          <label>
+            Key name
+            <input name="name" placeholder="local beanctl" required autoFocus />
+          </label>
+          <label>
+            Expires at
+            <input name="expires_at" type="datetime-local" />
+          </label>
+          <label>
+            Permission preset
+            <select name="preset" defaultValue={defaultPreset}>
+              <option value="">Custom scopes</option>
+              {presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
+            </select>
+          </label>
+          <div className="scope-picker">
+            {scopes.map((scope) => (
+              <label className="checkbox-row" key={scope.id} title={scope.description}>
+                <input name="scopes" type="checkbox" value={scope.id} />
+                <span><b>{scope.label}</b><small>{scope.id}</small></span>
+              </label>
+            ))}
+            {scopes.length === 0 && <div className="empty">No scope options loaded.</div>}
+          </div>
+          <div className="drawer-actions">
+            <button type="button" onClick={onClose}>Cancel</button>
+            <button className="primary" type="submit"><KeyRound size={15} /> Create key</button>
+          </div>
+        </form>
+      </aside>
     </div>
   );
 }
@@ -4035,12 +4829,12 @@ function ServiceForm({existing, onSubmit}) {
 
 function CredentialManager({kind, rows, onCreate, onDelete}) {
   const isCloudflare = kind === "cloudflare";
-  const title = isCloudflare ? "Cloudflare accounts" : "BasaltPass instances";
-  const columns = isCloudflare ? ["name", "account_id", "is_active"] : ["name", "base_url", "client_id"];
+  const title = isCloudflare ? "Cloudflare accounts" : "BasaltPass tenants";
+  const columns = isCloudflare ? ["name", "account_id", "is_active"] : ["name", "tenant_code", "tenant_id", "base_url", "is_active"];
   return (
     <div className="stack">
       <section className="panel">
-        <h2><KeyRound size={18} /> Add {isCloudflare ? "Cloudflare account" : "BasaltPass instance"}</h2>
+        <h2><KeyRound size={18} /> Add {isCloudflare ? "Cloudflare account" : "BasaltPass tenant"}</h2>
         <form className="form-grid" onSubmit={(event) => onCreate(kind, event)}>
           <input name="name" placeholder="Name" required />
           {isCloudflare ? (
@@ -4051,9 +4845,9 @@ function CredentialManager({kind, rows, onCreate, onDelete}) {
           ) : (
             <>
               <input name="base_url" placeholder="https://auth.example.com" required />
-              <input name="client_id" placeholder="Management client ID" required />
-              <input name="client_secret" type="password" placeholder="Management client secret" required />
-              <input name="service_token" type="password" placeholder="Service token, optional" />
+              <input name="tenant_code" placeholder="Tenant code" required />
+              <input name="tenant_id" placeholder="Tenant ID, optional" />
+              <input name="automation_token" type="password" placeholder="Automation token bpk_..." required />
             </>
           )}
           <button className="primary" type="submit"><Plus size={16} /> Add</button>
@@ -4076,10 +4870,64 @@ function CredentialManager({kind, rows, onCreate, onDelete}) {
   );
 }
 
-function ProjectModal({project, onClose, onSubmit}) {
+function EnvEditor({entries, onChange, title = "Environment variables", masked = false}) {
+  const [bulkText, setBulkText] = useState("");
+  const setEntry = (index, patch) => onChange(entries.map((entry, itemIndex) => itemIndex === index ? {...entry, ...patch} : entry));
+  const addEntry = () => onChange([...(entries || []), {key: "", value: ""}]);
+  const removeEntry = (index) => onChange(entries.filter((_, itemIndex) => itemIndex !== index));
+  const importBulk = () => {
+    const parsed = parseDotEnv(bulkText);
+    if (!parsed.length) return;
+    const byKey = new Map((entries || []).filter((entry) => entry.key).map((entry) => [entry.key, entry]));
+    parsed.forEach((entry) => byKey.set(entry.key, entry));
+    onChange(Array.from(byKey.values()));
+    setBulkText("");
+  };
+  return (
+    <div className="env-editor">
+      <div className="section-head">
+        <h3>{title}</h3>
+        <button type="button" onClick={addEntry}><Plus size={15} /> Add variable</button>
+      </div>
+      <div className="env-list">
+        {(entries || []).map((entry, index) => (
+          <div className="env-row" key={`${entry.key}-${index}`}>
+            <input value={entry.key} placeholder="DATABASE_URL" onChange={(event) => setEntry(index, {key: event.target.value.trim()})} />
+            <input value={entry.value} type={masked && entry.value === "********" ? "password" : "text"} placeholder={masked ? "Keep existing secret" : "value"} onChange={(event) => setEntry(index, {value: event.target.value})} />
+            <button type="button" onClick={() => removeEntry(index)}><Trash2 size={15} /></button>
+          </div>
+        ))}
+        {(entries || []).length === 0 && <div className="empty">No runtime variables configured.</div>}
+      </div>
+      <label>Import .env</label>
+      <textarea value={bulkText} placeholder={"DATABASE_URL=postgres://...\nRABBITMQ_URL=amqp://..."} onChange={(event) => setBulkText(event.target.value)} />
+      <button type="button" onClick={importBulk} disabled={!bulkText.trim()}><Upload size={15} /> Import variables</button>
+      <p className="muted">Values are stored in the Kubernetes app-env-vars Secret. Existing masked values stay unchanged unless replaced.</p>
+    </div>
+  );
+}
+
+function ProjectModal({project, onClose, onSubmit, onLoadEnv}) {
+  const [envEntries, setEnvEntries] = useState([]);
+  const [envLoading, setEnvLoading] = useState(true);
+  const [envError, setEnvError] = useState("");
+  useEffect(() => {
+    let cancelled = false;
+    setEnvLoading(true);
+    setEnvError("");
+    onLoadEnv(project).then((data) => {
+      if (!cancelled) setEnvEntries(envEntriesFromObject(data));
+    }).catch((err) => {
+      if (!cancelled) setEnvError(err.message);
+    }).finally(() => {
+      if (!cancelled) setEnvLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [project.id]);
+  const submit = (event) => onSubmit(event, envError ? null : envObjectFromEntries(envEntries));
   return (
     <div className="modal-backdrop">
-      <form className="modal" onSubmit={onSubmit}>
+      <form className="modal wide-modal" onSubmit={submit}>
         <h2>Edit {project.name}</h2>
         <label>Display name</label>
         <input name="display_name" defaultValue={project.display_name || ""} />
@@ -4099,9 +4947,15 @@ function ProjectModal({project, onClose, onSubmit}) {
             Auto build and deploy on GitHub push
           </label>
         )}
+        {envLoading ? <div className="empty">Loading environment variables...</div> : (
+          <>
+            {envError && <p className="warning-note">{envError}</p>}
+            <EnvEditor entries={envEntries} onChange={setEnvEntries} title="Runtime environment" masked />
+          </>
+        )}
         <div className="modal-actions">
           <button type="button" onClick={onClose}>Cancel</button>
-          <button className="primary" type="submit">Save</button>
+          <button className="primary" type="submit" disabled={envLoading}>Save</button>
         </div>
       </form>
     </div>
@@ -4121,6 +4975,7 @@ function defaultDeployForm() {
   return {
     deploy_source: "gitops",
     build_source: "github",
+    application_type: "single",
     repo_type: "github",
     git_url: "",
     update_mode: "argocd",
@@ -4133,6 +4988,7 @@ function defaultDeployForm() {
     github_repo: "",
     github_branch: "main",
     dockerfile_path: "Dockerfile",
+    build_context: ".",
     auto_deploy: true,
     image_reference: "",
     source_archive_name: "",
@@ -4145,6 +5001,9 @@ function defaultDeployForm() {
     port: 8080,
     replicas: 1,
     resource_preset: "small",
+    env_entries: [],
+    components: [],
+    dependencies: [],
   };
 }
 
@@ -4164,6 +5023,7 @@ function buildProjectPayload(form, githubCredentialID, credentials) {
     github_repo: source === "github" ? form.github_repo : undefined,
     github_branch: form.github_branch || "main",
     dockerfile_path: form.dockerfile_path || undefined,
+    build_context: form.build_context || ".",
     auto_deploy: source === "github" ? form.update_mode === "argocd" : false,
     basaltpass_instance_id: form.basaltpass_instance_id ? Number(form.basaltpass_instance_id) : undefined,
     cloudflare_credential_id: exposure === "public" ? Number(form.cloudflare_credential_id) : undefined,
@@ -4174,8 +5034,282 @@ function buildProjectPayload(form, githubCredentialID, credentials) {
     port: Number(form.port || 8080),
     replicas: Number(form.replicas || 1),
     ports: [{name: "http", port: Number(form.port || 8080), protocol: "http", exposure, domain}],
-    env: {},
+    env: envObjectFromEntries(form.env_entries || []),
   };
+}
+
+function monorepoComponentsFromAnalysis(applicationName, components = []) {
+  return components.map((component) => {
+    const name = slugify(component.name || component.path || "component");
+    const suggestedPort = Number(component.suggested_port || 0);
+    return {
+      enabled: true,
+      name,
+      kind: component.kind || "service",
+      path: component.path || "",
+      component_path: component.path || "",
+      project_name: slugify(`${applicationName}-${name}`),
+      dockerfile_path: component.dockerfile_path || "",
+      build_context: component.build_context || ".",
+      port: suggestedPort || "",
+      exposure_mode: suggestedPort ? (component.kind === "frontend" ? "public" : "private") : "internal-only",
+      replicas: 1,
+      env_entries: [],
+      dependency_links: [],
+    };
+  });
+}
+
+function applicationSpecAnalysis(data) {
+  const doc = data.document || {};
+  const plan = data.plan || {};
+  const projects = plan.willCreateProjects || [];
+  return {
+    source: "beancs_spec",
+    config_path: data.config_path || ".beancs/app.yaml",
+    is_monorepo: doc.spec?.type === "monorepo" || projects.length > 1,
+    deployable: Boolean(data.validation?.valid),
+    document: doc,
+    plan,
+    components: projects.map((project) => ({
+      name: project.component,
+      path: project.buildContext,
+      dockerfile_path: project.dockerfile,
+      build_context: project.buildContext,
+      suggested_port: project.ports?.[0]?.port || 0,
+      kind: project.kind,
+    })),
+    signals: [
+      `Application: ${plan.application?.name || doc.metadata?.name || "-"}`,
+      `Projects: ${projects.map((project) => project.name).join(", ") || "none"}`,
+      `Dependencies: ${(plan.willCreateDependencies || []).map((dep) => dep.name).join(", ") || "none"}`,
+    ],
+    warnings: [
+      ...(data.validation?.warnings || []).map((warning) => `${warning.field}: ${warning.message}`),
+      ...(plan.warnings || []).map((warning) => `${warning.field}: ${warning.message}`),
+    ],
+  };
+}
+
+function deployFormFromApplicationSpec(current, repoFullName, branch, data) {
+  const doc = data.document || {};
+  const spec = doc.spec || {};
+  const metadata = doc.metadata || {};
+  const plan = data.plan || {};
+  const namespace = spec.namespace?.strategy === "shared" ? spec.namespace?.name || "" : "";
+  return {
+    ...current,
+    application_type: "monorepo",
+    name: slugify(metadata.name || plan.application?.name || repoFullName.split("/")[1] || current.name),
+    github_repo: repoFullName,
+    github_branch: spec.repo?.branch || branch || "main",
+    namespace,
+    auto_deploy: Boolean(spec.autoDeploy?.enabled),
+    update_mode: spec.autoDeploy?.enabled ? "argocd" : "passive",
+    components: (spec.components || []).map((component) => componentFromApplicationSpec(metadata.name || plan.application?.name || repoFullName, component)),
+    dependencies: (spec.dependencies || []).map((dependency) => ({
+      name: dependency.name,
+      type: dependency.type,
+      deploy_method: dependency.deployMethod || "helm",
+      version: dependency.version || "",
+      config: dependency.config || {},
+    })),
+  };
+}
+
+function componentFromApplicationSpec(applicationName, component) {
+  const firstPort = (component.ports || [])[0];
+  const exposure = firstPort?.exposure === "internal" ? "internal-only" : firstPort?.exposure || (firstPort ? "private" : "internal-only");
+  return {
+    enabled: true,
+    name: slugify(component.name),
+    kind: component.kind || "service",
+    path: component.build?.context || "",
+    component_path: component.build?.context || "",
+    project_name: slugify(component.projectName || `${applicationName}-${component.name}`),
+    dockerfile_path: component.build?.dockerfile || "",
+    build_context: component.build?.context || ".",
+    build_args: component.build?.args || {},
+    port: firstPort?.port || "",
+    exposure_mode: exposure,
+    replicas: component.replicas || 1,
+    health_check: component.healthCheck || null,
+    volumes: component.volumes || [],
+    watch_paths: component.watchPaths || [],
+    env_entries: envEntriesFromObject(component.env || {}),
+    dependency_links: (component.envFromDependencies || []).map((ref) => ({dependency: ref.dependency, preset: ref.preset || ""})),
+  };
+}
+
+function indexForComponent(components, target) {
+  return (components || []).findIndex((component) => component === target || component.project_name === target.project_name);
+}
+
+function monorepoComponentHost(component, form, selectedCloudflareDomain) {
+  const exposure = component.exposure_mode || (component.port ? "private" : "internal-only");
+  if (exposure === "public") {
+    const subdomain = slugify(component.subdomain ?? component.project_name);
+    return selectedCloudflareDomain?.domain ? `${subdomain}.${selectedCloudflareDomain.domain}` : "Choose a Cloudflare zone";
+  }
+  if (exposure === "private") {
+    return component.private_host || monorepoDefaultPrivateHost(component, form);
+  }
+  return "internal only";
+}
+
+function monorepoDefaultPrivateHost(component, form) {
+  return `${component.project_name}.${form.namespace || `proj-${component.project_name}`}.ts.net`;
+}
+
+function monorepoComponentDomainOverrides(form, credentials) {
+  const selectedCF = (credentials.domains || []).find((domain) => String(domain.credential_id) === String(form.cloudflare_credential_id) && String(domain.zone_id) === String(form.cloudflare_zone_id))
+    || credentials.cloudflare.find((cred) => String(cred.id) === String(form.cloudflare_credential_id));
+  const out = {};
+  for (const component of form.components || []) {
+    if (component.enabled === false || Number(component.port || 0) <= 0) continue;
+    const exposure = component.exposure_mode || "internal-only";
+    let host = "";
+    if (exposure === "public" && selectedCF?.domain) {
+      host = `${slugify(component.subdomain ?? component.project_name)}.${selectedCF.domain}`;
+    } else if (exposure === "private") {
+      host = component.private_host || monorepoDefaultPrivateHost(component, form);
+    }
+    if (host) out[component.project_name] = host;
+  }
+  return out;
+}
+
+function buildMonorepoApplicationPayload(form, githubCredentialID, credentials) {
+  const selectedCF = (credentials.domains || []).find((domain) => String(domain.credential_id) === String(form.cloudflare_credential_id) && String(domain.zone_id) === String(form.cloudflare_zone_id))
+    || credentials.cloudflare.find((cred) => String(cred.id) === String(form.cloudflare_credential_id));
+  return {
+    name: form.name,
+    display_name: form.name,
+    github_credential_id: Number(githubCredentialID),
+    github_repo: form.github_repo,
+    github_branch: form.github_branch || "main",
+    auto_deploy: form.update_mode === "argocd",
+    namespace: form.namespace || undefined,
+    basaltpass_instance_id: form.basaltpass_instance_id ? Number(form.basaltpass_instance_id) : undefined,
+    cloudflare_credential_id: form.cloudflare_credential_id ? Number(form.cloudflare_credential_id) : undefined,
+    cloudflare_zone_id: form.cloudflare_zone_id || undefined,
+    resource_preset: form.resource_preset || "small",
+    dependencies: (form.dependencies || []).map((dependency) => ({
+      name: dependency.name,
+      type: dependency.type,
+      version: dependency.version || undefined,
+      deploy_method: dependency.deploy_method || "helm",
+      config: dependency.config || {},
+    })),
+    components: (form.components || []).filter((component) => component.enabled !== false).map((component) => {
+      const exposure = component.exposure_mode || (component.port ? "private" : "internal-only");
+      const port = Number(component.port || 0);
+      const domain = exposure === "public" && selectedCF ? `${slugify(component.subdomain ?? component.project_name)}.${selectedCF.domain}` : exposure === "private" ? component.private_host || monorepoDefaultPrivateHost(component, form) : "";
+      return {
+        name: component.name,
+        kind: component.kind || "service",
+        project_name: component.project_name,
+        dockerfile_path: component.dockerfile_path,
+        build_context: component.build_context || ".",
+        component_path: component.component_path || component.path || "",
+        namespace: form.namespace || undefined,
+        exposure_mode: exposure,
+        resource_preset: form.resource_preset || "small",
+        replicas: Number(component.replicas || 1),
+        ports: port > 0 ? [{name: "http", port, protocol: "http", exposure, domain}] : [],
+        env: envObjectFromEntries(component.env_entries || form.env_entries || []),
+        depends_on: (component.dependency_links || []).map((link) => link.dependency),
+        env_from_dependencies: (component.dependency_links || []).map((link) => ({
+          dependency: link.dependency,
+          preset: link.preset,
+        })),
+      };
+    }),
+  };
+}
+
+function definitionForDependency(definitions, type) {
+  return (definitions || []).find((definition) => definition.name === type || definition.type === type);
+}
+
+function normalizeDependencyDefinition(definition) {
+  if (!definition?.metadata && definition?.name) return definition;
+  return {
+    raw: definition,
+    name: definition?.metadata?.name || "",
+    display_name: definition?.metadata?.display_name || definition?.metadata?.displayName || definition?.metadata?.name || "",
+    category: definition?.metadata?.category || "",
+    type: definition?.spec?.type || definition?.metadata?.name || "",
+    supported_deploy_methods: definition?.spec?.supported_deploy_methods || definition?.spec?.supportedDeployMethods || [],
+    default_deploy_method: definition?.spec?.default_deploy_method || definition?.spec?.defaultDeployMethod || "helm",
+    config_schema: definition?.spec?.config_schema || definition?.spec?.configSchema || {},
+    env_presets: definition?.spec?.env_presets || definition?.spec?.envPresets || {},
+  };
+}
+
+function dependencyDefaultConfig(definition) {
+  const out = {};
+  const properties = definition?.config_schema?.properties || {};
+  for (const [key, schema] of Object.entries(properties)) {
+    if (schema.type === "object") {
+      out[key] = dependencyDefaultConfig({config_schema: {properties: schema.properties || {}}});
+      continue;
+    }
+    if (schema.generate) {
+      continue;
+    }
+    if (schema.default !== undefined) out[key] = schema.default;
+  }
+  return out;
+}
+
+function uniqueDependencyName(dependencies, base) {
+  const root = slugify(base || "dependency") || "dependency";
+  const existing = new Set((dependencies || []).map((dependency) => dependency.name));
+  if (!existing.has(root)) return root;
+  let index = 2;
+  while (existing.has(`${root}-${index}`)) index += 1;
+  return `${root}-${index}`;
+}
+
+function firstEnvPreset(definition) {
+  return Object.keys(definition?.env_presets || {})[0] || "";
+}
+
+function labelize(value) {
+  return String(value || "").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[_-]+/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function envObjectFromEntries(entries) {
+  const out = {};
+  for (const entry of entries || []) {
+    const key = String(entry.key || "").trim();
+    if (!key) continue;
+    out[key] = String(entry.value ?? "");
+  }
+  return out;
+}
+
+function envEntriesFromObject(obj = {}) {
+  return Object.entries(obj).sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => ({key, value: String(value ?? "")}));
+}
+
+function parseDotEnv(text) {
+  const entries = [];
+  String(text || "").split(/\r?\n/).forEach((line) => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) return;
+    const normalized = trimmed.startsWith("export ") ? trimmed.slice(7).trim() : trimmed;
+    const index = normalized.indexOf("=");
+    if (index <= 0) return;
+    const key = normalized.slice(0, index).trim();
+    let value = normalized.slice(index + 1).trim();
+    if ((value.startsWith("\"") && value.endsWith("\"")) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    entries.push({key, value});
+  });
+  return entries;
 }
 
 function imageName(image) {
@@ -4380,13 +5514,32 @@ async function finishLogin(config) {
   const returnedState = params.get("state");
   const expectedState = sessionStorage.getItem("beancs.oauthState");
   const verifier = sessionStorage.getItem("beancs.pkceVerifier");
+  const expectedNonce = sessionStorage.getItem("beancs.oauthNonce");
   if (!code || !verifier || returnedState !== expectedState) throw new Error("Login callback was incomplete.");
   const data = await publicJSON(`${API}/ui/oauth/token`, {
     method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({code, redirect_uri: browserRedirectURI(), code_verifier: verifier}),
   });
+  if (data.id_token && claimFromJwt(data.id_token, "nonce") !== expectedNonce) {
+    throw new Error("Login callback returned an invalid id_token nonce.");
+  }
+
+  sessionStorage.removeItem("beancs.pkceVerifier");
+  sessionStorage.removeItem("beancs.oauthState");
+  sessionStorage.removeItem("beancs.oauthNonce");
   return data.access_token;
+}
+
+function claimFromJwt(token, key) {
+  try {
+    const payload = token.split(".")[1] || "";
+    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
+    return JSON.parse(atob(padded))[key];
+  } catch {
+    return undefined;
+  }
 }
 
 function titleFor(view) {

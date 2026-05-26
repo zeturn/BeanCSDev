@@ -189,3 +189,10 @@ func Scopes(c *fiber.Ctx) []string {
 	scopes, _ := c.Locals("scopes").([]string)
 	return scopes
 }
+
+func AuthMethod(c *fiber.Ctx) string {
+	if v, ok := c.Locals("auth_method").(string); ok {
+		return v
+	}
+	return ""
+}

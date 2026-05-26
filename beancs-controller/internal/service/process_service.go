@@ -300,11 +300,13 @@ func (r *processRun) network() error {
 		if err := r.svc.k8s.ApplyNetworkPoliciesForPorts(r.ctx, r.project.Namespace, r.project.Name, r.project.Ports); err != nil {
 			return r.svc.failJob(r.ctx, job, err.Error())
 		}
-		if err := r.svc.k8s.ApplyServicePorts(r.ctx, r.project.Namespace, r.project.Name, r.project.Ports); err != nil {
-			return r.svc.failJob(r.ctx, job, err.Error())
-		}
-		if err := r.svc.k8s.ApplyIngressPorts(r.ctx, r.project.Namespace, r.project.Name, r.project.Ports); err != nil {
-			return r.svc.failJob(r.ctx, job, err.Error())
+		if len(r.project.Ports) > 0 {
+			if err := r.svc.k8s.ApplyServicePorts(r.ctx, r.project.Namespace, r.project.Name, r.project.Ports); err != nil {
+				return r.svc.failJob(r.ctx, job, err.Error())
+			}
+			if err := r.svc.k8s.ApplyIngressPorts(r.ctx, r.project.Namespace, r.project.Name, r.project.Ports); err != nil {
+				return r.svc.failJob(r.ctx, job, err.Error())
+			}
 		}
 	}
 	if r.project.CloudflareCredentialID != nil && r.svc.dns != nil && r.svc.credentials != nil && r.project.Domain != "" {
@@ -485,6 +487,9 @@ func (r *processRun) argocd() error {
 	if err := r.svc.db.WithContext(r.ctx).Model(r.project).Update("image_reference", r.image).Error; err != nil {
 		return r.svc.failJob(r.ctx, job, err.Error())
 	}
+	if err := r.syncApplicationDependencies(job); err != nil {
+		return r.svc.failJob(r.ctx, job, err.Error())
+	}
 	if r.svc.gitops != nil {
 		if err := r.svc.gitops.CommitProjectManifests(r.ctx, r.token, r.cred, r.project); err != nil {
 			return r.svc.failJob(r.ctx, job, err.Error())
@@ -509,6 +514,43 @@ func (r *processRun) argocd() error {
 	return r.svc.finishJob(r.ctx, job, model.ProcessStatusSucceeded, "")
 }
 
+func (r *processRun) syncApplicationDependencies(job *model.ProcessJob) error {
+	if r.project.ApplicationID == nil || r.svc.gitops == nil {
+		return nil
+	}
+	var app model.Application
+	if err := r.svc.db.WithContext(r.ctx).First(&app, *r.project.ApplicationID).Error; err != nil {
+		return err
+	}
+	var deps []model.ManagedDependency
+	if err := r.svc.db.WithContext(r.ctx).Where("application_id = ?", app.ID).Order("name asc").Find(&deps).Error; err != nil {
+		return err
+	}
+	for _, dep := range deps {
+		if dep.DeployMethod == model.DependencyDeployMethodExternal {
+			continue
+		}
+		if r.svc.k8s != nil {
+			if err := r.svc.k8s.CreateNamespace(r.ctx, dep.Namespace, app.Name); err != nil {
+				return err
+			}
+			if err := r.svc.k8s.UpsertSecret(r.ctx, dep.Namespace, dep.SecretName, app.Name, dependencySecretRuntimeData(dep)); err != nil {
+				return err
+			}
+		}
+		if err := r.svc.gitops.CommitDependencyManifests(r.ctx, r.token, r.cred, app, dep); err != nil {
+			return err
+		}
+		if r.svc.k8s != nil && r.cred.GitOpsRepo != "" {
+			if err := r.svc.k8s.ApplyArgoCDApplication(r.ctx, dependencyRootArgoApplicationName(app.Name, dep.Name), gitOpsRepoURL(r.cred), fmt.Sprintf("apps/%s/dependencies/%s", app.Name, dep.Name), dep.Namespace); err != nil {
+				return err
+			}
+		}
+		r.svc.appendJobLog(r.ctx, job, fmt.Sprintf("dependency reconciled %s/%s", dep.Namespace, dep.Name))
+	}
+	return nil
+}
+
 func (r *processRun) rollout() error {
 	job, err := r.svc.startJob(r.ctx, r.processID, "rollout")
 	if err != nil {
@@ -519,7 +561,7 @@ func (r *processRun) rollout() error {
 		resources = model.ResourcePresets["small"]
 	}
 	if r.svc.k8s != nil {
-		if err := r.svc.k8s.ApplyDeploymentPortsWithPullSecret(r.ctx, r.project.Namespace, r.project.Name, r.image, r.project.Ports, int32(r.project.Replicas), resources.CPURequest, resources.CPULimit, resources.MemRequest, resources.MemLimit, r.project.RegistryPullSecretName); err != nil {
+		if err := r.svc.k8s.ApplyProjectDeployment(r.ctx, *r.project, r.image, resources); err != nil {
 			return r.svc.failJob(r.ctx, job, err.Error())
 		}
 		r.svc.appendJobLog(r.ctx, job, fmt.Sprintf("deployment applied %s/%s image=%s", r.project.Namespace, r.project.Name, r.image))

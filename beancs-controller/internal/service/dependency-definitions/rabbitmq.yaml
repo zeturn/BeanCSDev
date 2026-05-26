@@ -1,0 +1,84 @@
+apiVersion: beancs.io/v1
+kind: DependencyDefinition
+metadata:
+  name: rabbitmq
+  displayName: RabbitMQ
+  category: message-queue
+spec:
+  type: rabbitmq
+  supportedDeployMethods: [helm, external]
+  defaultDeployMethod: helm
+  helm:
+    chart:
+      repo: oci://registry-1.docker.io/bitnamicharts
+      name: rabbitmq
+      version: "*"
+    valuesTemplate: rabbitmq.values.yaml
+  configSchema:
+    type: object
+    properties:
+      username:
+        type: string
+        default: user
+      password:
+        type: string
+        secret: true
+        generate:
+          length: 32
+      persistence:
+        type: object
+        properties:
+          enabled:
+            type: boolean
+            default: true
+          size:
+            type: string
+            default: 8Gi
+      managementUI:
+        type: object
+        properties:
+          enabled:
+            type: boolean
+            default: false
+  services:
+    - name: amqp
+      port: 5672
+      protocol: tcp
+      default: true
+    - name: management
+      port: 15672
+      protocol: http
+      optional: true
+  outputs:
+    host:
+      valueFrom:
+        serviceHost: amqp
+    port:
+      value: "5672"
+    username:
+      valueFrom:
+        secretKey: username
+    password:
+      valueFrom:
+        secretKey: password
+    url:
+      secretTemplate: "amqp://{{username}}:{{password}}@{{host}}:{{port}}/"
+  envPresets:
+    rabbitmq_default:
+      env:
+        RABBITMQ_HOST:
+          output: host
+        RABBITMQ_PORT:
+          output: port
+        RABBITMQ_USERNAME:
+          output: username
+          secret: true
+        RABBITMQ_PASSWORD:
+          output: password
+          secret: true
+        RABBITMQ_URL:
+          output: url
+          secret: true
+  persistence:
+    defaultEnabled: true
+    mountPath: /var/lib/rabbitmq

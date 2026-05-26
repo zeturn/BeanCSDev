@@ -18,6 +18,36 @@ import (
 
 const apiKeyMarker = "bcs"
 
+const (
+	ScopeLegacyAPI         = "beancs.api"
+	ScopeAdmin             = "beancs.admin"
+	ScopeProjectsRead      = "projects:read"
+	ScopeProjectsWrite     = "projects:write"
+	ScopeProjectsDelete    = "projects:delete"
+	ScopeProjectsDeploy    = "projects:deploy"
+	ScopeDeploymentsRead   = "deployments:read"
+	ScopeDeploymentsWrite  = "deployments:write"
+	ScopeProcessesRead     = "processes:read"
+	ScopeCredentialsRead   = "credentials:read"
+	ScopeCredentialsWrite  = "credentials:write"
+	ScopeCredentialsDelete = "credentials:delete"
+	ScopeRegistriesRead    = "registries:read"
+	ScopeRegistriesWrite   = "registries:write"
+	ScopeRegistriesDelete  = "registries:delete"
+	ScopeRuntimeRead       = "runtime:read"
+	ScopeRuntimeWrite      = "runtime:write"
+	ScopeAPIKeysRead       = "api-keys:read"
+	ScopeAPIKeysWrite      = "api-keys:write"
+	ScopeAPIKeysRevoke     = "api-keys:revoke"
+)
+
+const (
+	APIKeyPresetProjectDeveloper = "project-developer"
+	APIKeyPresetProjectOperator  = "project-operator"
+	APIKeyPresetReadOnly         = "read-only"
+	APIKeyPresetAdmin            = "admin"
+)
+
 type APIKeyService struct {
 	db *gorm.DB
 }
@@ -34,12 +64,12 @@ func NewAPIKeyService(db *gorm.DB) *APIKeyService {
 	return &APIKeyService{db: db}
 }
 
-func (s *APIKeyService) Create(ctx context.Context, userID, tenantID string, currentScopes []string, req dto.CreateAPIKeyRequest) (*dto.CreateAPIKeyResponse, error) {
+func (s *APIKeyService) Create(ctx context.Context, userID, tenantID string, currentScopes []string, restrictToCurrent bool, req dto.CreateAPIKeyRequest) (*dto.CreateAPIKeyResponse, error) {
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
 		return nil, fmt.Errorf("name is required")
 	}
-	scopes, err := allowedAPIKeyScopes(req.Scopes, currentScopes)
+	scopes, err := allowedAPIKeyScopes(req.Scopes, req.Preset, currentScopes, restrictToCurrent)
 	if err != nil {
 		return nil, err
 	}
@@ -70,6 +100,10 @@ func (s *APIKeyService) Create(ctx context.Context, userID, tenantID string, cur
 	}
 	out := apiKeyResponse(key)
 	return &dto.CreateAPIKeyResponse{APIKeyResponse: out, Key: plain}, nil
+}
+
+func (s *APIKeyService) ScopeOptions(currentScopes []string) APIKeyScopeCatalog {
+	return apiKeyScopeCatalog(currentScopes)
 }
 
 func (s *APIKeyService) List(ctx context.Context, userID string) ([]dto.APIKeyResponse, error) {
@@ -127,17 +161,21 @@ func (s *APIKeyService) Authenticate(ctx context.Context, plain string) (*APIKey
 	}, true, nil
 }
 
-func allowedAPIKeyScopes(requested []string, current []string) ([]string, error) {
+func allowedAPIKeyScopes(requested []string, preset string, current []string, restrictToCurrent bool) ([]string, error) {
 	currentSet := map[string]bool{}
 	for _, scope := range current {
 		currentSet[strings.TrimSpace(scope)] = true
 	}
+	if strings.TrimSpace(preset) != "" {
+		presetScopes, ok := apiKeyPresetScopes(strings.TrimSpace(preset))
+		if !ok {
+			return nil, fmt.Errorf("unknown api key preset %q", preset)
+		}
+		requested = append(append([]string{}, presetScopes...), requested...)
+	}
 	out := []string{}
 	if len(requested) == 0 {
-		out = append(out, "beancs.api")
-		if currentSet["beancs.admin"] {
-			out = append(out, "beancs.admin")
-		}
+		out = append(out, apiKeyPresetScopesMust(APIKeyPresetProjectDeveloper)...)
 		return out, nil
 	}
 	seen := map[string]bool{}
@@ -146,16 +184,118 @@ func allowedAPIKeyScopes(requested []string, current []string) ([]string, error)
 		if scope == "" || seen[scope] {
 			continue
 		}
-		if scope == "beancs.admin" && !currentSet["beancs.admin"] {
+		if !knownAPIKeyScope(scope) {
+			return nil, fmt.Errorf("unknown api key scope %q", scope)
+		}
+		if scope == ScopeAdmin && !currentSet[ScopeAdmin] {
 			return nil, fmt.Errorf("beancs.admin scope requires an admin session")
+		}
+		if restrictToCurrent && !apiKeyScopeGranted(current, scope) {
+			return nil, fmt.Errorf("scope %q exceeds the current api key permissions", scope)
 		}
 		seen[scope] = true
 		out = append(out, scope)
 	}
 	if len(out) == 0 {
-		out = []string{"beancs.api"}
+		out = apiKeyPresetScopesMust(APIKeyPresetProjectDeveloper)
 	}
 	return out, nil
+}
+
+func apiKeyScopeGranted(granted []string, required string) bool {
+	for _, scope := range granted {
+		scope = strings.TrimSpace(scope)
+		if scope == required || scope == ScopeAdmin {
+			return true
+		}
+		if scope == ScopeLegacyAPI && required != ScopeAdmin {
+			return true
+		}
+		if strings.HasSuffix(scope, ":*") && strings.HasPrefix(required, strings.TrimSuffix(scope, "*")) {
+			return true
+		}
+	}
+	return false
+}
+
+type APIKeyScopeCatalog struct {
+	Scopes  []dto.APIKeyScopeOption `json:"scopes"`
+	Presets []dto.APIKeyScopePreset `json:"presets"`
+}
+
+func apiKeyScopeCatalog(currentScopes []string) APIKeyScopeCatalog {
+	admin := hasScope(currentScopes, ScopeAdmin)
+	scopes := []dto.APIKeyScopeOption{
+		{ID: ScopeProjectsRead, Label: "Read projects", Description: "List projects, inspect project settings, DNS, env keys, and release history."},
+		{ID: ScopeProjectsWrite, Label: "Write projects", Description: "Create and update projects and project environment variables."},
+		{ID: ScopeProjectsDelete, Label: "Delete projects", Description: "Delete owned projects and their managed resources."},
+		{ID: ScopeProjectsDeploy, Label: "Deploy projects", Description: "Start rebuilds, rollbacks, restarts, and project deploy actions."},
+		{ID: ScopeDeploymentsRead, Label: "Read deployments", Description: "List deployment records, logs, tracking, and release history."},
+		{ID: ScopeDeploymentsWrite, Label: "Write deployments", Description: "Create deployment records and rollback requests."},
+		{ID: ScopeProcessesRead, Label: "Read processes", Description: "Inspect deployment process records and job logs."},
+		{ID: ScopeCredentialsRead, Label: "Read credentials", Description: "List and verify GitHub, Cloudflare, and BasaltPass credentials."},
+		{ID: ScopeCredentialsWrite, Label: "Write credentials", Description: "Create and update credentials and DNS records."},
+		{ID: ScopeCredentialsDelete, Label: "Delete credentials", Description: "Delete credentials and revoke credential shares."},
+		{ID: ScopeRegistriesRead, Label: "Read registries", Description: "List container registries, tracked images, and live tags."},
+		{ID: ScopeRegistriesWrite, Label: "Write registries", Description: "Create registries, track images, and refresh tracked tags."},
+		{ID: ScopeRegistriesDelete, Label: "Delete registries", Description: "Delete registries and tracked images."},
+		{ID: ScopeRuntimeRead, Label: "Read runtime", Description: "Inspect Kubernetes runtime, logs, events, namespaces, pods, and services."},
+		{ID: ScopeRuntimeWrite, Label: "Write runtime", Description: "Change runtime objects such as services, ingresses, namespace settings, and scaling."},
+		{ID: ScopeAPIKeysRead, Label: "Read API keys", Description: "List API keys for the same user."},
+		{ID: ScopeAPIKeysWrite, Label: "Write API keys", Description: "Create API keys for the same user."},
+		{ID: ScopeAPIKeysRevoke, Label: "Revoke API keys", Description: "Revoke API keys for the same user."},
+		{ID: ScopeLegacyAPI, Label: "Legacy API", Description: "Compatibility scope for existing BeanCS API keys."},
+	}
+	if admin {
+		scopes = append(scopes, dto.APIKeyScopeOption{ID: ScopeAdmin, Label: "Admin", Description: "Administrative access across tenants and cluster admin APIs."})
+	}
+	presets := []dto.APIKeyScopePreset{
+		{ID: APIKeyPresetProjectDeveloper, Label: "Project developer", Description: "Create projects, trigger builds, and inspect release history.", Scopes: apiKeyPresetScopesMust(APIKeyPresetProjectDeveloper)},
+		{ID: APIKeyPresetProjectOperator, Label: "Project operator", Description: "Manage projects, credentials, registries, deployments, and runtime operations.", Scopes: apiKeyPresetScopesMust(APIKeyPresetProjectOperator)},
+		{ID: APIKeyPresetReadOnly, Label: "Read only", Description: "Inspect projects, deployments, credentials, registries, and runtime state.", Scopes: apiKeyPresetScopesMust(APIKeyPresetReadOnly)},
+	}
+	if admin {
+		presets = append(presets, dto.APIKeyScopePreset{ID: APIKeyPresetAdmin, Label: "Admin", Description: "Full BeanCS admin API access.", Scopes: apiKeyPresetScopesMust(APIKeyPresetAdmin)})
+	}
+	return APIKeyScopeCatalog{Scopes: scopes, Presets: presets}
+}
+
+func apiKeyPresetScopes(preset string) ([]string, bool) {
+	switch preset {
+	case APIKeyPresetProjectDeveloper:
+		return []string{ScopeProjectsRead, ScopeProjectsWrite, ScopeProjectsDeploy, ScopeDeploymentsRead, ScopeDeploymentsWrite, ScopeProcessesRead, ScopeCredentialsRead, ScopeRegistriesRead, ScopeRuntimeRead}, true
+	case APIKeyPresetProjectOperator:
+		return []string{ScopeProjectsRead, ScopeProjectsWrite, ScopeProjectsDelete, ScopeProjectsDeploy, ScopeDeploymentsRead, ScopeDeploymentsWrite, ScopeProcessesRead, ScopeCredentialsRead, ScopeCredentialsWrite, ScopeCredentialsDelete, ScopeRegistriesRead, ScopeRegistriesWrite, ScopeRegistriesDelete, ScopeRuntimeRead, ScopeRuntimeWrite}, true
+	case APIKeyPresetReadOnly:
+		return []string{ScopeProjectsRead, ScopeDeploymentsRead, ScopeProcessesRead, ScopeCredentialsRead, ScopeRegistriesRead, ScopeRuntimeRead}, true
+	case APIKeyPresetAdmin:
+		return []string{ScopeAdmin}, true
+	default:
+		return nil, false
+	}
+}
+
+func apiKeyPresetScopesMust(preset string) []string {
+	scopes, _ := apiKeyPresetScopes(preset)
+	return scopes
+}
+
+func knownAPIKeyScope(scope string) bool {
+	switch scope {
+	case ScopeLegacyAPI, ScopeAdmin, ScopeProjectsRead, ScopeProjectsWrite, ScopeProjectsDelete, ScopeProjectsDeploy, ScopeDeploymentsRead, ScopeDeploymentsWrite, ScopeProcessesRead, ScopeCredentialsRead, ScopeCredentialsWrite, ScopeCredentialsDelete, ScopeRegistriesRead, ScopeRegistriesWrite, ScopeRegistriesDelete, ScopeRuntimeRead, ScopeRuntimeWrite, ScopeAPIKeysRead, ScopeAPIKeysWrite, ScopeAPIKeysRevoke:
+		return true
+	default:
+		return false
+	}
+}
+
+func hasScope(scopes []string, scope string) bool {
+	for _, s := range scopes {
+		if strings.TrimSpace(s) == scope {
+			return true
+		}
+	}
+	return false
 }
 
 func parseAPIKeyExpiry(value string) (*time.Time, error) {

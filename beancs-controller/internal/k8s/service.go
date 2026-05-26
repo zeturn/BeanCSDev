@@ -18,6 +18,9 @@ func (m *Manager) ApplyServicePorts(ctx context.Context, namespace, projectName 
 	if err := m.ensure(); err != nil {
 		return err
 	}
+	if len(ports) == 0 {
+		return nil
+	}
 	servicePorts := make([]corev1.ServicePort, 0, len(ports))
 	for _, p := range ports {
 		servicePorts = append(servicePorts, corev1.ServicePort{

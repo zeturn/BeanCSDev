@@ -2,6 +2,7 @@ package basaltpass
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/zeturn/beancs-controller/internal/config"
@@ -46,16 +47,26 @@ func (r *ClientRegistry) GetClientForInstance(instanceID uint) (Client, error) {
 	if err := r.db.First(&inst, instanceID).Error; err != nil {
 		return nil, err
 	}
-	secret, err := r.cipher.DecryptString(inst.ClientSecretEnc)
-	if err != nil {
-		return nil, err
-	}
-	serviceToken := ""
-	if len(inst.ServiceTokenEnc) > 0 {
-		serviceToken, err = r.cipher.DecryptString(inst.ServiceTokenEnc)
+	secret := ""
+	var err error
+	if len(inst.ClientSecretEnc) > 0 {
+		secret, err = r.cipher.DecryptString(inst.ClientSecretEnc)
 		if err != nil {
 			return nil, err
 		}
+	}
+	serviceToken := ""
+	switch {
+	case len(inst.AutomationTokenEnc) > 0:
+		serviceToken, err = r.cipher.DecryptString(inst.AutomationTokenEnc)
+	case len(inst.ServiceTokenEnc) > 0:
+		serviceToken, err = r.cipher.DecryptString(inst.ServiceTokenEnc)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(serviceToken) == "" && (strings.TrimSpace(inst.ClientID) == "" || strings.TrimSpace(secret) == "") {
+		return nil, fmt.Errorf("BasaltPass credential requires automation_token or client_id/client_secret")
 	}
 	client := NewHTTPClientWithServiceToken(inst.BaseURL, inst.ClientID, secret, serviceToken)
 
@@ -63,6 +74,21 @@ func (r *ClientRegistry) GetClientForInstance(instanceID uint) (Client, error) {
 	r.clients[instanceID] = client
 	r.mu.Unlock()
 	return client, nil
+}
+
+func (r *ClientRegistry) InstanceAutomationToken(instanceID uint) (string, error) {
+	var inst model.BasaltPassInstance
+	if err := r.db.First(&inst, instanceID).Error; err != nil {
+		return "", err
+	}
+	if len(inst.AutomationTokenEnc) > 0 {
+		token, err := r.cipher.DecryptString(inst.AutomationTokenEnc)
+		if err != nil {
+			return "", err
+		}
+		return token, nil
+	}
+	return "", nil
 }
 
 func (r *ClientRegistry) Invalidate(instanceID uint) {

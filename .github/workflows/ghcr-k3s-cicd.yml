@@ -194,6 +194,7 @@ jobs:
           BEANCS_DATABASE_URL: ${{ secrets.BEANCS_DATABASE_URL }}
           BEANCS_POSTGRES_PASSWORD: ${{ secrets.BEANCS_POSTGRES_PASSWORD }}
         run: |
+          RELEASE_VERSION="${GITHUB_REF_NAME}-${GITHUB_SHA::12}"
           DATABASE_URL="${BEANCS_DATABASE_URL}"
           if [ -z "${DATABASE_URL}" ]; then
             ENCODED_POSTGRES_PASSWORD="$(python3 -c 'import os, urllib.parse; print(urllib.parse.quote(os.environ["BEANCS_POSTGRES_PASSWORD"], safe=""))')"
@@ -201,6 +202,7 @@ jobs:
             DATABASE_URL="postgres://beancs:${ENCODED_POSTGRES_PASSWORD}@${POSTGRES_HOST}:5432/beancs?sslmode=disable"
           fi
           kubectl -n "${NAMESPACE}" create secret generic beancs-controller-env \
+            --from-literal=VERSION="${RELEASE_VERSION}" \
             --from-literal=DATABASE_URL="${DATABASE_URL}" \
             --from-literal=BP_MGMT_BASE_URL="${{ secrets.BP_MGMT_BASE_URL }}" \
             --from-literal=BP_MGMT_CLIENT_ID="${{ secrets.BP_MGMT_CLIENT_ID }}" \

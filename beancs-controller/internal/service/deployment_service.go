@@ -60,6 +60,85 @@ func (s *DeploymentService) List(ctx context.Context, projectID uint) ([]model.D
 	return out, err
 }
 
+func (s *DeploymentService) ProjectTracking(ctx context.Context, project model.Project, limit int) (*dto.ProjectTrackingResponse, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	var deployments []model.Deployment
+	if err := s.db.WithContext(ctx).Where("project_id = ?", project.ID).Order("created_at desc").Limit(limit).Find(&deployments).Error; err != nil {
+		return nil, err
+	}
+	processes, err := s.latestProcessesForDeployments(ctx, deployments)
+	if err != nil {
+		return nil, err
+	}
+	history := make([]dto.DeploymentHistoryItem, 0, len(deployments))
+	var latest *dto.DeploymentHistoryItem
+	var running *dto.DeploymentHistoryItem
+	summary := dto.ProjectTrackingSummary{Total: len(deployments)}
+	for _, dep := range deployments {
+		item := deploymentHistoryItem(dep, processes[dep.ID])
+		history = append(history, item)
+		if latest == nil {
+			copy := item
+			latest = &copy
+		}
+		if running == nil && isCurrentDeploymentStatus(item.Status) {
+			copy := item
+			running = &copy
+		}
+		accumulateTrackingSummary(&summary, item.Status)
+	}
+	currentImage := strings.TrimSpace(project.ImageReference)
+	if running != nil && strings.TrimSpace(running.ImageRef) != "" {
+		currentImage = running.ImageRef
+	} else if latest != nil && strings.TrimSpace(latest.ImageRef) != "" {
+		currentImage = latest.ImageRef
+	}
+	out := &dto.ProjectTrackingResponse{
+		ProjectID:         project.ID,
+		ProjectName:       project.Name,
+		DisplayName:       project.DisplayName,
+		ProjectStatus:     project.Status,
+		BuildSource:       project.BuildSource,
+		GitHubRepo:        project.GitHubRepo,
+		GitHubBranch:      project.GitHubBranch,
+		Namespace:         project.Namespace,
+		Domain:            project.Domain,
+		CurrentImage:      currentImage,
+		CurrentVersion:    versionFromImageRef(currentImage),
+		LatestDeployment:  latest,
+		RunningDeployment: running,
+		History:           history,
+		Summary:           summary,
+	}
+	if latest != nil {
+		out.LatestStatus = latest.Status
+	}
+	return out, nil
+}
+
+func (s *DeploymentService) latestProcessesForDeployments(ctx context.Context, deployments []model.Deployment) (map[uint]model.Process, error) {
+	out := map[uint]model.Process{}
+	if len(deployments) == 0 {
+		return out, nil
+	}
+	ids := make([]uint, 0, len(deployments))
+	for _, dep := range deployments {
+		ids = append(ids, dep.ID)
+	}
+	var processes []model.Process
+	if err := s.db.WithContext(ctx).Where("deployment_id IN ?", ids).Order("created_at desc").Find(&processes).Error; err != nil {
+		return nil, err
+	}
+	for _, process := range processes {
+		if _, exists := out[process.DeploymentID]; !exists {
+			out[process.DeploymentID] = process
+		}
+	}
+	return out, nil
+}
+
 func (s *DeploymentService) Logs(ctx context.Context, project model.Project, deploymentID uint) (string, error) {
 	var dep model.Deployment
 	if err := s.db.WithContext(ctx).Where("project_id = ? AND id = ?", project.ID, deploymentID).First(&dep).Error; err != nil {
@@ -154,7 +233,10 @@ func (s *DeploymentService) HandleGitHubWebhook(ctx context.Context, req dto.Git
 		if err != nil {
 			return err
 		}
-		return s.gitops.UpdateImageTag(ctx, token, cred, &p, imageRef)
+		if err := s.gitops.UpdateImageTag(ctx, token, cred, &p, imageRef); err != nil {
+			_ = s.db.WithContext(ctx).Model(&dep).Updates(map[string]any{"status": "failed", "failure_reason": truncateFailure(err.Error())}).Error
+			return err
+		}
 	}
 	return nil
 }
@@ -180,6 +262,84 @@ func webhookImageReference(project model.Project, tag string) string {
 		base = base[:lastColon]
 	}
 	return base + ":" + imageRef
+}
+
+func deploymentHistoryItem(dep model.Deployment, process model.Process) dto.DeploymentHistoryItem {
+	item := dto.DeploymentHistoryItem{
+		ID:            dep.ID,
+		Version:       deploymentVersion(dep),
+		Tag:           dep.Tag,
+		ImageRef:      dep.ImageRef,
+		ImageDigest:   dep.ImageDigest,
+		CommitSHA:     dep.CommitSHA,
+		Status:        coalesce(dep.Status, "pending"),
+		TriggeredBy:   dep.TriggeredBy,
+		FailureReason: dep.FailureReason,
+		WorkflowRunID: dep.WorkflowRunID,
+		WorkflowURL:   dep.WorkflowURL,
+		CreatedAt:     dep.CreatedAt,
+		UpdatedAt:     dep.UpdatedAt,
+	}
+	if process.ID != 0 {
+		item.ProcessID = process.ID
+		item.ProcessStatus = process.Status
+		item.ProcessTitle = process.Title
+		item.StartedAt = process.StartedAt
+		item.FinishedAt = process.FinishedAt
+	}
+	return item
+}
+
+func deploymentVersion(dep model.Deployment) string {
+	if version := versionFromImageRef(dep.ImageRef); version != "" {
+		return version
+	}
+	if version := versionFromImageRef(dep.Tag); version != "" {
+		return version
+	}
+	return strings.TrimSpace(dep.Tag)
+}
+
+func versionFromImageRef(image string) string {
+	value := strings.TrimSpace(image)
+	if value == "" {
+		return ""
+	}
+	if at := strings.LastIndex(value, "@"); at >= 0 && at+1 < len(value) {
+		return value[at+1:]
+	}
+	lastSlash := strings.LastIndex(value, "/")
+	lastColon := strings.LastIndex(value, ":")
+	if lastColon > lastSlash && lastColon+1 < len(value) {
+		return value[lastColon+1:]
+	}
+	return value
+}
+
+func isCurrentDeploymentStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "running", "succeeded", "ready":
+		return true
+	default:
+		return false
+	}
+}
+
+func accumulateTrackingSummary(summary *dto.ProjectTrackingSummary, status string) {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "running", "ready":
+		summary.Running++
+	case "deploying":
+		summary.Deploying++
+	case "building":
+		summary.Building++
+	case "queued":
+		summary.Queued++
+	case "failed", "failure", "cancelled", "error":
+		summary.Failed++
+	case "succeeded", "success":
+		summary.Successful++
+	}
 }
 
 func deploymentRecordLog(dep model.Deployment) string {

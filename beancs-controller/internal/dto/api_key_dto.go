@@ -5,6 +5,7 @@ import "time"
 type CreateAPIKeyRequest struct {
 	Name      string   `json:"name" validate:"required,max=128"`
 	Scopes    []string `json:"scopes" validate:"omitempty,dive,max=64"`
+	Preset    string   `json:"preset" validate:"omitempty,max=64"`
 	ExpiresAt string   `json:"expires_at" validate:"omitempty"`
 }
 
@@ -22,4 +23,17 @@ type APIKeyResponse struct {
 type CreateAPIKeyResponse struct {
 	APIKeyResponse
 	Key string `json:"key"`
+}
+
+type APIKeyScopeOption struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Description string `json:"description"`
+}
+
+type APIKeyScopePreset struct {
+	ID          string   `json:"id"`
+	Label       string   `json:"label"`
+	Description string   `json:"description"`
+	Scopes      []string `json:"scopes"`
 }

@@ -21,17 +21,17 @@ func NewContainerRegistryHandler(svc *service.ContainerRegistryService, v *valid
 }
 
 func (h *ContainerRegistryHandler) Register(r fiber.Router) {
-	r.Get("/container-registries/presets", h.presets)
-	r.Get("/container-registries", h.listRegistries)
-	r.Post("/container-registries", h.createRegistry)
-	r.Patch("/container-registries/:id", h.updateRegistry)
-	r.Delete("/container-registries/:id", h.deleteRegistry)
-	r.Get("/container-registries/:id/tags", h.listTagsLive)
+	r.Get("/container-registries/presets", middleware.RequireAPIScope(service.ScopeRegistriesRead), h.presets)
+	r.Get("/container-registries", middleware.RequireAPIScope(service.ScopeRegistriesRead), h.listRegistries)
+	r.Post("/container-registries", middleware.RequireAPIScope(service.ScopeRegistriesWrite), h.createRegistry)
+	r.Patch("/container-registries/:id", middleware.RequireAPIScope(service.ScopeRegistriesWrite), h.updateRegistry)
+	r.Delete("/container-registries/:id", middleware.RequireAPIScope(service.ScopeRegistriesDelete), h.deleteRegistry)
+	r.Get("/container-registries/:id/tags", middleware.RequireAPIScope(service.ScopeRegistriesRead), h.listTagsLive)
 
-	r.Get("/container-images", h.listImages)
-	r.Post("/container-images", h.createImage)
-	r.Post("/container-images/:id/refresh", h.refreshImage)
-	r.Delete("/container-images/:id", h.deleteImage)
+	r.Get("/container-images", middleware.RequireAPIScope(service.ScopeRegistriesRead), h.listImages)
+	r.Post("/container-images", middleware.RequireAPIScope(service.ScopeRegistriesWrite), h.createImage)
+	r.Post("/container-images/:id/refresh", middleware.RequireAPIScope(service.ScopeRegistriesWrite), h.refreshImage)
+	r.Delete("/container-images/:id", middleware.RequireAPIScope(service.ScopeRegistriesDelete), h.deleteImage)
 }
 
 func (h *ContainerRegistryHandler) presets(c *fiber.Ctx) error {
