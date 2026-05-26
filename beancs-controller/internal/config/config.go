@@ -87,12 +87,23 @@ func Load() (*Config, error) {
 
 func (c *Config) WebhookBaseURL() string {
 	if c.SelfWebhookHost != "" {
-		return strings.TrimRight(c.SelfWebhookHost, "/")
+		return publicURL(c.SelfWebhookHost)
 	}
 	if c.SelfPublicHost != "" {
-		return "https://" + strings.Trim(strings.TrimSpace(c.SelfPublicHost), "/")
+		return publicURL(c.SelfPublicHost)
 	}
 	return ""
+}
+
+func publicURL(host string) string {
+	host = strings.TrimRight(strings.TrimSpace(host), "/")
+	if host == "" {
+		return ""
+	}
+	if strings.HasPrefix(host, "http://") || strings.HasPrefix(host, "https://") {
+		return host
+	}
+	return "https://" + strings.Trim(host, "/")
 }
 
 func basaltAPIBaseURL(v string) string {
