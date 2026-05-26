@@ -5,6 +5,7 @@ import (
 
 	appspec "github.com/zeturn/beancs-controller/internal/application/spec"
 	"github.com/zeturn/beancs-controller/internal/dto"
+	"github.com/zeturn/beancs-controller/internal/model"
 )
 
 func TestSpecToMonorepoRequestResolvesGeneratedComponentSecrets(t *testing.T) {
@@ -38,7 +39,7 @@ func TestSpecToMonorepoRequestResolvesGeneratedComponentSecrets(t *testing.T) {
 		},
 	}
 
-	req := (&ApplicationSpecService{}).specToMonorepoRequest(doc, dto.ApplicationSpecRepoRequest{})
+	req := (&ApplicationSpecService{}).specToMonorepoRequest(nil, "", doc, dto.ApplicationSpecRepoRequest{})
 	if len(req.Components) != 2 {
 		t.Fatalf("expected 2 components, got %d", len(req.Components))
 	}
@@ -49,5 +50,27 @@ func TestSpecToMonorepoRequestResolvesGeneratedComponentSecrets(t *testing.T) {
 	}
 	if executorKey != controlKey {
 		t.Fatalf("expected executor to reuse control key")
+	}
+}
+
+func TestApplyComponentDomainsFillsRoutableHosts(t *testing.T) {
+	component := dto.MonorepoComponentRequest{
+		ProjectName: "araneae-control",
+		Ports: model.ProjectPorts{
+			{Name: "http", Port: 8180, Protocol: "http", Exposure: model.ExposurePublic},
+			{Name: "grpc", Port: 9190, Protocol: "grpc", Exposure: model.ExposurePrivate},
+		},
+	}
+
+	applyComponentDomains(&component, "app-araneae", "hollowdata.com")
+
+	if got := component.Ports[0].Domain; got != "araneae-control.hollowdata.com" {
+		t.Fatalf("public domain = %q", got)
+	}
+	if got := component.Ports[1].Domain; got != "araneae-control.app-araneae.ts.net" {
+		t.Fatalf("private domain = %q", got)
+	}
+	if got := component.Ports[1].Protocol; got != "" {
+		t.Fatalf("expected unsupported project protocol to be cleared, got %q", got)
 	}
 }

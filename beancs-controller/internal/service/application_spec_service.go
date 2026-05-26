@@ -64,7 +64,7 @@ func (s *ApplicationSpecService) ApplyFromRepo(ctx context.Context, userID, tena
 	if req.DryRun {
 		return resp, nil, nil
 	}
-	monorepo := s.specToMonorepoRequest(doc, req)
+	monorepo := s.specToMonorepoRequest(ctx, userID, doc, req)
 	app, err := s.applications.CreateMonorepo(ctx, userID, tenantID, tenantCode, monorepo)
 	if app != nil {
 		updates := map[string]any{"spec_path": file.Path, "spec_hash": file.Hash, "spec_raw": specRawMap(doc)}
@@ -164,7 +164,7 @@ func (s *ApplicationSpecService) dependencyDefinitions() map[string]appspec.Depe
 	return out
 }
 
-func (s *ApplicationSpecService) specToMonorepoRequest(doc *appspec.ApplicationSpecDocument, applyReq dto.ApplicationSpecRepoRequest) dto.CreateMonorepoApplicationRequest {
+func (s *ApplicationSpecService) specToMonorepoRequest(ctx context.Context, userID string, doc *appspec.ApplicationSpecDocument, applyReq dto.ApplicationSpecRepoRequest) dto.CreateMonorepoApplicationRequest {
 	autoDeploy := doc.Spec.AutoDeploy != nil && doc.Spec.AutoDeploy.Enabled && doc.Spec.AutoDeploy.Mode != "disabled"
 	req := dto.CreateMonorepoApplicationRequest{
 		Name:                   doc.Metadata.Name,
@@ -180,6 +180,7 @@ func (s *ApplicationSpecService) specToMonorepoRequest(doc *appspec.ApplicationS
 	if doc.Spec.Namespace != nil && doc.Spec.Namespace.Strategy == "shared" {
 		req.Namespace = doc.Spec.Namespace.Name
 	}
+	publicDomain := s.cloudflareDomainForSpec(ctx, userID, applyReq)
 	for _, dep := range doc.Spec.Dependencies {
 		req.Dependencies = append(req.Dependencies, dto.CreateManagedDependencyRequest{
 			Name:         dep.Name,
@@ -192,6 +193,7 @@ func (s *ApplicationSpecService) specToMonorepoRequest(doc *appspec.ApplicationS
 	componentSecrets := map[string]map[string]string{}
 	for _, component := range doc.Spec.Components {
 		componentReq := specComponentToRequest(component)
+		applyComponentDomains(&componentReq, req.Namespace, publicDomain)
 		secrets := resolveComponentSecrets(component, componentSecrets)
 		if len(secrets) > 0 {
 			if componentReq.Env == nil {
@@ -205,6 +207,35 @@ func (s *ApplicationSpecService) specToMonorepoRequest(doc *appspec.ApplicationS
 		req.Components = append(req.Components, componentReq)
 	}
 	return req
+}
+
+func (s *ApplicationSpecService) cloudflareDomainForSpec(ctx context.Context, userID string, applyReq dto.ApplicationSpecRepoRequest) string {
+	if s == nil || s.credentials == nil || applyReq.CloudflareCredentialID == nil {
+		return ""
+	}
+	if err := s.credentials.RequireAccess(userID, model.CredentialTypeCloudflare, *applyReq.CloudflareCredentialID, false); err != nil {
+		return ""
+	}
+	cred, err := s.credentials.CloudflareCredentialForDomain(ctx, *applyReq.CloudflareCredentialID, applyReq.CloudflareZoneID, "")
+	if err != nil {
+		return ""
+	}
+	return strings.Trim(strings.ToLower(cred.Domain), ".")
+}
+
+func applyComponentDomains(component *dto.MonorepoComponentRequest, namespace, publicDomain string) {
+	for i := range component.Ports {
+		port := &component.Ports[i]
+		if port.Exposure == model.ExposurePublic && port.Domain == "" && publicDomain != "" {
+			port.Domain = component.ProjectName + "." + publicDomain
+		}
+		if port.Exposure == model.ExposurePrivate && port.Domain == "" {
+			port.Domain = component.ProjectName + "." + coalesce(namespace, "proj-"+component.ProjectName) + ".ts.net"
+		}
+		if port.Protocol != "" && port.Protocol != "http" {
+			port.Protocol = ""
+		}
+	}
 }
 
 func specComponentToRequest(component appspec.ComponentSpec) dto.MonorepoComponentRequest {

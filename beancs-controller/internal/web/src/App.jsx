@@ -2415,7 +2415,18 @@ function DeployView({credentials, domains, namespaces, selectedCredential, setSe
                 <p className="muted">Public component hostnames use the component project name under the selected zone.</p>
               </>
             )}
-            {form.application_type === "monorepo" && !(form.components || []).some((component) => component.enabled !== false && component.exposure_mode === "public") && <p className="muted">No public DNS zone is required for the selected components.</p>}
+            {form.application_type === "monorepo" && (
+              <>
+                {!(form.components || []).some((component) => component.enabled !== false && component.exposure_mode === "public") && <p className="muted">No public DNS zone is required for the selected components.</p>}
+                <div className="signal-list">
+                  {(form.components || []).filter((component) => component.enabled !== false && Number(component.port || 0) > 0).map((component) => (
+                    <span key={component.project_name}>
+                      {component.project_name}: {monorepoComponentHost(component, form, selectedCloudflareDomain)}
+                    </span>
+                  ))}
+                </div>
+              </>
+            )}
             {form.application_type !== "monorepo" && form.exposure_mode === "public" && (
               <>
                 <label>Cloudflare credential</label>
@@ -5066,6 +5077,17 @@ function componentFromApplicationSpec(applicationName, component) {
     env_entries: envEntriesFromObject(component.env || {}),
     dependency_links: (component.envFromDependencies || []).map((ref) => ({dependency: ref.dependency, preset: ref.preset || ""})),
   };
+}
+
+function monorepoComponentHost(component, form, selectedCloudflareDomain) {
+  const exposure = component.exposure_mode || (component.port ? "private" : "internal-only");
+  if (exposure === "public") {
+    return selectedCloudflareDomain?.domain ? `${component.project_name}.${selectedCloudflareDomain.domain}` : "Choose a Cloudflare zone";
+  }
+  if (exposure === "private") {
+    return `${component.project_name}.${form.namespace || `proj-${component.project_name}`}.ts.net`;
+  }
+  return "internal only";
 }
 
 function buildMonorepoApplicationPayload(form, githubCredentialID, credentials) {
