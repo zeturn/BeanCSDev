@@ -101,6 +101,8 @@ func TestRenderDependencyManifestsUsesExistingSecret(t *testing.T) {
 
 	files := service.RenderDependencyManifests(model.Application{Name: "araneae"}, dep, def)
 	values := files[path.Join("apps", "araneae", "dependencies", "rabbitmq", "values.yaml")]
+	assertContains(t, values, "allowInsecureImages: true")
+	assertContains(t, values, "repository: bitnamilegacy/rabbitmq")
 	assertContains(t, values, "existingPasswordSecret: araneae-rabbitmq-credentials")
 	assertContains(t, values, "size: \"8Gi\"")
 	if strings.Contains(values, "secret-password") {
@@ -108,6 +110,8 @@ func TestRenderDependencyManifestsUsesExistingSecret(t *testing.T) {
 	}
 
 	app := files[path.Join("apps", "araneae", "dependencies", "rabbitmq", "application.yaml")]
+	assertContains(t, app, "repoURL: https://charts.bitnami.com/bitnami")
+	assertContains(t, app, "targetRevision: 16.0.14")
 	assertContains(t, app, "chart: rabbitmq")
 	assertContains(t, app, "namespace: app-araneae")
 	assertContains(t, app, "releaseName: rabbitmq")

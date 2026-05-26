@@ -486,6 +486,13 @@ func renderRabbitMQValues(dep model.ManagedDependency) string {
 		username = "user"
 	}
 	return fmt.Sprintf(`fullnameOverride: %s
+global:
+  security:
+    allowInsecureImages: true
+image:
+  registry: docker.io
+  repository: bitnamilegacy/rabbitmq
+  tag: 4.1.3-debian-12-r1
 auth:
   username: %s
   existingPasswordSecret: %s
