@@ -5,6 +5,7 @@ metadata:
   namespace: beancs-system
 type: Opaque
 stringData:
+  VERSION: dev
   DATABASE_URL: postgres://beancs:change-me-before-production@beancs-postgres.beancs-system.svc.cluster.local:5432/beancs?sslmode=disable
   BP_MGMT_BASE_URL: https://your-basaltpass.example.com
   BP_MGMT_CLIENT_ID: replace-me

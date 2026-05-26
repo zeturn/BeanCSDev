@@ -1117,10 +1117,8 @@ function App() {
 	setNotice("");
 	const branch = branchOverride || deployForm.github_branch || "main";
 	try {
-      if (deployForm.application_type === "monorepo") {
-        const specAnalysis = await analyzeApplicationSpec(repoFullName, branch);
-        if (specAnalysis) return specAnalysis;
-      }
+      const specAnalysis = await analyzeApplicationSpec(repoFullName, branch);
+      if (specAnalysis) return specAnalysis;
 	  const endpoint = deployForm.application_type === "monorepo" ? "/repositories/analyze-monorepo" : "/projects/analyze";
 	  const data = await api.post(endpoint, {
 	    github_credential_id: Number(selectedCredential),
@@ -1160,15 +1158,23 @@ function App() {
       return specAnalysis;
     } catch (err) {
       const message = String(err.message || "");
-      if (message.includes("application spec config not found")) return null;
-      setAnalysis({
+      if (message.includes("application spec config not found")) return false;
+      const specAnalysis = {
         source: "beancs_spec",
         is_monorepo: false,
+        deployable: false,
         spec_error: message,
         warnings: [message],
-      });
+      };
+      setAnalysis(specAnalysis);
+      setDeployForm((current) => ({
+        ...current,
+        application_type: "monorepo",
+        github_repo: repoFullName,
+        github_branch: branch,
+      }));
       setError(`Application spec check failed: ${message}`);
-      return null;
+      return specAnalysis;
     }
   }
 
@@ -2199,11 +2205,11 @@ function DeployView({credentials, domains, namespaces, selectedCredential, setSe
         )}
         {step.id === "check" && (
           <div className="readiness-card">
-            <button type="button" className="primary" onClick={runInstallCheck} disabled={checkingInstall}>
-              {checkingInstall ? <LoaderCircle className="spin" size={16} /> : <Shield size={16} />}
-              {checkingInstall ? "Checking..." : "Check installability"}
-            </button>
-            {!analysis && <p className="muted">BeanCS will verify repository signals or image/source inputs before continuing.</p>}
+            {!analysis && (
+              <p className="muted">
+                {checkingInstall ? "Checking installability..." : "BeanCS will verify repository signals or image/source inputs before continuing."}
+              </p>
+            )}
             {analysis && form.application_type === "monorepo" && (
               <>
                 <div className={analysis.is_monorepo ? "status good" : "status bad"}>
@@ -3769,7 +3775,9 @@ function SettingsView({version}) {
     <div className="stack">
       <section className="panel">
         <h2><Settings size={18} /> Settings</h2>
-        <p className="muted">Controller API version: <code className="mono">{version || "—"}</code></p>
+        <div className="metric-row">
+          <MetricCard icon={Rocket} label="Deployed version" value={version || "-"} detail="Controller VERSION environment value" />
+        </div>
         <p className="muted">Authentication uses BasaltPass. Manage identity provider connections under <b>Security → Access Control</b>.</p>
       </section>
     </div>
