@@ -10,7 +10,7 @@ spec:
   defaultDeployMethod: helm
   helm:
     chart:
-      repo: oci://registry-1.docker.io/bitnamicharts
+      repo: https://charts.bitnami.com/bitnami
       name: mysql
       version: "*"
     valuesTemplate: mysql.values.yaml
