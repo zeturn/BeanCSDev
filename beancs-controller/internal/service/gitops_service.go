@@ -519,13 +519,6 @@ func renderPostgreSQLValues(dep model.ManagedDependency) string {
 		database = fmt.Sprint(dep.Config["database"])
 	}
 	return fmt.Sprintf(`fullnameOverride: %s
-global:
-  security:
-    allowInsecureImages: true
-image:
-  registry: docker.io
-  repository: bitnamilegacy/mysql
-  tag: 9.4.0-debian-12-r1
 auth:
   username: %s
   database: %s
@@ -549,6 +542,13 @@ func renderMySQLValues(dep model.ManagedDependency) string {
 		database = fmt.Sprint(dep.Config["database"])
 	}
 	return fmt.Sprintf(`fullnameOverride: %s
+global:
+  security:
+    allowInsecureImages: true
+image:
+  registry: docker.io
+  repository: bitnamilegacy/mysql
+  tag: 9.4.0-debian-12-r1
 auth:
   username: %s
   database: %s
