@@ -130,7 +130,7 @@ func (s *DependencyService) Create(ctx context.Context, userID string, applicati
 			return nil, fmt.Errorf("external dependency %q requires config.host", req.Name)
 		}
 	}
-	outputs := resolveDependencyOutputs(def, serviceName, config, secretData)
+	outputs := resolveDependencyOutputs(def, dependencyRuntimeHost(serviceName, coalesce(app.Namespace, coalesce(app.Name, req.Name)), external), config, secretData)
 	outputs = applyExternalDependencyOutputs(outputs, config, external)
 	secretName := fmt.Sprintf("%s-%s-credentials", app.Name, req.Name)
 	dep := &model.ManagedDependency{
@@ -317,6 +317,10 @@ func (s *DependencyService) CreateCredential(ctx context.Context, userID string,
 	if err := s.db.WithContext(ctx).Create(cred).Error; err != nil {
 		return nil, err
 	}
+	if err := s.reconcileRuntimeCredential(ctx, dep, *cred); err != nil {
+		_ = s.db.WithContext(ctx).Model(cred).Updates(map[string]any{"status": model.DependencyStatusFailed, "description": strings.TrimSpace(coalesce(cred.Description, "") + " runtime reconcile failed: " + err.Error())}).Error
+		return nil, err
+	}
 	return cred, nil
 }
 
@@ -493,7 +497,7 @@ func (s *DependencyService) buildDependencyCredential(dep model.ManagedDependenc
 	definitionName := coalesce(dep.DefinitionName, dep.Type)
 	def, _ := s.registry.Get(definitionName)
 	secretData := dependencySecretData(def, config)
-	outputs := resolveDependencyOutputs(def, dep.ServiceName, config, secretData)
+	outputs := resolveDependencyOutputs(def, dependencyRuntimeHost(dep.ServiceName, dep.Namespace, dep.External), config, secretData)
 	outputs = applyExternalDependencyOutputs(outputs, config, dep.External)
 	return &model.DependencyCredential{
 		DependencyID: dep.ID,
@@ -502,6 +506,29 @@ func (s *DependencyService) buildDependencyCredential(dep model.ManagedDependenc
 		Config:       config,
 		Outputs:      outputs,
 		Status:       model.DependencyStatusReady,
+	}
+}
+
+func (s *DependencyService) reconcileRuntimeCredential(ctx context.Context, dep model.ManagedDependency, cred model.DependencyCredential) error {
+	if s.k8s == nil || dep.External {
+		return nil
+	}
+	switch dep.Type {
+	case "mysql":
+		outputs := flattenDependencyOutputs(cred.Outputs)
+		return s.k8s.ReconcileMySQLCredential(ctx, k8s.MySQLCredentialRuntime{
+			Namespace:      dep.Namespace,
+			ServiceName:    dep.ServiceName,
+			SecretName:     dep.SecretName,
+			Database:       coalesce(outputs["database"], fmt.Sprint(cred.Config["database"])),
+			Username:       coalesce(outputs["username"], fmt.Sprint(cred.Config["username"])),
+			Password:       coalesce(outputs["password"], fmt.Sprint(cred.Config["password"])),
+			Port:           coalesce(coalesce(outputs["port"], fmt.Sprint(cred.Config["port"])), "3306"),
+			DependencyName: dep.Name,
+			CredentialName: cred.Name,
+		})
+	default:
+		return nil
 	}
 }
 
@@ -571,6 +598,18 @@ func applyExternalDependencyOutputs(outputs model.JSONMap, config model.JSONMap,
 		outputs["port"] = map[string]any{"value": port, "secret": false}
 	}
 	return outputs
+}
+
+func dependencyRuntimeHost(serviceName, namespace string, external bool) string {
+	serviceName = strings.TrimSpace(serviceName)
+	if external || serviceName == "" {
+		return serviceName
+	}
+	namespace = strings.TrimSpace(namespace)
+	if namespace == "" || strings.Contains(serviceName, ".") {
+		return serviceName
+	}
+	return serviceName + "." + namespace + ".svc.cluster.local"
 }
 
 func flattenDependencyOutputs(outputs model.JSONMap) map[string]string {
