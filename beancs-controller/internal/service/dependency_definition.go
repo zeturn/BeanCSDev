@@ -118,7 +118,11 @@ func (r *DependencyDefinitionRegistry) List() []DependencyDefinition {
 }
 
 func (r *DependencyDefinitionRegistry) Get(name string) (DependencyDefinition, bool) {
-	def, ok := r.definitions[strings.TrimSpace(name)]
+	name = strings.TrimSpace(name)
+	if name == "pgsql" || name == "postgres" {
+		name = "postgresql"
+	}
+	def, ok := r.definitions[name]
 	return def, ok
 }
 

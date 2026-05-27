@@ -10,9 +10,9 @@ spec:
   defaultDeployMethod: helm
   helm:
     chart:
-      repo: oci://registry-1.docker.io/bitnamicharts
+      repo: https://charts.bitnami.com/bitnami
       name: postgresql
-      version: "*"
+      version: "18.6.7"
     valuesTemplate: postgresql.values.yaml
   configSchema:
     type: object
@@ -20,6 +20,11 @@ spec:
       database:
         type: string
         default: app
+      host:
+        type: string
+      port:
+        type: string
+        default: "5432"
       username:
         type: string
         default: app
@@ -47,7 +52,8 @@ spec:
       valueFrom:
         serviceHost: postgres
     port:
-      value: "5432"
+      valueFrom:
+        config: port
     database:
       valueFrom:
         config: database

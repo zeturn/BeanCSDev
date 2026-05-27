@@ -432,6 +432,10 @@ func renderDependencyArgoApplication(app model.Application, dep model.ManagedDep
 	if chartVersion == "" {
 		chartVersion = "*"
 	}
+	targetRevision := chartVersion
+	if strings.Contains(chartVersion, "*") {
+		targetRevision = yamlScalar(chartVersion)
+	}
 	return fmt.Sprintf(`apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -461,7 +465,7 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
-`, appName, dep.Name, app.Name, dep.Name, chartRepo, chartName, chartVersion, dep.ServiceName, indentYAMLBlock(values, 8), dep.Namespace)
+`, appName, dep.Name, app.Name, dep.Name, chartRepo, chartName, targetRevision, dep.ServiceName, indentYAMLBlock(values, 8), dep.Namespace)
 }
 
 func renderDependencyHelmValues(dep model.ManagedDependency) string {
@@ -470,6 +474,8 @@ func renderDependencyHelmValues(dep model.ManagedDependency) string {
 		return renderRabbitMQValues(dep)
 	case "postgresql":
 		return renderPostgreSQLValues(dep)
+	case "mysql":
+		return renderMySQLValues(dep)
 	case "redis":
 		return renderRedisValues(dep)
 	default:
@@ -486,10 +492,17 @@ func renderRabbitMQValues(dep model.ManagedDependency) string {
 		username = "user"
 	}
 	return fmt.Sprintf(`fullnameOverride: %s
+global:
+  security:
+    allowInsecureImages: true
+image:
+  registry: docker.io
+  repository: bitnamilegacy/rabbitmq
+  tag: 4.1.3-debian-12-r1
 auth:
   username: %s
   existingPasswordSecret: %s
-  existingSecretPasswordKey: password
+  existingSecretPasswordKey: rabbitmq-password
 persistence:
   enabled: %s
   size: %s
@@ -506,6 +519,36 @@ func renderPostgreSQLValues(dep model.ManagedDependency) string {
 		database = fmt.Sprint(dep.Config["database"])
 	}
 	return fmt.Sprintf(`fullnameOverride: %s
+auth:
+  username: %s
+  database: %s
+  existingSecret: %s
+  customPasswordFiles:
+    user: mysql-password
+primary:
+  persistence:
+    enabled: %s
+    size: %s
+`, dep.ServiceName, yamlScalar(coalesce(username, "app")), yamlScalar(coalesce(database, "app")), dep.SecretName, yamlBool(configBool(dep.Config, "persistence.enabled", true)), yamlScalar(configString(dep.Config, "persistence.size", "20Gi")))
+}
+
+func renderMySQLValues(dep model.ManagedDependency) string {
+	username := dependencyOutputValue(dep, "username")
+	if username == "" {
+		username = fmt.Sprint(dep.Config["username"])
+	}
+	database := dependencyOutputValue(dep, "database")
+	if database == "" {
+		database = fmt.Sprint(dep.Config["database"])
+	}
+	return fmt.Sprintf(`fullnameOverride: %s
+global:
+  security:
+    allowInsecureImages: true
+image:
+  registry: docker.io
+  repository: bitnamilegacy/mysql
+  tag: 9.4.0-debian-12-r1
 auth:
   username: %s
   database: %s
@@ -546,6 +589,17 @@ func dependencySecretRuntimeData(dep model.ManagedDependency) map[string]string 
 	}
 	if password := dependencyOutputValue(dep, "password"); password != "" {
 		data["password"] = password
+		switch dep.Type {
+		case "mysql":
+			data["mysql-password"] = password
+			data["mysql-root-password"] = password
+			data["mysql-replication-password"] = password
+		case "rabbitmq":
+			data["rabbitmq-password"] = password
+		case "postgresql":
+			data["postgres-password"] = password
+			data["replication-password"] = password
+		}
 	}
 	if username := dependencyOutputValue(dep, "username"); username != "" {
 		data["username"] = username

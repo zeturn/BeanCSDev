@@ -14,6 +14,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&model.UserCredential{},
 		&model.Application{},
 		&model.ManagedDependency{},
+		&model.DependencyCredential{},
 		&model.ApplicationComponent{},
 		&model.DependencyDefinitionRecord{},
 		&model.Project{},

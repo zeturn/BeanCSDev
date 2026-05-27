@@ -75,6 +75,7 @@ func main() {
 	}
 	gitopsSvc.SetDependencyRegistry(dependencyRegistry)
 	dependencySvc := service.NewDependencyService(db, dependencyRegistry)
+	dependencySvc.SetDeployers(credentialSvc, gitopsSvc, k8sManager)
 	applicationSvc := service.NewApplicationService(db, projectSvc, dependencySvc)
 	applicationSpecSvc := service.NewApplicationSpecService(db, credentialSvc, dependencySvc, applicationSvc)
 	processSvc := service.NewProcessService(db, buildSvc, credentialSvc, gitopsSvc, dnsSvc, k8sManager)

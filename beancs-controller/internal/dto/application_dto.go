@@ -45,9 +45,12 @@ type MonorepoComponentRequest struct {
 }
 
 type EnvFromDependencyRequest struct {
-	Dependency string         `json:"dependency" validate:"required,max=128"`
-	Preset     string         `json:"preset" validate:"omitempty,max=128"`
-	Mappings   map[string]any `json:"mappings" validate:"omitempty"`
+	Dependency   string         `json:"dependency" validate:"required_without=DependencyID,max=128"`
+	DependencyID uint           `json:"dependency_id" validate:"omitempty"`
+	Credential   string         `json:"credential" validate:"omitempty,max=128"`
+	CredentialID uint           `json:"credential_id" validate:"omitempty"`
+	Preset       string         `json:"preset" validate:"omitempty,max=128"`
+	Mappings     map[string]any `json:"mappings" validate:"omitempty"`
 }
 
 type ApplicationResponse struct {

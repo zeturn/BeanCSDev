@@ -101,6 +101,8 @@ func TestRenderDependencyManifestsUsesExistingSecret(t *testing.T) {
 
 	files := service.RenderDependencyManifests(model.Application{Name: "araneae"}, dep, def)
 	values := files[path.Join("apps", "araneae", "dependencies", "rabbitmq", "values.yaml")]
+	assertContains(t, values, "allowInsecureImages: true")
+	assertContains(t, values, "repository: bitnamilegacy/rabbitmq")
 	assertContains(t, values, "existingPasswordSecret: araneae-rabbitmq-credentials")
 	assertContains(t, values, "size: \"8Gi\"")
 	if strings.Contains(values, "secret-password") {
@@ -108,9 +110,54 @@ func TestRenderDependencyManifestsUsesExistingSecret(t *testing.T) {
 	}
 
 	app := files[path.Join("apps", "araneae", "dependencies", "rabbitmq", "application.yaml")]
+	assertContains(t, app, "repoURL: https://charts.bitnami.com/bitnami")
+	assertContains(t, app, "targetRevision: 16.0.14")
 	assertContains(t, app, "chart: rabbitmq")
 	assertContains(t, app, "namespace: app-araneae")
 	assertContains(t, app, "releaseName: rabbitmq")
+}
+
+func TestRenderMySQLDependencyManifestsUseLegacyImage(t *testing.T) {
+	service := NewGitOpsService(nil, nil)
+	registry, err := NewDependencyDefinitionRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	def, ok := registry.Get("mysql")
+	if !ok {
+		t.Fatal("mysql definition not found")
+	}
+	dep := model.ManagedDependency{
+		Name:         "mysql",
+		Type:         "mysql",
+		Namespace:    "app-araneae",
+		ServiceName:  "mysql",
+		SecretName:   "araneae-mysql-credentials",
+		DeployMethod: model.DependencyDeployMethodHelm,
+		Config: model.JSONMap{
+			"database":    "app",
+			"username":    "app",
+			"persistence": map[string]any{"enabled": false, "size": "1Gi"},
+		},
+		Outputs: model.JSONMap{
+			"username": map[string]any{"value": "app", "secret": true},
+			"database": map[string]any{"value": "app"},
+			"password": map[string]any{"value": "secret-password", "secret": true},
+		},
+	}
+
+	files := service.RenderDependencyManifests(model.Application{Name: "araneae"}, dep, def)
+	values := files[path.Join("apps", "araneae", "dependencies", "mysql", "values.yaml")]
+	assertContains(t, values, "allowInsecureImages: true")
+	assertContains(t, values, "repository: bitnamilegacy/mysql")
+	assertContains(t, values, "existingSecret: araneae-mysql-credentials")
+	assertContains(t, values, "enabled: false")
+	if strings.Contains(values, "secret-password") {
+		t.Fatalf("dependency values must not include secret plaintext:\n%s", values)
+	}
+
+	app := files[path.Join("apps", "araneae", "dependencies", "mysql", "application.yaml")]
+	assertContains(t, app, "targetRevision: 14.0.3")
 }
 
 func assertContains(t *testing.T, text, want string) {

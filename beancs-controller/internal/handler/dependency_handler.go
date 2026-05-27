@@ -22,8 +22,12 @@ func NewDependencyHandler(svc *service.DependencyService, v *validator.Validate)
 func (h *DependencyHandler) Register(r fiber.Router) {
 	r.Get("/dependency-definitions", middleware.RequireAPIScope(service.ScopeProjectsRead), h.listDefinitions)
 	r.Get("/dependency-definitions/:name", middleware.RequireAPIScope(service.ScopeProjectsRead), h.getDefinition)
+	r.Get("/dependencies", middleware.RequireAPIScope(service.ScopeProjectsRead), h.listReusableDependencies)
+	r.Post("/dependencies", middleware.RequireAPIScope(service.ScopeProjectsWrite), h.createStandaloneDependency)
 	r.Get("/applications/:id/dependencies", middleware.RequireAPIScope(service.ScopeProjectsRead), h.listDependencies)
 	r.Post("/applications/:id/dependencies", middleware.RequireAPIScope(service.ScopeProjectsWrite), h.createDependency)
+	r.Get("/dependencies/:id/credentials", middleware.RequireAPIScope(service.ScopeProjectsRead), h.listCredentials)
+	r.Post("/dependencies/:id/credentials", middleware.RequireAPIScope(service.ScopeProjectsWrite), h.createCredential)
 	r.Post("/projects/:id/dependencies", middleware.RequireAPIScope(service.ScopeProjectsWrite), h.linkProjectDependency)
 }
 
@@ -63,6 +67,14 @@ func (h *DependencyHandler) listDependencies(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"data": h.service.MaskList(out)})
 }
 
+func (h *DependencyHandler) listReusableDependencies(c *fiber.Ctx) error {
+	out, err := h.service.ListReusable(c.UserContext(), middleware.UserID(c))
+	if err != nil {
+		return fail(c, 400, err)
+	}
+	return c.JSON(fiber.Map{"data": h.service.MaskList(out)})
+}
+
 func (h *DependencyHandler) createDependency(c *fiber.Ctx) error {
 	id, err := parseUintParam(c, "id")
 	if err != nil {
@@ -77,6 +89,46 @@ func (h *DependencyHandler) createDependency(c *fiber.Ctx) error {
 		return fail(c, 400, err)
 	}
 	return c.Status(fiber.StatusCreated).JSON(h.service.Mask(*out))
+}
+
+func (h *DependencyHandler) createStandaloneDependency(c *fiber.Ctx) error {
+	var req dto.CreateManagedDependencyRequest
+	if err := h.parseAndValidate(c, &req); err != nil {
+		return err
+	}
+	out, err := h.service.CreateStandalone(c.UserContext(), middleware.UserID(c), middleware.TenantID(c), middleware.TenantCode(c), req)
+	if err != nil {
+		return fail(c, 400, err)
+	}
+	return c.Status(fiber.StatusCreated).JSON(h.service.Mask(*out))
+}
+
+func (h *DependencyHandler) listCredentials(c *fiber.Ctx) error {
+	id, err := parseUintParam(c, "id")
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid dependency id"})
+	}
+	out, err := h.service.ListCredentials(c.UserContext(), middleware.UserID(c), id)
+	if err != nil {
+		return fail(c, 404, err)
+	}
+	return c.JSON(fiber.Map{"data": out})
+}
+
+func (h *DependencyHandler) createCredential(c *fiber.Ctx) error {
+	id, err := parseUintParam(c, "id")
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid dependency id"})
+	}
+	var req dto.CreateDependencyCredentialRequest
+	if err := h.parseAndValidate(c, &req); err != nil {
+		return err
+	}
+	out, err := h.service.CreateCredential(c.UserContext(), middleware.UserID(c), id, req)
+	if err != nil {
+		return fail(c, 400, err)
+	}
+	return c.Status(fiber.StatusCreated).JSON(h.service.MaskCredential(*out))
 }
 
 func (h *DependencyHandler) linkProjectDependency(c *fiber.Ctx) error {

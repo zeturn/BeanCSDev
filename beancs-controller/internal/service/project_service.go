@@ -566,18 +566,20 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID, te
 		})
 	})
 
-	if err := s.gitops.CommitProjectManifests(ctx, ghToken, ghCred, project); err != nil {
-		rollback()
-		return nil, err
-	}
-	if project.BuildSource == model.BuildSourceGitHub && project.AutoDeploy && ghCred.GitOpsRepo != "" {
-		if err := ensureArgoCDGitOpsRepository(ctx, s.k8s, s.gitops, s.credentials, s.cfg, ghToken, ghCred, project.Name); err != nil {
+	if project.BuildSource != model.BuildSourceGitHub {
+		if err := s.gitops.CommitProjectManifests(ctx, ghToken, ghCred, project); err != nil {
 			rollback()
 			return nil, err
 		}
-		if err := s.k8s.ApplyArgoCDApplication(ctx, project.Name, gitOpsRepoURL(ghCred), fmt.Sprintf("apps/%s/overlays/dev", project.Name), project.Namespace); err != nil {
-			rollback()
-			return nil, err
+		if project.AutoDeploy && ghCred.GitOpsRepo != "" {
+			if err := ensureArgoCDGitOpsRepository(ctx, s.k8s, s.gitops, s.credentials, s.cfg, ghToken, ghCred, project.Name); err != nil {
+				rollback()
+				return nil, err
+			}
+			if err := s.k8s.ApplyArgoCDApplication(ctx, project.Name, gitOpsRepoURL(ghCred), fmt.Sprintf("apps/%s/overlays/dev", project.Name), project.Namespace); err != nil {
+				rollback()
+				return nil, err
+			}
 		}
 	}
 	_ = s.db.WithContext(ctx).Model(deployment).Updates(map[string]any{"status": "provisioned"}).Error

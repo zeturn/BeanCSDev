@@ -76,6 +76,10 @@ func Validate(doc *ApplicationSpecDocument, opts ValidateOptions) ValidationResu
 		}
 		dependencyNames[dep.Name] = true
 		def, ok := opts.Dependencies[dep.Type]
+		if dep.ExistingDependencyID != 0 {
+			dependencyDefs[dep.Name] = def
+			continue
+		}
 		if dep.Type == "" {
 			addError(field+".type", "is required")
 		} else if !ok {
@@ -188,6 +192,9 @@ func validateDependencies(component ComponentSpec, field string, dependencyNames
 	}
 	for i, ref := range component.EnvFromDependencies {
 		rf := fmt.Sprintf("%s.envFromDependencies[%d]", field, i)
+		if ref.DependencyID != 0 {
+			continue
+		}
 		if !dependencyNames[ref.Dependency] {
 			addError(rf+".dependency", "references an unknown dependency")
 			continue
