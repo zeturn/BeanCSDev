@@ -1303,9 +1303,6 @@ function App() {
   }
 
   async function deployMonorepoApplication() {
-    if (analysis?.source === "beancs_spec") {
-      return deployApplicationFromRepoConfig();
-    }
     const payload = buildMonorepoApplicationPayload(deployForm, selectedCredential, {...credentials, domains});
     if (!payload.components.length) {
       setError("Select at least one monorepo component.");
@@ -1317,7 +1314,7 @@ function App() {
       project: payload.name,
       started_at: new Date().toISOString(),
       logs: [
-        `Starting monorepo deploy for ${payload.name}`,
+        `Starting ${analysis?.source === "beancs_spec" ? ".beancs spec" : "monorepo"} deploy for ${payload.name}`,
         `Repository: ${payload.github_repo} @ ${payload.github_branch}`,
         `Dependencies: ${(payload.dependencies || []).map((dep) => dep.name).join(", ") || "none"}`,
         `Components: ${payload.components.map((component) => component.project_name).join(", ")}`,
@@ -2087,6 +2084,30 @@ function DeployView({credentials, domains, namespaces, selectedCredential, setSe
       dependencies: (form.dependencies || []).map((dependency, i) => i === index ? {...dependency, ...patch} : dependency),
     });
   };
+  const updateDependencyAndLinks = (index, patch) => {
+    const currentDependency = (form.dependencies || [])[index] || {};
+    const nextDependency = {...currentDependency, ...patch};
+    const oldName = currentDependency.name;
+    const nextName = nextDependency.name;
+    const existingID = nextDependency.source === "existing" ? Number(nextDependency.existing_dependency_id || 0) : 0;
+    setForm({
+      ...form,
+      dependencies: (form.dependencies || []).map((dependency, i) => i === index ? nextDependency : dependency),
+      components: (form.components || []).map((component) => ({
+        ...component,
+        dependency_links: (component.dependency_links || []).map((link) => {
+          if (link.dependency !== oldName) return link;
+          return {
+            ...link,
+            dependency: nextName || oldName,
+            dependency_id: existingID || undefined,
+            credential: existingID ? undefined : link.credential,
+            credential_id: existingID ? undefined : link.credential_id,
+          };
+        }),
+      })),
+    });
+  };
   const deleteDependency = (index) => {
     const removed = (form.dependencies || [])[index]?.name;
     setForm({
@@ -2393,9 +2414,10 @@ function DeployView({credentials, domains, namespaces, selectedCredential, setSe
                   <button type="button" onClick={addDependency} disabled={!dependencyDefinitions.length}><Plus size={15} /> Add dependency</button>
                 </div>
                   <div className="dependency-list">
-                  {analysis?.source === "beancs_spec" && <p className="muted">Dependencies are declared by repo config and will be created from the spec during deploy.</p>}
+                  {analysis?.source === "beancs_spec" && <p className="muted">Dependencies are declared by repo config. Choose Create new or Reuse registered here before deploying.</p>}
                   {(form.dependencies || []).map((dependency, index) => {
                     const definition = definitionForDependency(dependencyDefinitions, dependency.type);
+                    const reusableOptions = matchingReusableDependencies(reusableDependencies, dependency);
                     return (
                       <div className="dependency-card" key={`${dependency.name}-${index}`}>
                         <div className="component-card-head">
@@ -2403,12 +2425,12 @@ function DeployView({credentials, domains, namespaces, selectedCredential, setSe
                           <button type="button" className="danger-button" onClick={() => deleteDependency(index)} title="Remove dependency"><Trash2 size={15} /></button>
                         </div>
                         <div className="component-grid">
-                          <Field label="Name" value={dependency.name} onChange={(v) => updateDependency(index, {...dependency, name: slugify(v)})} required />
+                          <Field label="Name" value={dependency.name} onChange={(v) => updateDependencyAndLinks(index, {name: slugify(v)})} required />
                           <label>Source</label>
                           <select value={dependency.source || "new"} onChange={(event) => {
                             const source = event.target.value;
-                            const existing = reusableDependencies?.[0];
-                            updateDependency(index, {
+                            const existing = matchingReusableDependencies(reusableDependencies, dependency)[0];
+                            updateDependencyAndLinks(index, {
                               source,
                               existing_dependency_id: source === "existing" && existing ? existing.id : undefined,
                               type: source === "existing" && existing ? existing.type : dependency.type,
@@ -2417,23 +2439,24 @@ function DeployView({credentials, domains, namespaces, selectedCredential, setSe
                             });
                           }}>
                             <option value="new">Create new</option>
-                            <option value="existing" disabled={!reusableDependencies?.length}>Reuse registered</option>
+                            <option value="existing" disabled={!reusableOptions.length}>Reuse registered</option>
                           </select>
                           {dependency.source === "existing" && (
                             <>
                               <label>Registered dependency</label>
                               <select value={dependency.existing_dependency_id || ""} onChange={(event) => {
                                 const existing = (reusableDependencies || []).find((item) => String(item.id) === event.target.value);
-                                updateDependency(index, {existing_dependency_id: Number(event.target.value), type: existing?.type || dependency.type});
+                                updateDependencyAndLinks(index, {existing_dependency_id: Number(event.target.value), type: existing?.type || dependency.type});
                               }}>
-                                {(reusableDependencies || []).map((item) => <option key={item.id} value={item.id}>{item.name} · {item.type}</option>)}
+                                <option value="">Choose reusable dependency</option>
+                                {reusableOptions.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.type}</option>)}
                               </select>
                             </>
                           )}
                           <label>Type</label>
                           <select value={dependency.type} disabled={dependency.source === "existing"} onChange={(event) => {
                             const nextDefinition = definitionForDependency(dependencyDefinitions, event.target.value);
-                            updateDependency(index, {
+                            updateDependencyAndLinks(index, {
                               type: event.target.value,
                               name: uniqueDependencyName((form.dependencies || []).filter((_, i) => i !== index), event.target.value),
                               deploy_method: nextDefinition?.default_deploy_method || "helm",
@@ -2725,7 +2748,12 @@ function DependencyLinksEditor({component, dependencies, definitions, credential
       return;
     }
     const definition = definitionForDependency(definitions, dependency.type);
-    onChange([...links, {dependency: dependency.name, preset: firstEnvPreset(definition)}]);
+    onChange([...links, {
+      dependency: dependency.name,
+      dependency_id: dependency.source === "existing" ? Number(dependency.existing_dependency_id || 0) || undefined : undefined,
+      preset: firstEnvPreset(definition),
+      credential: dependency.source === "existing" ? undefined : dependency.credential?.name,
+    }]);
   };
   const updatePreset = (dependencyName, preset) => {
     onChange(links.map((link) => link.dependency === dependencyName ? {...link, preset} : link));
@@ -3700,7 +3728,9 @@ function canContinueDeployStep(stepID, form, selectedCredential, analysis) {
     }
     return Boolean(form.name && Number(form.port || 0) > 0 && Number(form.replicas || 0) > 0);
   }
-  if (stepID === "dependencies") return true;
+  if (stepID === "dependencies") {
+    return (form.dependencies || []).every((dependency) => dependency.source !== "existing" || Number(dependency.existing_dependency_id || 0) > 0);
+  }
   if (stepID === "domain") {
     if (form.application_type === "monorepo") {
       const publicComponents = (form.components || []).some((component) => component.enabled !== false && component.exposure_mode === "public");
@@ -5533,6 +5563,7 @@ function buildMonorepoApplicationPayload(form, githubCredentialID, credentials) 
         exposure_mode: exposure,
         resource_preset: form.resource_preset || "small",
         replicas: Number(component.replicas || 1),
+        build_args: component.build_args || {},
         ports: port > 0 ? [{name: "http", port, protocol: "http", exposure, domain}] : [],
         env: envObjectFromEntries(component.env_entries || form.env_entries || []),
         depends_on: (component.dependency_links || []).map((link) => link.dependency),
@@ -5543,6 +5574,9 @@ function buildMonorepoApplicationPayload(form, githubCredentialID, credentials) 
           credential: link.credential || undefined,
           credential_id: link.credential_id || undefined,
         })),
+        health_check: component.health_check || undefined,
+        volumes: component.volumes?.length ? {items: component.volumes} : undefined,
+        watch_paths: component.watch_paths || [],
       };
     }),
   };
@@ -5550,6 +5584,11 @@ function buildMonorepoApplicationPayload(form, githubCredentialID, credentials) 
 
 function definitionForDependency(definitions, type) {
   return (definitions || []).find((definition) => definition.name === type || definition.type === type);
+}
+
+function matchingReusableDependencies(reusableDependencies, dependency) {
+  const type = dependency?.type || "";
+  return (reusableDependencies || []).filter((item) => !type || item.type === type || item.definition_name === type || item.name === type);
 }
 
 function normalizeDependencyDefinition(definition) {
