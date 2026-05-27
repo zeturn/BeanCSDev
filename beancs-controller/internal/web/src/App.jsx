@@ -1742,6 +1742,7 @@ function App() {
                 containerImages={containerImages}
                 dependencyDefinitions={dependencyDefinitions}
                 reusableDependencies={reusableDependencies}
+                onLoadDependencyCredentials={loadDependencyCredentials}
                 createTrackedImageFromDeploy={createTrackedImageFromDeploy}
                 onConnectGitHub={connectGitHubApp}
                 reposLoading={reposLoading}
@@ -1952,12 +1953,13 @@ function shouldShowSkeleton(view, dashboard, network) {
   return false;
 }
 
-function DeployView({credentials, domains, namespaces, selectedCredential, setSelectedCredential, repos, selectedRepo, analysis, setAnalysis, form, setForm, loadRepos, analyzeRepo, checkInstallSource, deployProject, containerRegistries, containerImages, dependencyDefinitions, reusableDependencies, createTrackedImageFromDeploy, onConnectGitHub, reposLoading}) {
+function DeployView({credentials, domains, namespaces, selectedCredential, setSelectedCredential, repos, selectedRepo, analysis, setAnalysis, form, setForm, loadRepos, analyzeRepo, checkInstallSource, deployProject, containerRegistries, containerImages, dependencyDefinitions, reusableDependencies, onLoadDependencyCredentials, createTrackedImageFromDeploy, onConnectGitHub, reposLoading}) {
   const [stepIndex, setStepIndex] = useState(0);
   const [creatingImage, setCreatingImage] = useState(false);
   const [checkingInstall, setCheckingInstall] = useState(false);
   const [repoSearch, setRepoSearch] = useState("");
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [dependencyCredentialCache, setDependencyCredentialCache] = useState({});
   const selectedCloudflareDomain = (domains || []).find((domain) => String(domain.credential_id) === String(form.cloudflare_credential_id) && String(domain.zone_id) === String(form.cloudflare_zone_id));
   const selectedGitHubCredential = credentials.github.find((cred) => String(cred.id) === String(selectedCredential));
   const visibleRepos = repos.filter((repo) => `${repo.full_name || ""} ${repo.name || ""}`.toLowerCase().includes(repoSearch.toLowerCase()));
@@ -2032,6 +2034,17 @@ function DeployView({credentials, domains, namespaces, selectedCredential, setSe
     if (checkingInstall || analysis) return;
     runInstallCheck();
   }, [step.id]);
+  useEffect(() => {
+    const ids = (form.dependencies || [])
+      .filter((dependency) => dependency.source === "existing" && dependency.existing_dependency_id)
+      .map((dependency) => String(dependency.existing_dependency_id));
+    ids.forEach((id) => {
+      if (dependencyCredentialCache[id] || !onLoadDependencyCredentials) return;
+      onLoadDependencyCredentials(id).then((rows) => {
+        setDependencyCredentialCache((current) => ({...current, [id]: rows || []}));
+      });
+    });
+  }, [(form.dependencies || []).map((dependency) => `${dependency.source}:${dependency.existing_dependency_id || ""}`).join("|")]);
   const next = async () => {
     if (step.id === "check") {
       const result = await runInstallCheck();
@@ -2400,6 +2413,7 @@ function DeployView({credentials, domains, namespaces, selectedCredential, setSe
                               existing_dependency_id: source === "existing" && existing ? existing.id : undefined,
                               type: source === "existing" && existing ? existing.type : dependency.type,
                               deploy_method: source === "existing" ? "external" : dependency.deploy_method || definition?.default_deploy_method || "helm",
+                              credential: source === "existing" ? undefined : dependency.credential || {name: "default", config: {}},
                             });
                           }}>
                             <option value="new">Create new</option>
@@ -2465,6 +2479,7 @@ function DeployView({credentials, domains, namespaces, selectedCredential, setSe
                         component={component}
                         dependencies={form.dependencies || []}
                         definitions={dependencyDefinitions}
+                        credentialCache={dependencyCredentialCache}
                         onChange={(dependency_links) => updateComponent(index, {dependency_links})}
                       />
                     ))}
@@ -2702,7 +2717,7 @@ function DependencyConfigField({label, schema, value, onChange}) {
   return <Field label={label} value={value ?? schema.default ?? ""} onChange={(nextValue) => onChange(nextValue)} />;
 }
 
-function DependencyLinksEditor({component, dependencies, definitions, onChange}) {
+function DependencyLinksEditor({component, dependencies, definitions, credentialCache = {}, onChange}) {
   const links = component.dependency_links || [];
   const toggle = (dependency, checked) => {
     if (!checked) {
@@ -2715,8 +2730,16 @@ function DependencyLinksEditor({component, dependencies, definitions, onChange})
   const updatePreset = (dependencyName, preset) => {
     onChange(links.map((link) => link.dependency === dependencyName ? {...link, preset} : link));
   };
-  const updateCredential = (dependencyName, credential) => {
-    onChange(links.map((link) => link.dependency === dependencyName ? {...link, credential} : link));
+  const updateCredential = (dependencyName, value) => {
+    const dependency = dependencies.find((item) => item.name === dependencyName);
+    const credentials = dependencyCredentialsForLink(dependency, credentialCache);
+    const selected = credentials.find((item) => String(item.id) === value);
+    onChange(links.map((link) => {
+      if (link.dependency !== dependencyName) return link;
+      if (!value) return {...link, credential: undefined, credential_id: undefined};
+      if (selected?.id) return {...link, credential: selected.name, credential_id: selected.id};
+      return {...link, credential: value, credential_id: undefined};
+    }));
   };
   return (
     <div className="component-card">
@@ -2729,6 +2752,8 @@ function DependencyLinksEditor({component, dependencies, definitions, onChange})
           const link = links.find((item) => item.dependency === dependency.name);
           const definition = definitionForDependency(definitions, dependency.type);
           const presets = Object.keys(definition?.env_presets || {});
+          const credentialOptions = dependencyCredentialsForLink(dependency, credentialCache);
+          const selectedCredentialValue = link?.credential_id ? String(link.credential_id) : (link?.credential || dependency.credential?.name || "");
           return (
             <div className="dependency-link-row" key={`${component.project_name}-${dependency.name}`}>
               <label className="checkbox-label">
@@ -2738,9 +2763,11 @@ function DependencyLinksEditor({component, dependencies, definitions, onChange})
               <select value={link?.preset || firstEnvPreset(definition)} onChange={(event) => updatePreset(dependency.name, event.target.value)} disabled={!link}>
                 {presets.map((preset) => <option key={preset} value={preset}>{preset}</option>)}
               </select>
-              <select value={link?.credential || dependency.credential?.name || ""} onChange={(event) => updateCredential(dependency.name, event.target.value)} disabled={!link}>
+              <select value={selectedCredentialValue} onChange={(event) => updateCredential(dependency.name, event.target.value)} disabled={!link}>
                 <option value="">default credential</option>
-                {dependency.credential?.name && <option value={dependency.credential.name}>{dependency.credential.name}</option>}
+                {credentialOptions.map((credential) => (
+                  <option key={credential.id || credential.name} value={credential.id ? String(credential.id) : credential.name}>{credential.name}</option>
+                ))}
               </select>
             </div>
           );
@@ -2748,6 +2775,14 @@ function DependencyLinksEditor({component, dependencies, definitions, onChange})
       </div>
     </div>
   );
+}
+
+function dependencyCredentialsForLink(dependency, credentialCache) {
+  if (!dependency) return [];
+  if (dependency.source === "existing" && dependency.existing_dependency_id) {
+    return credentialCache[String(dependency.existing_dependency_id)] || [];
+  }
+  return dependency.credential?.name ? [{name: dependency.credential.name}] : [];
 }
 
 function DependenciesView({dependencies, definitions, githubCredentials, onCreate, onLoadCredentials, onCreateCredential, refresh}) {
@@ -2867,6 +2902,7 @@ function DependenciesView({dependencies, definitions, githubCredentials, onCreat
                 <div className="dependency-link-row" key={credential.id}>
                   <b>{credential.name}</b>
                   <span>{credential.status}</span>
+                  <small>{dependencyCredentialSummary(credential)}</small>
                 </div>
               ))}
               {credentials.length === 0 && <div className="empty">No credentials registered.</div>}
@@ -2920,6 +2956,13 @@ function credentialConfigFromForm(data) {
     out[key.slice("config.".length)] = clean;
   }
   return out;
+}
+
+function dependencyCredentialSummary(credential) {
+  const outputs = credential?.outputs || {};
+  const keys = Object.keys(outputs).filter((key) => key !== "password" && key !== "url").sort();
+  if (!keys.length) return "no visible outputs";
+  return keys.slice(0, 4).join(", ");
 }
 
 function ProgressView({projects, processes, activeProcessID, setActiveProcessID, activeProjectID, setActiveProjectID, progress, installProgress, refresh, refreshList, logFollow, liveLogs, logStatus, onStartLogFollow, onStopLogFollow}) {
