@@ -1,8 +1,5 @@
 import React, {useEffect, useMemo, useRef, useState} from "react";
 import {createRoot} from "react-dom/client";
-import { filterNavItems, filterNavSections, shouldShowSkeleton, defaultDeployForm, buildProjectPayload, monorepoComponentsFromAnalysis, applicationSpecAnalysis, deployFormFromApplicationSpec, monorepoComponentDomainOverrides, buildMonorepoApplicationPayload, normalizeDependencyDefinition, imageName, profileFromBasalt, trimLiveLog, titleFor, subtitleFor, parseKeyValues, parseTaints, parseCSV, parsePermissionSubjects, parseServicePorts, localDateTimeToRFC3339, slugify, trimSlash, browserRedirectURI, randomString, codeChallenge } from "./utils/index";
-import { makeAPI, consumeTextStream, publicJSON, finishLogin } from "./api/index";
-import { SidebarNavGroup, PageHeading, SkeletonPage, RuntimeTable, CredentialManager } from "./components/index";
 import {
   Activity,
   AlertTriangle,
@@ -129,35 +126,6 @@ const navSections = [
     items: [{id: "settings", label: "Settings", icon: Settings}],
   },
 ];
-
-import DeployView from "./views/DeployView";
-import ProgressView from "./views/ProgressView";
-import ProgressListView from "./views/ProgressListView";
-import DashboardView from "./views/DashboardView";
-import AlertsView from "./views/AlertsView";
-import EventsView from "./views/EventsView";
-import MetricsView from "./views/MetricsView";
-import LogsView from "./views/LogsView";
-import DeploymentsView from "./views/DeploymentsView";
-import ProjectsView from "./views/ProjectsView";
-import ProjectTrackingModal from "./views/ProjectTrackingModal";
-import DeleteProjectModal from "./views/DeleteProjectModal";
-import DeleteApplicationModal from "./views/DeleteApplicationModal";
-import ContainerRegistriesView from "./views/ContainerRegistriesView";
-import WorkloadImageView from "./views/WorkloadImageView";
-import ComingSoonView from "./views/ComingSoonView";
-import SettingsView from "./views/SettingsView";
-import APIKeysView from "./views/APIKeysView";
-import APIKeyDrawer from "./views/APIKeyDrawer";
-import GitHubView from "./views/GitHubView";
-import CloudflareView from "./views/CloudflareView";
-import CloudflareAccountDrawer from "./views/CloudflareAccountDrawer";
-import DomainsView from "./views/DomainsView";
-import NetworkingView from "./views/NetworkingView";
-import RuntimeDetailDrawer from "./views/RuntimeDetailDrawer";
-import NodeDetailView from "./views/NodeDetailView";
-import NamespaceDetailView from "./views/NamespaceDetailView";
-import ProjectModal from "./views/ProjectModal";
 
 function App() {
   const [config, setConfig] = useState(null);
