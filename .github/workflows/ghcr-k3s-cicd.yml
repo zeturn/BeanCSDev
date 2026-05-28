@@ -114,7 +114,7 @@ jobs:
       - name: Verify tag belongs to deploy branch
         shell: bash
         run: |
-          git fetch origin deploy --depth=1
+          git fetch origin deploy:refs/remotes/origin/deploy --depth=1
           TAG_SHA="$(git rev-list -n 1 "${GITHUB_REF}")"
           if ! git merge-base --is-ancestor "${TAG_SHA}" "origin/deploy"; then
             echo "Tag commit is not contained in origin/deploy."
