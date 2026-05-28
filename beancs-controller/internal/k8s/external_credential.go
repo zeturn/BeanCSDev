@@ -40,7 +40,7 @@ func (m *Manager) ReconcileExternalMySQLCredential(ctx context.Context, in Exter
 	}
 	port := coalescePort(in.Port, "3306")
 	command := fmt.Sprintf(`for i in {1..90}; do
-  if /opt/bitnami/mysql/bin/mysql -h %s -P %s -u"$ADMIN_USERNAME" -p"$ADMIN_PASSWORD" -e 'SELECT 1' >/dev/null 2>&1; then
+  if mysql -h %s -P %s -u"$ADMIN_USERNAME" -p"$ADMIN_PASSWORD" -e 'SELECT 1' >/dev/null 2>&1; then
     mysql_ready=1
     break
   fi
@@ -50,7 +50,7 @@ if [ "${mysql_ready:-}" != "1" ]; then
   echo "mysql service did not become ready"
   exit 1
 fi
-/opt/bitnami/mysql/bin/mysql -h %s -P %s -u"$ADMIN_USERNAME" -p"$ADMIN_PASSWORD" <<'SQL'
+mysql -h %s -P %s -u"$ADMIN_USERNAME" -p"$ADMIN_PASSWORD" <<'SQL'
 CREATE DATABASE IF NOT EXISTS %s;
 CREATE USER IF NOT EXISTS %s@'%%' IDENTIFIED BY %s;
 ALTER USER %s@'%%' IDENTIFIED BY %s;
@@ -58,7 +58,7 @@ GRANT ALL PRIVILEGES ON %s.* TO %s@'%%';
 FLUSH PRIVILEGES;
 SQL
 `, shellQuote(in.Host), shellQuote(port), shellQuote(in.Host), shellQuote(port), mysqlIdent(in.Database), mysqlString(in.Username), mysqlString(in.Password), mysqlString(in.Username), mysqlString(in.Password), mysqlIdent(in.Database), mysqlString(in.Username))
-	return m.runExternalCredentialJob(ctx, in, "mysql-client", "docker.io/bitnamilegacy/mysql:9.4.0-debian-12-r1", command)
+	return m.runExternalCredentialJob(ctx, in, "mysql-client", "docker.io/mysql:8.4", command)
 }
 
 func (m *Manager) ReconcileExternalPostgreSQLCredential(ctx context.Context, in ExternalCredentialRuntime) error {
@@ -99,7 +99,7 @@ SQL
 psql -h %s -p %s -U "$ADMIN_USERNAME" -d %s -v ON_ERROR_STOP=1 -c "GRANT ALL PRIVILEGES ON DATABASE %s TO %s"
 psql -h %s -p %s -U "$ADMIN_USERNAME" -d %s -v ON_ERROR_STOP=1 -c "GRANT ALL PRIVILEGES ON SCHEMA public TO %s"
 `, shellQuote(in.Host), shellQuote(port), shellQuote(in.Host), shellQuote(port), postgresString(in.Database), shellQuote(in.Host), shellQuote(port), postgresIdent(in.Database), shellQuote(in.Host), shellQuote(port), postgresString(in.Username), postgresString(in.Username), postgresString(in.Password), postgresString(in.Username), postgresString(in.Password), shellQuote(in.Host), shellQuote(port), postgresIdent(in.Database), postgresIdent(in.Database), postgresIdent(in.Username), shellQuote(in.Host), shellQuote(port), postgresIdent(in.Database), postgresIdent(in.Username))
-	return m.runExternalCredentialJob(ctx, in, "postgres-client", "docker.io/bitnamilegacy/postgresql:18.0.0-debian-12-r4", command)
+	return m.runExternalCredentialJob(ctx, in, "postgres-client", "docker.io/postgres:16", command)
 }
 
 func (m *Manager) ReconcileExternalRabbitMQCredential(ctx context.Context, in ExternalCredentialRuntime) error {
