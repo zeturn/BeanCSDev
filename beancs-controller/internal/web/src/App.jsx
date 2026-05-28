@@ -269,7 +269,6 @@ const navSections = [
 ];
 import DeployView from "./views/DeployView";
 import ProgressView from "./views/ProgressView";
-import ProgressListView from "./views/ProgressListView";
 import DashboardView from "./views/DashboardView";
 import AlertsView from "./views/AlertsView";
 import EventsView from "./views/EventsView";
@@ -285,10 +284,8 @@ import WorkloadImageView from "./views/WorkloadImageView";
 import ComingSoonView from "./views/ComingSoonView";
 import SettingsView from "./views/SettingsView";
 import APIKeysView from "./views/APIKeysView";
-import APIKeyDrawer from "./views/APIKeyDrawer";
 import GitHubView from "./views/GitHubView";
 import CloudflareView from "./views/CloudflareView";
-import CloudflareAccountDrawer from "./views/CloudflareAccountDrawer";
 import DomainsView from "./views/DomainsView";
 import NetworkingView from "./views/NetworkingView";
 import RuntimeDetailDrawer from "./views/RuntimeDetailDrawer";
