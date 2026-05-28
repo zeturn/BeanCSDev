@@ -1,31 +1,33 @@
 apiVersion: beancs.io/v1
 kind: DependencyDefinition
 metadata:
-  name: redis
-  displayName: Redis
-  category: cache
+  name: mysql
+  displayName: MySQL
+  category: database
 spec:
-  type: redis
+  type: mysql
   supportedDeployMethods: [helm, external]
   defaultDeployMethod: helm
   helm:
     chart:
       repo: https://charts.bitnami.com/bitnami
-      name: redis
-      version: "25.5.3"
-    valuesTemplate: redis.values.yaml
+      name: mysql
+      version: "14.0.3"
+    valuesTemplate: mysql.values.yaml
   configSchema:
     type: object
     properties:
-      architecture:
+      database:
         type: string
-        enum: [standalone, replication]
-        default: standalone
+        default: app
       host:
         type: string
       port:
         type: string
-        default: "6379"
+        default: "3306"
+      username:
+        type: string
+        default: app
       password:
         type: string
         secret: true
@@ -39,34 +41,45 @@ spec:
             default: true
           size:
             type: string
-            default: 8Gi
+            default: 20Gi
   services:
-    - name: redis
-      port: 6379
+    - name: mysql
+      port: 3306
       protocol: tcp
       default: true
   outputs:
     host:
       valueFrom:
-        serviceHost: redis
+        serviceHost: mysql
     port:
       valueFrom:
         config: port
+    database:
+      valueFrom:
+        config: database
+    username:
+      valueFrom:
+        secretKey: username
     password:
       valueFrom:
         secretKey: password
     url:
-      secretTemplate: "redis://:{{password}}@{{host}}:{{port}}/0"
+      secretTemplate: "{{username}}:{{password}}@tcp({{host}}:{{port}})/{{database}}?charset=utf8mb4&parseTime=True&loc=Local"
   envPresets:
-    redis_default:
+    mysql_default:
       env:
-        REDIS_HOST:
+        MYSQL_HOST:
           output: host
-        REDIS_PORT:
+        MYSQL_PORT:
           output: port
-        REDIS_PASSWORD:
+        MYSQL_DATABASE:
+          output: database
+        MYSQL_USERNAME:
+          output: username
+          secret: true
+        MYSQL_PASSWORD:
           output: password
           secret: true
-        REDIS_URL:
+        DATABASE_URL:
           output: url
           secret: true

@@ -170,6 +170,7 @@ func (s *ApplicationSpecService) specToMonorepoRequest(ctx context.Context, user
 		Name:                   doc.Metadata.Name,
 		DisplayName:            doc.Metadata.DisplayName,
 		Description:            doc.Metadata.Description,
+		GitHubCredentialID:     applyReq.GitHubCredentialID,
 		GitHubRepo:             doc.Spec.Repo.Name,
 		GitHubBranch:           doc.Spec.Repo.Branch,
 		AutoDeploy:             &autoDeploy,
@@ -183,11 +184,15 @@ func (s *ApplicationSpecService) specToMonorepoRequest(ctx context.Context, user
 	publicDomain := s.cloudflareDomainForSpec(ctx, userID, applyReq)
 	for _, dep := range doc.Spec.Dependencies {
 		req.Dependencies = append(req.Dependencies, dto.CreateManagedDependencyRequest{
-			Name:         dep.Name,
-			Type:         dep.Type,
-			DeployMethod: dep.DeployMethod,
-			Version:      dep.Version,
-			Config:       model.JSONMap(dep.Config),
+			Name:                 dep.Name,
+			Type:                 dep.Type,
+			DeployMethod:         dep.DeployMethod,
+			Version:              dep.Version,
+			Config:               model.JSONMap(dep.Config),
+			Shared:               dep.Shared,
+			External:             dep.External,
+			ExistingDependencyID: dep.ExistingDependencyID,
+			Credential:           dependencyCredentialToRequest(dep.Credential),
 		})
 	}
 	componentSecrets := map[string]map[string]string{}
@@ -227,7 +232,7 @@ func applyComponentDomains(component *dto.MonorepoComponentRequest, namespace, p
 	override := componentDomainOverride(component.Name, component.ProjectName, overrides)
 	for i := range component.Ports {
 		port := &component.Ports[i]
-		if override != "" && (port.Exposure == model.ExposurePublic || port.Exposure == model.ExposurePrivate) {
+		if override != "" && shouldApplyDomainOverride(port.Exposure, override) {
 			port.Domain = override
 		}
 		if port.Exposure == model.ExposurePublic && port.Domain == "" && publicDomain != "" {
@@ -240,6 +245,19 @@ func applyComponentDomains(component *dto.MonorepoComponentRequest, namespace, p
 			port.Protocol = ""
 		}
 	}
+}
+
+func shouldApplyDomainOverride(exposure, override string) bool {
+	if override == "" {
+		return false
+	}
+	if exposure == model.ExposurePublic {
+		return !strings.HasSuffix(override, ".ts.net")
+	}
+	if exposure == model.ExposurePrivate {
+		return strings.HasSuffix(override, ".ts.net")
+	}
+	return false
 }
 
 func componentDomainOverride(componentName, projectName string, overrides map[string]string) string {
@@ -285,9 +303,23 @@ func specComponentToRequest(component appspec.ComponentSpec) dto.MonorepoCompone
 		req.ExposureMode = model.ExposureInternalOnly
 	}
 	for _, ref := range component.EnvFromDependencies {
-		req.EnvFromDependencies = append(req.EnvFromDependencies, dto.EnvFromDependencyRequest{Dependency: ref.Dependency, Preset: ref.Preset, Mappings: envMappingsToAny(ref.Mappings)})
+		req.EnvFromDependencies = append(req.EnvFromDependencies, dto.EnvFromDependencyRequest{
+			Dependency:   ref.Dependency,
+			DependencyID: ref.DependencyID,
+			Credential:   ref.Credential,
+			CredentialID: ref.CredentialID,
+			Preset:       ref.Preset,
+			Mappings:     envMappingsToAny(ref.Mappings),
+		})
 	}
 	return req
+}
+
+func dependencyCredentialToRequest(in *appspec.DependencyCredentialSpec) *dto.CreateDependencyCredentialRequest {
+	if in == nil {
+		return nil
+	}
+	return &dto.CreateDependencyCredentialRequest{Name: in.Name, Description: in.Description, Config: model.JSONMap(in.Config)}
 }
 
 func resolveComponentSecrets(component appspec.ComponentSpec, existing map[string]map[string]string) map[string]string {

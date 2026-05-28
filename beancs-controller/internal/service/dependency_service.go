@@ -9,13 +9,17 @@ import (
 	"strings"
 
 	"github.com/zeturn/beancs-controller/internal/dto"
+	"github.com/zeturn/beancs-controller/internal/k8s"
 	"github.com/zeturn/beancs-controller/internal/model"
 	"gorm.io/gorm"
 )
 
 type DependencyService struct {
-	db       *gorm.DB
-	registry *DependencyDefinitionRegistry
+	db          *gorm.DB
+	registry    *DependencyDefinitionRegistry
+	credentials *CredentialService
+	gitops      *GitOpsService
+	k8s         *k8s.Manager
 }
 
 func NewDependencyService(db *gorm.DB, registry *DependencyDefinitionRegistry) *DependencyService {
@@ -26,15 +30,90 @@ func (s *DependencyService) Registry() *DependencyDefinitionRegistry {
 	return s.registry
 }
 
+func (s *DependencyService) SetDeployers(credentials *CredentialService, gitops *GitOpsService, k8sManager *k8s.Manager) {
+	s.credentials = credentials
+	s.gitops = gitops
+	s.k8s = k8sManager
+}
+
+func (s *DependencyService) CreateStandalone(ctx context.Context, userID, tenantID, tenantCode string, req dto.CreateManagedDependencyRequest) (*model.ManagedDependency, error) {
+	appName := harborName(coalesce(req.ApplicationName, "dep-"+req.Name))
+	if err := ensureDependencyApplicationNameAvailable(ctx, s.db, appName); err != nil {
+		return nil, err
+	}
+	app := &model.Application{
+		Name:        appName,
+		DisplayName: coalesce(req.DisplayName, req.Name),
+		Type:        model.ApplicationTypeSingle,
+		Namespace:   coalesce(req.Namespace, appName),
+		OwnerID:     userID,
+		TenantID:    tenantID,
+		TenantCode:  tenantCode,
+		Status:      model.ApplicationStatusCreating,
+	}
+	if err := s.db.WithContext(ctx).Create(app).Error; err != nil {
+		return nil, err
+	}
+	dep, err := s.Create(ctx, userID, app.ID, req)
+	if err != nil {
+		_ = s.db.WithContext(ctx).Model(app).Update("status", model.ApplicationStatusPartialFailed).Error
+		return nil, err
+	}
+	if req.GitHubCredentialID != 0 && dep.DeployMethod != model.DependencyDeployMethodExternal {
+		if err := s.deployStandalone(ctx, userID, *app, *dep, req.GitHubCredentialID); err != nil {
+			_ = s.db.WithContext(ctx).Model(app).Update("status", model.ApplicationStatusPartialFailed).Error
+			return dep, err
+		}
+	}
+	_ = s.db.WithContext(ctx).Model(app).Update("status", model.ApplicationStatusActive).Error
+	return dep, nil
+}
+
+func (s *DependencyService) deployStandalone(ctx context.Context, userID string, app model.Application, dep model.ManagedDependency, credentialID uint) error {
+	if s.credentials == nil || s.gitops == nil {
+		return nil
+	}
+	if err := s.credentials.RequireAccess(userID, model.CredentialTypeGitHub, credentialID, false); err != nil {
+		return err
+	}
+	var cred model.GitHubCredential
+	if err := s.db.WithContext(ctx).First(&cred, credentialID).Error; err != nil {
+		return err
+	}
+	token, err := s.credentials.GitHubToken(ctx, cred)
+	if err != nil {
+		return err
+	}
+	if s.k8s != nil {
+		if err := s.k8s.CreateNamespace(ctx, dep.Namespace, app.Name); err != nil {
+			return err
+		}
+		if err := s.k8s.UpsertSecret(ctx, dep.Namespace, dep.SecretName, app.Name, dependencySecretRuntimeData(dep)); err != nil {
+			return err
+		}
+	}
+	if err := s.gitops.CommitDependencyManifests(ctx, token, cred, app, dep); err != nil {
+		return err
+	}
+	if s.k8s != nil && cred.GitOpsRepo != "" {
+		return s.k8s.ApplyArgoCDApplication(ctx, dependencyRootArgoApplicationName(app.Name, dep.Name), gitOpsRepoURL(cred), fmt.Sprintf("apps/%s/dependencies/%s", app.Name, dep.Name), dep.Namespace)
+	}
+	return nil
+}
+
 func (s *DependencyService) Create(ctx context.Context, userID string, applicationID uint, req dto.CreateManagedDependencyRequest) (*model.ManagedDependency, error) {
 	var app model.Application
 	if err := s.db.WithContext(ctx).Where("id = ? AND owner_id = ?", applicationID, userID).First(&app).Error; err != nil {
 		return nil, err
 	}
+	if req.ExistingDependencyID != 0 {
+		return s.attachExisting(ctx, userID, app, req)
+	}
 	def, ok := s.registry.Get(req.Type)
 	if !ok {
 		return nil, fmt.Errorf("unknown dependency type %q", req.Type)
 	}
+	req.Type = def.Spec.Type
 	if req.DeployMethod == "" {
 		req.DeployMethod = def.Spec.DefaultDeployMethod
 	}
@@ -43,7 +122,16 @@ func (s *DependencyService) Create(ctx context.Context, userID string, applicati
 	}
 	config := applyDependencyConfigDefaults(def, req.Config)
 	secretData := dependencySecretData(def, config)
-	outputs := resolveDependencyOutputs(def, req.Name, config, secretData)
+	serviceName := req.Name
+	external := req.External || req.DeployMethod == model.DependencyDeployMethodExternal
+	if external {
+		serviceName = strings.TrimSpace(fmt.Sprint(config["host"]))
+		if serviceName == "" {
+			return nil, fmt.Errorf("external dependency %q requires config.host", req.Name)
+		}
+	}
+	outputs := resolveDependencyOutputs(def, dependencyRuntimeHost(serviceName, coalesce(app.Namespace, coalesce(app.Name, req.Name)), external), config, secretData)
+	outputs = applyExternalDependencyOutputs(outputs, config, external)
 	secretName := fmt.Sprintf("%s-%s-credentials", app.Name, req.Name)
 	dep := &model.ManagedDependency{
 		ApplicationID:     app.ID,
@@ -52,16 +140,21 @@ func (s *DependencyService) Create(ctx context.Context, userID string, applicati
 		Version:           req.Version,
 		DeployMethod:      req.DeployMethod,
 		Namespace:         coalesce(app.Namespace, coalesce(app.Name, req.Name)),
-		ServiceName:       req.Name,
+		ServiceName:       serviceName,
 		SecretName:        secretName,
 		DefinitionName:    def.Metadata.Name,
 		DefinitionVersion: "v1",
 		Config:            config,
 		Outputs:           outputs,
 		Status:            model.DependencyStatusReady,
+		Shared:            req.Shared,
+		External:          external,
 	}
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(dep).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(s.defaultDependencyCredential(dep, req.Credential)).Error; err != nil {
 			return err
 		}
 		component := model.ApplicationComponent{
@@ -79,13 +172,46 @@ func (s *DependencyService) Create(ctx context.Context, userID string, applicati
 	return dep, nil
 }
 
+func (s *DependencyService) attachExisting(ctx context.Context, userID string, app model.Application, req dto.CreateManagedDependencyRequest) (*model.ManagedDependency, error) {
+	var dep model.ManagedDependency
+	if err := s.db.WithContext(ctx).
+		Joins("JOIN applications ON applications.id = managed_dependencies.application_id").
+		Where("managed_dependencies.id = ? AND applications.owner_id = ? AND (managed_dependencies.shared = TRUE OR managed_dependencies.external = TRUE)", req.ExistingDependencyID, userID).
+		First(&dep).Error; err != nil {
+		return nil, err
+	}
+	componentName := coalesce(req.Name, dep.Name)
+	err := s.db.WithContext(ctx).Create(&model.ApplicationComponent{
+		ApplicationID: app.ID,
+		Name:          componentName,
+		Kind:          model.ApplicationComponentKindDependency,
+		DependencyID:  &dep.ID,
+		Status:        model.DependencyStatusReady,
+	}).Error
+	if err != nil {
+		return nil, err
+	}
+	return &dep, nil
+}
+
 func (s *DependencyService) List(ctx context.Context, userID string, applicationID uint) ([]model.ManagedDependency, error) {
 	var app model.Application
 	if err := s.db.WithContext(ctx).Where("id = ? AND owner_id = ?", applicationID, userID).First(&app).Error; err != nil {
 		return nil, err
 	}
 	var deps []model.ManagedDependency
-	err := s.db.WithContext(ctx).Where("application_id = ?", app.ID).Order("name asc").Find(&deps).Error
+	ids := s.dependencyIDsForApplication(ctx, app.ID)
+	err := s.db.WithContext(ctx).Where("id IN ?", ids).Order("name asc").Find(&deps).Error
+	return deps, err
+}
+
+func (s *DependencyService) ListReusable(ctx context.Context, userID string) ([]model.ManagedDependency, error) {
+	var deps []model.ManagedDependency
+	err := s.db.WithContext(ctx).
+		Joins("JOIN applications ON applications.id = managed_dependencies.application_id").
+		Where("applications.owner_id = ? AND (managed_dependencies.shared = TRUE OR managed_dependencies.external = TRUE)", userID).
+		Order("managed_dependencies.name asc").
+		Find(&deps).Error
 	return deps, err
 }
 
@@ -97,12 +223,21 @@ func (s *DependencyService) LinkProject(ctx context.Context, userID string, proj
 	if project.ApplicationID == nil {
 		return nil, fmt.Errorf("project is not part of an application")
 	}
-	var dep model.ManagedDependency
-	if err := s.db.WithContext(ctx).Where("application_id = ? AND name = ?", *project.ApplicationID, req.Dependency).First(&dep).Error; err != nil {
+	dep, err := s.findDependencyForApplication(ctx, *project.ApplicationID, req.DependencyID, req.Dependency)
+	if err != nil {
 		return nil, err
 	}
 	project.DependsOn = appendUnique(project.DependsOn, dep.Name)
 	entry := map[string]any{"dependency": dep.Name}
+	if req.DependencyID != 0 {
+		entry["dependency_id"] = req.DependencyID
+	}
+	if req.Credential != "" {
+		entry["credential"] = req.Credential
+	}
+	if req.CredentialID != 0 {
+		entry["credential_id"] = req.CredentialID
+	}
 	if req.Preset != "" {
 		entry["preset"] = req.Preset
 	}
@@ -120,11 +255,23 @@ func (s *DependencyService) LinkProject(ctx context.Context, userID string, proj
 }
 
 func (s *DependencyService) EnvForDependency(dep model.ManagedDependency, preset string, mappings map[string]any) (map[string]string, error) {
+	return s.EnvForDependencyCredential(context.Background(), dep, 0, "", preset, mappings)
+}
+
+func (s *DependencyService) EnvForDependencyCredential(ctx context.Context, dep model.ManagedDependency, credentialID uint, credentialName, preset string, mappings map[string]any) (map[string]string, error) {
 	def, ok := s.registry.Get(dep.DefinitionName)
 	if !ok {
 		return nil, fmt.Errorf("dependency definition %q not found", dep.DefinitionName)
 	}
-	outputs := flattenDependencyOutputs(dep.Outputs)
+	outputSource := dep.Outputs
+	if credentialID != 0 || credentialName != "" {
+		cred, err := s.findCredential(ctx, dep.ID, credentialID, credentialName)
+		if err != nil {
+			return nil, err
+		}
+		outputSource = cred.Outputs
+	}
+	outputs := flattenDependencyOutputs(outputSource)
 	env := map[string]string{}
 	if preset != "" {
 		p, ok := def.Spec.EnvPresets[preset]
@@ -161,6 +308,31 @@ func (s *DependencyService) EnvForDependency(dep model.ManagedDependency, preset
 	return env, nil
 }
 
+func (s *DependencyService) CreateCredential(ctx context.Context, userID string, dependencyID uint, req dto.CreateDependencyCredentialRequest) (*model.DependencyCredential, error) {
+	dep, err := s.dependencyForOwner(ctx, userID, dependencyID)
+	if err != nil {
+		return nil, err
+	}
+	cred := s.buildDependencyCredential(dep, req)
+	if err := s.db.WithContext(ctx).Create(cred).Error; err != nil {
+		return nil, err
+	}
+	if err := s.reconcileRuntimeCredential(ctx, dep, *cred); err != nil {
+		_ = s.db.WithContext(ctx).Model(cred).Updates(map[string]any{"status": model.DependencyStatusFailed, "description": strings.TrimSpace(coalesce(cred.Description, "") + " runtime reconcile failed: " + err.Error())}).Error
+		return nil, err
+	}
+	return cred, nil
+}
+
+func (s *DependencyService) ListCredentials(ctx context.Context, userID string, dependencyID uint) ([]model.DependencyCredential, error) {
+	if _, err := s.dependencyForOwner(ctx, userID, dependencyID); err != nil {
+		return nil, err
+	}
+	var creds []model.DependencyCredential
+	err := s.db.WithContext(ctx).Where("dependency_id = ?", dependencyID).Order("name asc").Find(&creds).Error
+	return s.MaskCredentials(creds), err
+}
+
 func (s *DependencyService) Mask(dep model.ManagedDependency) model.ManagedDependency {
 	def, ok := s.registry.Get(dep.DefinitionName)
 	if !ok {
@@ -179,23 +351,8 @@ func (s *DependencyService) Mask(dep model.ManagedDependency) model.ManagedDepen
 			}
 		}
 	}
-	maskedOutputs := model.JSONMap{}
-	for key, raw := range dep.Outputs {
-		if m, ok := raw.(map[string]any); ok {
-			copy := map[string]any{}
-			for k, v := range m {
-				copy[k] = v
-			}
-			if secret, _ := copy["secret"].(bool); secret {
-				copy["value"] = "********"
-			}
-			maskedOutputs[key] = copy
-			continue
-		}
-		maskedOutputs[key] = raw
-	}
 	dep.Config = maskedConfig
-	dep.Outputs = maskedOutputs
+	dep.Outputs = maskOutputSecrets(dep.Outputs)
 	return dep
 }
 
@@ -205,6 +362,89 @@ func (s *DependencyService) MaskList(deps []model.ManagedDependency) []model.Man
 		out = append(out, s.Mask(dep))
 	}
 	return out
+}
+
+func (s *DependencyService) MaskCredential(cred model.DependencyCredential) model.DependencyCredential {
+	cred.Config = maskJSONSecrets(cred.Config)
+	cred.Outputs = maskOutputSecrets(cred.Outputs)
+	return cred
+}
+
+func (s *DependencyService) MaskCredentials(creds []model.DependencyCredential) []model.DependencyCredential {
+	out := make([]model.DependencyCredential, 0, len(creds))
+	for _, cred := range creds {
+		out = append(out, s.MaskCredential(cred))
+	}
+	return out
+}
+
+func (s *DependencyService) dependencyIDsForApplication(ctx context.Context, applicationID uint) []uint {
+	seen := map[uint]bool{}
+	var deps []model.ManagedDependency
+	_ = s.db.WithContext(ctx).Select("id").Where("application_id = ?", applicationID).Find(&deps).Error
+	for _, dep := range deps {
+		seen[dep.ID] = true
+	}
+	var components []model.ApplicationComponent
+	_ = s.db.WithContext(ctx).Select("dependency_id").Where("application_id = ? AND dependency_id IS NOT NULL", applicationID).Find(&components).Error
+	for _, component := range components {
+		if component.DependencyID != nil {
+			seen[*component.DependencyID] = true
+		}
+	}
+	out := make([]uint, 0, len(seen))
+	for id := range seen {
+		out = append(out, id)
+	}
+	if len(out) == 0 {
+		out = append(out, 0)
+	}
+	return out
+}
+
+func (s *DependencyService) findDependencyForApplication(ctx context.Context, applicationID uint, dependencyID uint, name string) (model.ManagedDependency, error) {
+	var dep model.ManagedDependency
+	ids := s.dependencyIDsForApplication(ctx, applicationID)
+	q := s.db.WithContext(ctx).Where("id IN ?", ids)
+	if dependencyID != 0 {
+		q = q.Where("id = ?", dependencyID)
+	} else {
+		q = q.Where("name = ?", name)
+	}
+	err := q.First(&dep).Error
+	return dep, err
+}
+
+func (s *DependencyService) dependencyForOwner(ctx context.Context, userID string, dependencyID uint) (model.ManagedDependency, error) {
+	var dep model.ManagedDependency
+	err := s.db.WithContext(ctx).
+		Joins("JOIN applications ON applications.id = managed_dependencies.application_id").
+		Where("managed_dependencies.id = ? AND applications.owner_id = ?", dependencyID, userID).
+		First(&dep).Error
+	return dep, err
+}
+
+func (s *DependencyService) findCredential(ctx context.Context, dependencyID uint, credentialID uint, name string) (model.DependencyCredential, error) {
+	var cred model.DependencyCredential
+	q := s.db.WithContext(ctx).Where("dependency_id = ?", dependencyID)
+	if credentialID != 0 {
+		q = q.Where("id = ?", credentialID)
+	} else {
+		q = q.Where("name = ?", name)
+	}
+	err := q.First(&cred).Error
+	return cred, err
+}
+
+func ensureDependencyApplicationNameAvailable(ctx context.Context, db *gorm.DB, name string) error {
+	var count int64
+	if err := db.WithContext(ctx).Model(&model.Application{}).Where("name = ?", name).Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return fmt.Errorf("application name %q already exists; choose a different application name", name)
+	}
+	return nil
 }
 
 func applyDependencyConfigDefaults(def DependencyDefinition, input model.JSONMap) model.JSONMap {
@@ -231,6 +471,65 @@ func applyDependencyConfigDefaults(def DependencyDefinition, input model.JSONMap
 		}
 	}
 	return out
+}
+
+func (s *DependencyService) defaultDependencyCredential(dep *model.ManagedDependency, req *dto.CreateDependencyCredentialRequest) *model.DependencyCredential {
+	if req != nil {
+		return s.buildDependencyCredential(*dep, *req)
+	}
+	return &model.DependencyCredential{
+		DependencyID: dep.ID,
+		Name:         "default",
+		Config:       dep.Config,
+		Outputs:      dep.Outputs,
+		Status:       model.DependencyStatusReady,
+	}
+}
+
+func (s *DependencyService) buildDependencyCredential(dep model.ManagedDependency, req dto.CreateDependencyCredentialRequest) *model.DependencyCredential {
+	config := model.JSONMap{}
+	for k, v := range dep.Config {
+		config[k] = v
+	}
+	for k, v := range req.Config {
+		config[k] = v
+	}
+	definitionName := coalesce(dep.DefinitionName, dep.Type)
+	def, _ := s.registry.Get(definitionName)
+	secretData := dependencySecretData(def, config)
+	outputs := resolveDependencyOutputs(def, dependencyRuntimeHost(dep.ServiceName, dep.Namespace, dep.External), config, secretData)
+	outputs = applyExternalDependencyOutputs(outputs, config, dep.External)
+	return &model.DependencyCredential{
+		DependencyID: dep.ID,
+		Name:         req.Name,
+		Description:  req.Description,
+		Config:       config,
+		Outputs:      outputs,
+		Status:       model.DependencyStatusReady,
+	}
+}
+
+func (s *DependencyService) reconcileRuntimeCredential(ctx context.Context, dep model.ManagedDependency, cred model.DependencyCredential) error {
+	if s.k8s == nil || dep.External {
+		return nil
+	}
+	switch dep.Type {
+	case "mysql":
+		outputs := flattenDependencyOutputs(cred.Outputs)
+		return s.k8s.ReconcileMySQLCredential(ctx, k8s.MySQLCredentialRuntime{
+			Namespace:      dep.Namespace,
+			ServiceName:    dep.ServiceName,
+			SecretName:     dep.SecretName,
+			Database:       coalesce(outputs["database"], fmt.Sprint(cred.Config["database"])),
+			Username:       coalesce(outputs["username"], fmt.Sprint(cred.Config["username"])),
+			Password:       coalesce(outputs["password"], fmt.Sprint(cred.Config["password"])),
+			Port:           coalesce(coalesce(outputs["port"], fmt.Sprint(cred.Config["port"])), "3306"),
+			DependencyName: dep.Name,
+			CredentialName: cred.Name,
+		})
+	default:
+		return nil
+	}
 }
 
 func dependencySecretData(def DependencyDefinition, config model.JSONMap) map[string]string {
@@ -286,6 +585,31 @@ func resolveDependencyOutputs(def DependencyDefinition, serviceName string, conf
 		out[key] = map[string]any{"value": value, "secret": secret[key]}
 	}
 	return out
+}
+
+func applyExternalDependencyOutputs(outputs model.JSONMap, config model.JSONMap, external bool) model.JSONMap {
+	if !external {
+		return outputs
+	}
+	if host := strings.TrimSpace(fmt.Sprint(config["host"])); host != "" {
+		outputs["host"] = map[string]any{"value": host, "secret": false}
+	}
+	if port := strings.TrimSpace(fmt.Sprint(config["port"])); port != "" && port != "<nil>" {
+		outputs["port"] = map[string]any{"value": port, "secret": false}
+	}
+	return outputs
+}
+
+func dependencyRuntimeHost(serviceName, namespace string, external bool) string {
+	serviceName = strings.TrimSpace(serviceName)
+	if external || serviceName == "" {
+		return serviceName
+	}
+	namespace = strings.TrimSpace(namespace)
+	if namespace == "" || strings.Contains(serviceName, ".") {
+		return serviceName
+	}
+	return serviceName + "." + namespace + ".svc.cluster.local"
 }
 
 func flattenDependencyOutputs(outputs model.JSONMap) map[string]string {
@@ -345,4 +669,36 @@ func appendEnvFromDependency(existing model.JSONMap, entry map[string]any) model
 	list = append(list, entry)
 	existing["items"] = list
 	return existing
+}
+
+func maskJSONSecrets(in model.JSONMap) model.JSONMap {
+	out := model.JSONMap{}
+	for key, value := range in {
+		lower := strings.ToLower(key)
+		if strings.Contains(lower, "password") || strings.Contains(lower, "secret") || strings.Contains(lower, "token") {
+			out[key] = "********"
+			continue
+		}
+		out[key] = value
+	}
+	return out
+}
+
+func maskOutputSecrets(in model.JSONMap) model.JSONMap {
+	out := model.JSONMap{}
+	for key, raw := range in {
+		if m, ok := raw.(map[string]any); ok {
+			copy := map[string]any{}
+			for k, v := range m {
+				copy[k] = v
+			}
+			if secret, _ := copy["secret"].(bool); secret {
+				copy["value"] = "********"
+			}
+			out[key] = copy
+			continue
+		}
+		out[key] = raw
+	}
+	return out
 }
