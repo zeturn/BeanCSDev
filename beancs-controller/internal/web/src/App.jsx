@@ -125,6 +125,11 @@ const navSections = [
         icon: Rocket,
       },
       {
+        id: "dependencies",
+        label: "Dependencies",
+        icon: Database,
+      },
+      {
         id: "progress",
         label: "Progress",
         icon: LoaderCircle,
@@ -275,6 +280,7 @@ import EventsView from "./views/EventsView";
 import MetricsView from "./views/MetricsView";
 import LogsView from "./views/LogsView";
 import DeploymentsView from "./views/DeploymentsView";
+import DependenciesView from "./views/DependenciesView";
 import ProjectsView from "./views/ProjectsView";
 import ProjectTrackingModal from "./views/ProjectTrackingModal";
 import DeleteProjectModal from "./views/DeleteProjectModal";
@@ -307,6 +313,7 @@ function App() {
   const [projects, setProjects] = useState([]);
   const [applications, setApplications] = useState([]);
   const [dependencyDefinitions, setDependencyDefinitions] = useState([]);
+  const [reusableDependencies, setReusableDependencies] = useState([]);
   const [credentials, setCredentials] = useState({
     github: [],
     cloudflare: [],
@@ -508,6 +515,7 @@ function App() {
         projectData,
         applicationData,
         dependencyDefinitionData,
+        dependencyData,
         apiKeyData,
         githubData,
         cloudflareData,
@@ -519,6 +527,7 @@ function App() {
         api.get("/projects"),
         api.get("/applications"),
         api.get("/dependency-definitions"),
+        api.get("/dependencies"),
         api.get("/api-keys"),
         api.get("/credentials/github/"),
         api.get("/credentials/cloudflare/"),
@@ -536,6 +545,26 @@ function App() {
         ),
       );
       setDependencyDefinitions(definitions.map(normalizeDependencyDefinition));
+      const dependencyRows = dependencyData.data || [];
+      const dependenciesWithCredentials = await Promise.all(
+        dependencyRows.map(async (dependency) => {
+          try {
+            const credentialData = await api.get(
+              `/dependencies/${dependency.id}/credentials`,
+            );
+            return {
+              ...dependency,
+              credentials: credentialData.data || [],
+            };
+          } catch {
+            return {
+              ...dependency,
+              credentials: [],
+            };
+          }
+        }),
+      );
+      setReusableDependencies(dependenciesWithCredentials);
       setAPIKeys(apiKeyData.data || []);
       setCredentials({
         github: githubData.data || [],
@@ -628,6 +657,90 @@ function App() {
     setProjects([]);
     setApplications([]);
     setDependencyDefinitions([]);
+    setReusableDependencies([]);
+  }
+  async function createDependency(event) {
+    event.preventDefault();
+    setError("");
+    setNotice("");
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const type = String(data.get("type") || "").trim();
+    const controlled = data.get("controlled") === "on";
+    const body = {
+      name: String(data.get("name") || "").trim(),
+      display_name: String(data.get("display_name") || "").trim(),
+      application_name: String(data.get("application_name") || "").trim(),
+      namespace: String(data.get("namespace") || "").trim(),
+      type,
+      deploy_method: "external",
+      external: true,
+      controlled,
+      shared: true,
+      config: {
+        host: String(data.get("host") || "").trim(),
+        port: String(data.get("port") || "").trim(),
+      },
+    };
+    if (type === "rabbitmq") {
+      body.config.management_port = String(
+        data.get("management_port") || "",
+      ).trim();
+    }
+    if (controlled) {
+      body.config.admin_username = String(
+        data.get("admin_username") || "",
+      ).trim();
+      body.config.admin_password = String(data.get("admin_password") || "");
+    }
+    Object.keys(body).forEach((key) => {
+      if (body[key] === "") delete body[key];
+    });
+    Object.keys(body.config).forEach((key) => {
+      if (body.config[key] === "") delete body.config[key];
+    });
+    try {
+      await api.post("/dependencies", body);
+      form.reset();
+      setNotice("Dependency added.");
+      await loadWorkspace();
+      return true;
+    } catch (err) {
+      setError(err.message);
+      return false;
+    }
+  }
+  async function createDependencyCredential(dependencyID, event) {
+    event.preventDefault();
+    setError("");
+    setNotice("");
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const body = {
+      name: String(data.get("name") || "").trim(),
+      description: String(data.get("description") || "").trim(),
+      config: {
+        database: String(data.get("database") || "").trim(),
+        username: String(data.get("username") || "").trim(),
+        password: String(data.get("password") || ""),
+      },
+    };
+    Object.keys(body).forEach((key) => {
+      if (body[key] === "") delete body[key];
+    });
+    Object.keys(body.config).forEach((key) => {
+      if (body.config[key] === "") delete body.config[key];
+    });
+    try {
+      await api.post(`/dependencies/${dependencyID}/credentials`, body);
+      form.reset();
+      setNotice("Credential added.");
+      await loadWorkspace();
+      return true;
+    } catch (err) {
+      setError(err.message);
+      return false;
+    }
   }
   async function connectGitHubApp(event, gitopsRepo) {
     event?.preventDefault();
@@ -2310,9 +2423,19 @@ function App() {
                 containerRegistries={containerRegistries}
                 containerImages={containerImages}
                 dependencyDefinitions={dependencyDefinitions}
+                reusableDependencies={reusableDependencies}
                 createTrackedImageFromDeploy={createTrackedImageFromDeploy}
                 onConnectGitHub={connectGitHubApp}
                 reposLoading={reposLoading}
+              />
+            )}
+            {view === "dependencies" && (
+              <DependenciesView
+                definitions={dependencyDefinitions}
+                dependencies={reusableDependencies}
+                onCreateDependency={createDependency}
+                onCreateCredential={createDependencyCredential}
+                onRefresh={loadWorkspace}
               />
             )}
             {view === "progress" && (

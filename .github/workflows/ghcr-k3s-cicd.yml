@@ -6,6 +6,7 @@ on:
     tags:
       - "v*"
       - "beancs-v*"
+      - "california-beans-v*"
   workflow_dispatch:
 
 permissions:
@@ -70,7 +71,7 @@ jobs:
             echo "tags<<EOF"
             echo "${IMAGE}:${GITHUB_SHA}"
             echo "${IMAGE}:latest"
-            if [[ "${GITHUB_REF}" == refs/tags/v* || "${GITHUB_REF}" == refs/tags/beancs-v* ]]; then
+            if [[ "${GITHUB_REF}" == refs/tags/v* || "${GITHUB_REF}" == refs/tags/beancs-v* || "${GITHUB_REF}" == refs/tags/california-beans-v* ]]; then
               echo "${IMAGE}:${GITHUB_REF_NAME}"
             fi
             echo "EOF"
@@ -103,7 +104,7 @@ jobs:
 
   deploy_k3s:
     needs: build_and_push
-    if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/beancs-v')
+    if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/beancs-v') || startsWith(github.ref, 'refs/tags/california-beans-v')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

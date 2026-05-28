@@ -33,6 +33,11 @@ spec:
         secret: true
         generate:
           length: 32
+      admin_username:
+        type: string
+      admin_password:
+        type: string
+        secret: true
       persistence:
         type: object
         properties:

@@ -14,6 +14,7 @@ type CreateManagedDependencyRequest struct {
 	Config               model.JSONMap                      `json:"config" validate:"omitempty"`
 	Shared               bool                               `json:"shared"`
 	External             bool                               `json:"external"`
+	Controlled           *bool                              `json:"controlled" validate:"omitempty"`
 	ExistingDependencyID uint                               `json:"existing_dependency_id" validate:"omitempty"`
 	Credential           *CreateDependencyCredentialRequest `json:"credential" validate:"omitempty"`
 }

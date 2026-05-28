@@ -306,9 +306,15 @@ export function DependencyLinksEditor({
       return;
     }
     const definition = definitionForDependency(definitions, dependency.type);
+    const credential = (dependency.credentials || [])[0];
     onChange([
       ...links,
-      { dependency: dependency.name, preset: firstEnvPreset(definition) },
+      {
+        dependency: dependency.name,
+        preset: firstEnvPreset(definition),
+        credential: credential?.name || "",
+        credential_id: credential?.id || "",
+      },
     ]);
   };
   const updatePreset = (dependencyName, preset) => {
@@ -316,6 +322,24 @@ export function DependencyLinksEditor({
       links.map((link) =>
         link.dependency === dependencyName ? { ...link, preset } : link,
       ),
+    );
+  };
+  const updateCredential = (dependencyName, credentialID) => {
+    onChange(
+      links.map((link) => {
+        if (link.dependency !== dependencyName) return link;
+        const dependency = dependencies.find(
+          (item) => item.name === dependencyName,
+        );
+        const credential = (dependency?.credentials || []).find(
+          (item) => String(item.id) === String(credentialID),
+        );
+        return {
+          ...link,
+          credential_id: credential?.id || "",
+          credential: credential?.name || "",
+        };
+      }),
     );
   };
   return (
@@ -357,6 +381,20 @@ export function DependencyLinksEditor({
                 {presets.map((preset) => (
                   <option key={preset} value={preset}>
                     {preset}
+                  </option>
+                ))}
+              </Select>
+              <Select
+                value={link?.credential_id || ""}
+                onChange={(event) =>
+                  updateCredential(dependency.name, event.target.value)
+                }
+                disabled={!link || !(dependency.credentials || []).length}
+              >
+                <option value="">default</option>
+                {(dependency.credentials || []).map((credential) => (
+                  <option key={credential.id} value={credential.id}>
+                    {credential.name}
                   </option>
                 ))}
               </Select>

@@ -184,6 +184,7 @@ export default function DeployView({
   containerRegistries,
   containerImages,
   dependencyDefinitions,
+  reusableDependencies,
   createTrackedImageFromDeploy,
   onConnectGitHub,
   reposLoading,
@@ -345,6 +346,7 @@ export default function DeployView({
         ...(form.dependencies || []),
         {
           name,
+          source: "new",
           type: definition.name,
           deploy_method: definition.default_deploy_method || "helm",
           version: "",
@@ -1226,9 +1228,38 @@ export default function DeployView({
                             }
                             required
                           />
+                          <label>Source</label>
+                          <Select
+                            value={dependency.source || "new"}
+                            onChange={(event) => {
+                              const source = event.target.value;
+                              if (source === "existing") {
+                                const match = (reusableDependencies || []).find(
+                                  (item) => item.type === dependency.type,
+                                );
+                                updateDependency(index, {
+                                  source,
+                                  existing_dependency_id: match?.id || "",
+                                  name: match?.name || dependency.name,
+                                  type: match?.type || dependency.type,
+                                  credentials: match?.credentials || [],
+                                });
+                                return;
+                              }
+                              updateDependency(index, {
+                                source,
+                                existing_dependency_id: "",
+                                credentials: [],
+                              });
+                            }}
+                          >
+                            <option value="new">New</option>
+                            <option value="existing">Existing</option>
+                          </Select>
                           <label>Type</label>
                           <Select
                             value={dependency.type}
+                            disabled={(dependency.source || "new") === "existing"}
                             onChange={(event) => {
                               const nextDefinition = definitionForDependency(
                                 dependencyDefinitions,
@@ -1258,6 +1289,38 @@ export default function DeployView({
                               </option>
                             ))}
                           </Select>
+                          {(dependency.source || "new") === "existing" && (
+                            <>
+                              <label>Dependency</label>
+                              <Select
+                                value={dependency.existing_dependency_id || ""}
+                                onChange={(event) => {
+                                  const match = (reusableDependencies || []).find(
+                                    (item) =>
+                                      String(item.id) === event.target.value,
+                                  );
+                                  updateDependency(index, {
+                                    existing_dependency_id: match?.id || "",
+                                    name: match?.name || dependency.name,
+                                    type: match?.type || dependency.type,
+                                    credentials: match?.credentials || [],
+                                  });
+                                }}
+                              >
+                                <option value="">Choose dependency</option>
+                                {(reusableDependencies || [])
+                                  .filter(
+                                    (item) => item.type === dependency.type,
+                                  )
+                                  .map((item) => (
+                                    <option key={item.id} value={item.id}>
+                                      {item.name} ·{" "}
+                                      {item.external ? "external" : "managed"}
+                                    </option>
+                                  ))}
+                              </Select>
+                            </>
+                          )}
                           <label>Deploy method</label>
                           <Select
                             value={
@@ -1268,8 +1331,10 @@ export default function DeployView({
                             onChange={(event) =>
                               updateDependency(index, {
                                 deploy_method: event.target.value,
+                                external: event.target.value === "external",
                               })
                             }
+                            disabled={(dependency.source || "new") === "existing"}
                           >
                             {(
                               definition?.supported_deploy_methods || ["helm"]
@@ -1289,15 +1354,34 @@ export default function DeployView({
                             }
                           />
                         </div>
-                        <DependencyConfigEditor
-                          definition={definition}
-                          value={dependency.config || {}}
-                          onChange={(config) =>
-                            updateDependency(index, {
-                              config,
-                            })
-                          }
-                        />
+                        {(dependency.source || "new") !== "existing" && (
+                          <>
+                            {(dependency.deploy_method === "external" ||
+                              dependency.external) && (
+                              <label className="checkbox-label">
+                                <Input
+                                  type="checkbox"
+                                  checked={Boolean(dependency.controlled)}
+                                  onChange={(event) =>
+                                    updateDependency(index, {
+                                      controlled: event.target.checked,
+                                    })
+                                  }
+                                />
+                                <span>BeanCS can create credentials</span>
+                              </label>
+                            )}
+                            <DependencyConfigEditor
+                              definition={definition}
+                              value={dependency.config || {}}
+                              onChange={(config) =>
+                                updateDependency(index, {
+                                  config,
+                                })
+                              }
+                            />
+                          </>
+                        )}
                       </div>
                     );
                   })}
