@@ -522,7 +522,6 @@ function App() {
         api.get("/projects"),
         api.get("/applications"),
         api.get("/dependency-definitions"),
-        api.get("/dependencies"),
         api.get("/api-keys"),
         api.get("/credentials/github/"),
         api.get("/credentials/cloudflare/"),
@@ -540,7 +539,6 @@ function App() {
         ),
       );
       setDependencyDefinitions(definitions.map(normalizeDependencyDefinition));
-      setReusableDependencies(reusableDependencyData.data || []);
       setAPIKeys(apiKeyData.data || []);
       setCredentials({
         github: githubData.data || [],
@@ -2315,8 +2313,6 @@ function App() {
                 containerRegistries={containerRegistries}
                 containerImages={containerImages}
                 dependencyDefinitions={dependencyDefinitions}
-                reusableDependencies={reusableDependencies}
-                onLoadDependencyCredentials={loadDependencyCredentials}
                 createTrackedImageFromDeploy={createTrackedImageFromDeploy}
                 onConnectGitHub={connectGitHubApp}
                 reposLoading={reposLoading}
@@ -2382,9 +2378,6 @@ function App() {
                 onRefresh={loadAPIKeys}
               />
             )}
-            {view === "deployments" && <DeploymentsView projects={projects} processes={processRecords} runtimeDeployments={runtime.deployments || []} refresh={loadWorkspace} onOpenProcess={(process) => { setActiveProcessID(String(process.id)); setActiveProgressProjectID(String(process.project_id || "")); setView("progress"); }} />}
-            {view === "dependencies" && <DependenciesView dependencies={reusableDependencies} definitions={dependencyDefinitions} githubCredentials={credentials.github} onCreate={createStandaloneDependency} onLoadCredentials={loadDependencyCredentials} onCreateCredential={createDependencyCredential} refresh={loadWorkspace} />}
-            {view === "apiKeys" && <APIKeysView keys={apiKeys} scopeCatalog={apiKeyScopeCatalog} createdKey={createdAPIKey} onDismissCreated={() => setCreatedAPIKey(null)} onCreate={createAPIKey} onRevoke={revokeAPIKey} onRefresh={loadAPIKeys} />}
             {view === "registries" && (
               <ContainerRegistriesView
                 presets={registryPresets}
