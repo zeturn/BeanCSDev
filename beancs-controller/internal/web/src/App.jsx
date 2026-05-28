@@ -1,8 +1,49 @@
-import React, {useEffect, useMemo, useRef, useState} from "react";
-import {createRoot} from "react-dom/client";
-import { filterNavItems, filterNavSections, shouldShowSkeleton, defaultDeployForm, buildProjectPayload, monorepoComponentsFromAnalysis, applicationSpecAnalysis, deployFormFromApplicationSpec, monorepoComponentDomainOverrides, buildMonorepoApplicationPayload, normalizeDependencyDefinition, imageName, profileFromBasalt, trimLiveLog, titleFor, subtitleFor, parseKeyValues, parseTaints, parseCSV, parsePermissionSubjects, parseServicePorts, localDateTimeToRFC3339, slugify, trimSlash, browserRedirectURI, randomString, codeChallenge } from "./utils/index";
-import { makeAPI, consumeTextStream, publicJSON, finishLogin } from "./api/index";
-import { SidebarNavGroup, PageHeading, SkeletonPage, RuntimeTable, CredentialManager } from "./components/index";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createRoot } from "react-dom/client";
+import {
+  filterNavItems,
+  filterNavSections,
+  shouldShowSkeleton,
+  defaultDeployForm,
+  buildProjectPayload,
+  monorepoComponentsFromAnalysis,
+  applicationSpecAnalysis,
+  deployFormFromApplicationSpec,
+  monorepoComponentDomainOverrides,
+  buildMonorepoApplicationPayload,
+  normalizeDependencyDefinition,
+  imageName,
+  profileFromBasalt,
+  trimLiveLog,
+  titleFor,
+  subtitleFor,
+  parseKeyValues,
+  parseTaints,
+  parseCSV,
+  parsePermissionSubjects,
+  parseServicePorts,
+  localDateTimeToRFC3339,
+  slugify,
+  trimSlash,
+  browserRedirectURI,
+  randomString,
+  codeChallenge,
+} from "./utils/index";
+import {
+  makeAPI,
+  consumeTextStream,
+  publicJSON,
+  finishLogin,
+} from "./api/index";
+import {
+  SidebarNavGroup,
+  PageHeading,
+  SkeletonPage,
+  RuntimeTable,
+  CredentialManager,
+  Button,
+  Input,
+} from "./components/index";
 import {
   Activity,
   AlertTriangle,
@@ -53,10 +94,8 @@ import {
   X,
 } from "lucide-react";
 import "./style.css";
-
 const API = "/v1/api";
 const tokenKey = "beancs.accessToken";
-
 const emptyRuntime = {
   namespaces: [],
   pods: [],
@@ -65,70 +104,169 @@ const emptyRuntime = {
   services: [],
   ingresses: [],
 };
-
-const navOverview = {id: "dashboard", label: "Overview", icon: LayoutDashboard};
-
+const navOverview = {
+  id: "dashboard",
+  label: "Overview",
+  icon: LayoutDashboard,
+};
 const navSections = [
   {
     id: "workloads",
     label: "Workloads",
     items: [
-      {id: "projects", label: "Projects", icon: Boxes},
-      {id: "deploy", label: "Deploy", icon: Rocket},
-      {id: "progress", label: "Progress", icon: LoaderCircle},
-      {id: "deployments", label: "Deployments", icon: Box},
-      {id: "pods", label: "Pods", icon: Layers3},
-      {id: "services", label: "Services", icon: Database},
-      {id: "ingresses", label: "Ingresses", icon: Network},
-      {id: "workloadImage", label: "Image", icon: ImageIcon},
+      {
+        id: "projects",
+        label: "Projects",
+        icon: Boxes,
+      },
+      {
+        id: "deploy",
+        label: "Deploy",
+        icon: Rocket,
+      },
+      {
+        id: "progress",
+        label: "Progress",
+        icon: LoaderCircle,
+      },
+      {
+        id: "deployments",
+        label: "Deployments",
+        icon: Box,
+      },
+      {
+        id: "pods",
+        label: "Pods",
+        icon: Layers3,
+      },
+      {
+        id: "services",
+        label: "Services",
+        icon: Database,
+      },
+      {
+        id: "ingresses",
+        label: "Ingresses",
+        icon: Network,
+      },
+      {
+        id: "workloadImage",
+        label: "Image",
+        icon: ImageIcon,
+      },
     ],
   },
   {
     id: "infrastructure",
     label: "Infrastructure",
     items: [
-      {id: "nodes", label: "Nodes", icon: Server},
-      {id: "namespaces", label: "Namespaces", icon: Layers3},
-      {id: "networking", label: "Networking", icon: Network},
-      {id: "storage", label: "Storage", icon: HardDrive},
+      {
+        id: "nodes",
+        label: "Nodes",
+        icon: Server,
+      },
+      {
+        id: "namespaces",
+        label: "Namespaces",
+        icon: Layers3,
+      },
+      {
+        id: "networking",
+        label: "Networking",
+        icon: Network,
+      },
+      {
+        id: "storage",
+        label: "Storage",
+        icon: HardDrive,
+      },
     ],
   },
   {
     id: "integrations",
     label: "Integrations",
     items: [
-      {id: "github", label: "GitHub", icon: Github},
-      {id: "cloudflare", label: "Cloudflare", icon: Cloud},
-      {id: "domains", label: "Domains", icon: Globe2},
-      {id: "registries", label: "Image Registry", icon: Package},
+      {
+        id: "github",
+        label: "GitHub",
+        icon: Github,
+      },
+      {
+        id: "cloudflare",
+        label: "Cloudflare",
+        icon: Cloud,
+      },
+      {
+        id: "domains",
+        label: "Domains",
+        icon: Globe2,
+      },
+      {
+        id: "registries",
+        label: "Image Registry",
+        icon: Package,
+      },
     ],
   },
   {
     id: "security",
     label: "Security",
     items: [
-      {id: "apiKeys", label: "API Keys", icon: KeyRound},
-      {id: "secrets", label: "Secrets", icon: Lock},
-      {id: "accessControl", label: "Access Control", icon: ShieldCheck},
+      {
+        id: "apiKeys",
+        label: "API Keys",
+        icon: KeyRound,
+      },
+      {
+        id: "secrets",
+        label: "Secrets",
+        icon: Lock,
+      },
+      {
+        id: "accessControl",
+        label: "Access Control",
+        icon: ShieldCheck,
+      },
     ],
   },
   {
     id: "observability",
     label: "Observability",
     items: [
-      {id: "alerts", label: "Alerts", icon: Bell},
-      {id: "events", label: "Events", icon: ScrollText},
-      {id: "logs", label: "Logs", icon: FileText},
-      {id: "metrics", label: "Metrics", icon: LineChart},
+      {
+        id: "alerts",
+        label: "Alerts",
+        icon: Bell,
+      },
+      {
+        id: "events",
+        label: "Events",
+        icon: ScrollText,
+      },
+      {
+        id: "logs",
+        label: "Logs",
+        icon: FileText,
+      },
+      {
+        id: "metrics",
+        label: "Metrics",
+        icon: LineChart,
+      },
     ],
   },
   {
     id: "settings",
     label: "Settings",
-    items: [{id: "settings", label: "Settings", icon: Settings}],
+    items: [
+      {
+        id: "settings",
+        label: "Settings",
+        icon: Settings,
+      },
+    ],
   },
 ];
-
 import DeployView from "./views/DeployView";
 import ProgressView from "./views/ProgressView";
 import ProgressListView from "./views/ProgressListView";
@@ -157,7 +295,6 @@ import RuntimeDetailDrawer from "./views/RuntimeDetailDrawer";
 import NodeDetailView from "./views/NodeDetailView";
 import NamespaceDetailView from "./views/NamespaceDetailView";
 import ProjectModal from "./views/ProjectModal";
-
 function App() {
   const [config, setConfig] = useState(null);
   const [token, setToken] = useState(localStorage.getItem(tokenKey) || "");
@@ -173,9 +310,16 @@ function App() {
   const [projects, setProjects] = useState([]);
   const [applications, setApplications] = useState([]);
   const [dependencyDefinitions, setDependencyDefinitions] = useState([]);
-  const [credentials, setCredentials] = useState({github: [], cloudflare: [], basaltpass: []});
+  const [credentials, setCredentials] = useState({
+    github: [],
+    cloudflare: [],
+    basaltpass: [],
+  });
   const [apiKeys, setAPIKeys] = useState([]);
-  const [apiKeyScopeCatalog, setAPIKeyScopeCatalog] = useState({scopes: [], presets: []});
+  const [apiKeyScopeCatalog, setAPIKeyScopeCatalog] = useState({
+    scopes: [],
+    presets: [],
+  });
   const [registryPresets, setRegistryPresets] = useState([]);
   const [containerRegistries, setContainerRegistries] = useState([]);
   const [containerImages, setContainerImages] = useState([]);
@@ -226,32 +370,37 @@ function App() {
   const progressLoadingRef = useRef(false);
   const nodeDetailLoadingRef = useRef(false);
   const registriesLoadingRef = useRef(false);
-
   const api = useMemo(() => makeAPI(token, logout), [token]);
-  const userProfile = useMemo(() => profileFromBasalt(basaltProfile, token), [basaltProfile, token]);
-  const filteredNavSections = useMemo(() => filterNavSections(navSections, sidebarQuery), [sidebarQuery]);
-  const filteredOverview = useMemo(() => filterNavItems([navOverview], sidebarQuery), [sidebarQuery]);
-
+  const userProfile = useMemo(
+    () => profileFromBasalt(basaltProfile, token),
+    [basaltProfile, token],
+  );
+  const filteredNavSections = useMemo(
+    () => filterNavSections(navSections, sidebarQuery),
+    [sidebarQuery],
+  );
+  const filteredOverview = useMemo(
+    () => filterNavItems([navOverview], sidebarQuery),
+    [sidebarQuery],
+  );
   useEffect(() => {
     boot();
   }, []);
-
   useEffect(() => {
     if (token) {
       loadWorkspace();
       loadUserProfile();
     }
   }, [token]);
-
   useEffect(() => {
-    if (!token || !["dashboard", "alerts", "events", "metrics"].includes(view)) return;
+    if (!token || !["dashboard", "alerts", "events", "metrics"].includes(view))
+      return;
     loadDashboard();
     const timer = setInterval(() => {
       if (!document.hidden) loadDashboard();
     }, 15000);
     return () => clearInterval(timer);
   }, [token, view]);
-
   useEffect(() => {
     if (!token || view !== "networking") return;
     loadNetwork();
@@ -260,12 +409,10 @@ function App() {
     }, 30000);
     return () => clearInterval(timer);
   }, [token, view]);
-
   useEffect(() => {
     if (!token || view !== "nodes") return;
     loadNodeJoinCommand("agent");
   }, [token, view]);
-
   useEffect(() => {
     if (!token || !["progress", "logs"].includes(view)) return;
     loadProcesses();
@@ -281,46 +428,60 @@ function App() {
       }
     }, 5000);
     return () => clearInterval(timer);
-  }, [token, view, activeProgressProjectID, activeProcessID, projects.length, projectLogFollow]);
-
+  }, [
+    token,
+    view,
+    activeProgressProjectID,
+    activeProcessID,
+    projects.length,
+    projectLogFollow,
+  ]);
   useEffect(() => {
     if (!token || runtimeDetail?.kind !== "node") return;
-    const nodeName = runtimeDetail.row?.summary?.name || runtimeDetail.row?.name;
+    const nodeName =
+      runtimeDetail.row?.summary?.name || runtimeDetail.row?.name;
     if (!nodeName) return;
     const timer = setInterval(() => {
-      if (!document.hidden) loadNodeDetail({name: nodeName}, false);
+      if (!document.hidden)
+        loadNodeDetail(
+          {
+            name: nodeName,
+          },
+          false,
+        );
     }, 15000);
     return () => clearInterval(timer);
-  }, [token, runtimeDetail?.kind, runtimeDetail?.row?.summary?.name, runtimeDetail?.row?.name]);
-
+  }, [
+    token,
+    runtimeDetail?.kind,
+    runtimeDetail?.row?.summary?.name,
+    runtimeDetail?.row?.name,
+  ]);
   useEffect(() => {
     if (!token || view !== "settings") return;
     publicJSON(`${API}/version`)
       .then((d) => setAppVersion(d.version || ""))
       .catch(() => setAppVersion(""));
   }, [token, view]);
-
   useEffect(() => {
     if (!token || view !== "apiKeys") return;
     loadAPIKeys();
   }, [token, view]);
-
   useEffect(() => {
-    if (!token || !["deploy", "registries", "workloadImage"].includes(view)) return;
+    if (!token || !["deploy", "registries", "workloadImage"].includes(view))
+      return;
     loadRegistriesPage();
     const timer = setInterval(() => {
       if (!document.hidden) loadContainerImages();
     }, 120000);
     return () => clearInterval(timer);
   }, [token, view]);
-
   useEffect(() => {
     return () => {
       projectLogController.current?.abort();
       runtimeLogController.current?.abort();
     };
   }, []);
-
   async function boot() {
     try {
       const cfg = await publicJSON(`${API}/ui/config`);
@@ -339,14 +500,24 @@ function App() {
       setError(err.message);
     }
   }
-
   async function loadWorkspace() {
     if (workspaceLoadingRef.current) return;
     workspaceLoadingRef.current = true;
     setLoading(true);
     setError("");
     try {
-      const [runtimeData, projectData, applicationData, dependencyDefinitionData, apiKeyData, githubData, cloudflareData, domainsData, basaltpassData, processData] = await Promise.all([
+      const [
+        runtimeData,
+        projectData,
+        applicationData,
+        dependencyDefinitionData,
+        apiKeyData,
+        githubData,
+        cloudflareData,
+        domainsData,
+        basaltpassData,
+        processData,
+      ] = await Promise.all([
         api.get("/runtime/overview"),
         api.get("/projects"),
         api.get("/applications"),
@@ -362,7 +533,11 @@ function App() {
       setProjects(projectData.data || []);
       setApplications(applicationData.data || []);
       const definitionSummaries = dependencyDefinitionData.data || [];
-      const definitions = await Promise.all(definitionSummaries.map((definition) => api.get(`/dependency-definitions/${definition.name}`)));
+      const definitions = await Promise.all(
+        definitionSummaries.map((definition) =>
+          api.get(`/dependency-definitions/${definition.name}`),
+        ),
+      );
       setDependencyDefinitions(definitions.map(normalizeDependencyDefinition));
       setAPIKeys(apiKeyData.data || []);
       setCredentials({
@@ -379,20 +554,21 @@ function App() {
       setLoading(false);
     }
   }
-
   async function loadProcesses() {
     try {
       const data = await api.get("/processes");
       const rows = data.data || [];
       setProcessRecords(rows);
-      if (activeProcessID && !rows.some((row) => String(row.id) === String(activeProcessID))) {
+      if (
+        activeProcessID &&
+        !rows.some((row) => String(row.id) === String(activeProcessID))
+      ) {
         setActiveProcessID("");
       }
     } catch (err) {
       setError(err.message);
     }
   }
-
   async function loadUserProfile() {
     try {
       const data = await api.get("/me");
@@ -401,7 +577,6 @@ function App() {
       setBasaltProfile(null);
     }
   }
-
   async function loadDashboard() {
     if (dashboardLoadingRef.current) return;
     dashboardLoadingRef.current = true;
@@ -414,7 +589,6 @@ function App() {
       dashboardLoadingRef.current = false;
     }
   }
-
   async function loadNetwork() {
     if (networkLoadingRef.current) return;
     networkLoadingRef.current = true;
@@ -427,7 +601,6 @@ function App() {
       networkLoadingRef.current = false;
     }
   }
-
   async function startLogin() {
     if (!config) return;
     const verifier = randomString(64);
@@ -447,9 +620,9 @@ function App() {
       code_challenge: challenge,
       code_challenge_method: "S256",
     });
-    location.href = trimSlash(config.auth_url) + "/oauth/authorize?" + params.toString();
+    location.href =
+      trimSlash(config.auth_url) + "/oauth/authorize?" + params.toString();
   }
-
   function logout() {
     localStorage.removeItem(tokenKey);
     setToken("");
@@ -459,7 +632,6 @@ function App() {
     setApplications([]);
     setDependencyDefinitions([]);
   }
-
   async function connectGitHubApp(event, gitopsRepo) {
     event?.preventDefault();
     setError("");
@@ -468,7 +640,6 @@ function App() {
     const data = await api.post("/credentials/github/app/start", body);
     location.href = data.install_url;
   }
-
   async function updateGitHubCredential(id, updates) {
     try {
       await api.patch(`/credentials/github/${id}`, updates);
@@ -478,10 +649,11 @@ function App() {
       setError(err.message);
     }
   }
-
   async function createCredential(kind, event) {
     event.preventDefault();
-    const body = Object.fromEntries(new FormData(event.currentTarget).entries());
+    const body = Object.fromEntries(
+      new FormData(event.currentTarget).entries(),
+    );
     Object.keys(body).forEach((key) => {
       if (typeof body[key] === "string") body[key] = body[key].trim();
       if (body[key] === "") delete body[key];
@@ -496,7 +668,6 @@ function App() {
       return false;
     }
   }
-
   async function deleteCredential(kind, id) {
     if (!confirm(`Delete this ${kind} credential?`)) return;
     try {
@@ -506,14 +677,16 @@ function App() {
       setError(err.message);
     }
   }
-
   async function createAPIKey(event) {
     event.preventDefault();
     setError("");
     setNotice("");
     const form = event.currentTarget;
     const data = new FormData(form);
-    const scopes = data.getAll("scopes").map((scope) => String(scope || "").trim()).filter(Boolean);
+    const scopes = data
+      .getAll("scopes")
+      .map((scope) => String(scope || "").trim())
+      .filter(Boolean);
     const body = {
       name: String(data.get("name") || "").trim(),
       preset: String(data.get("preset") || "").trim(),
@@ -531,13 +704,19 @@ function App() {
       return false;
     }
   }
-
   async function loadAPIKeys() {
-    const [keyData, scopeData] = await Promise.all([api.get("/api-keys"), api.get("/api-keys/scopes")]);
+    const [keyData, scopeData] = await Promise.all([
+      api.get("/api-keys"),
+      api.get("/api-keys/scopes"),
+    ]);
     setAPIKeys(keyData.data || []);
-    setAPIKeyScopeCatalog(scopeData || {scopes: [], presets: []});
+    setAPIKeyScopeCatalog(
+      scopeData || {
+        scopes: [],
+        presets: [],
+      },
+    );
   }
-
   async function loadRegistriesPage() {
     if (registriesLoadingRef.current) return;
     registriesLoadingRef.current = true;
@@ -557,7 +736,6 @@ function App() {
       registriesLoadingRef.current = false;
     }
   }
-
   async function loadContainerImages() {
     try {
       const imgData = await api.get("/container-images");
@@ -566,7 +744,6 @@ function App() {
       setError(err.message);
     }
   }
-
   async function createContainerRegistry(event) {
     event.preventDefault();
     setError("");
@@ -590,7 +767,6 @@ function App() {
       setError(err.message);
     }
   }
-
   async function deleteContainerRegistry(row) {
     if (!confirm(`删除镜像源「${row.name}」？关联的镜像跟踪也会删除。`)) return;
     try {
@@ -601,7 +777,6 @@ function App() {
       setError(err.message);
     }
   }
-
   async function createTrackedImage(event) {
     event.preventDefault();
     setError("");
@@ -623,13 +798,11 @@ function App() {
       setError(err.message);
     }
   }
-
   async function createTrackedImageFromDeploy(body) {
     const created = await api.post("/container-images", body);
     await loadRegistriesPage();
     return created;
   }
-
   async function refreshTrackedImage(id) {
     setError("");
     try {
@@ -639,7 +812,6 @@ function App() {
       setError(err.message);
     }
   }
-
   async function deleteTrackedImage(row) {
     if (!confirm(`从列表中移除「${row.repository}」？`)) return;
     try {
@@ -649,7 +821,6 @@ function App() {
       setError(err.message);
     }
   }
-
   async function syncAllTrackedImages() {
     setError("");
     let list = [];
@@ -670,9 +841,13 @@ function App() {
     }
     await loadContainerImages();
   }
-
   async function revokeAPIKey(key) {
-    if (!confirm(`Revoke API key ${key.name}? Existing clients using it will stop working.`)) return;
+    if (
+      !confirm(
+        `Revoke API key ${key.name}? Existing clients using it will stop working.`,
+      )
+    )
+      return;
     try {
       await api.delete(`/api-keys/${key.id}`);
       setNotice(`${key.name} revoked.`);
@@ -681,7 +856,6 @@ function App() {
       setError(err.message);
     }
   }
-
   async function loadRepos(credentialID = selectedCredential) {
     if (!credentialID) return;
     setSelectedCredential(String(credentialID));
@@ -689,17 +863,24 @@ function App() {
     setRepos([]);
     setReposLoading(true);
     try {
-      const data = await api.get(`/credentials/github/${credentialID}/repositories`);
+      const data = await api.get(
+        `/credentials/github/${credentialID}/repositories`,
+      );
       setRepos(data.data || []);
-      setReposByCredential((current) => ({...current, [credentialID]: data.data || []}));
+      setReposByCredential((current) => ({
+        ...current,
+        [credentialID]: data.data || [],
+      }));
     } catch (err) {
       setError(err.message);
     } finally {
       setReposLoading(false);
     }
   }
-
-  async function loadDNSRecords(credentialID = selectedCloudflareID, zoneID = selectedCloudflareZoneID) {
+  async function loadDNSRecords(
+    credentialID = selectedCloudflareID,
+    zoneID = selectedCloudflareZoneID,
+  ) {
     if (!credentialID) return;
     setSelectedCloudflareID(String(credentialID));
     setSelectedCloudflareZoneID(String(zoneID || ""));
@@ -707,7 +888,9 @@ function App() {
     setError("");
     try {
       const qs = zoneID ? `?zone_id=${encodeURIComponent(zoneID)}` : "";
-      const data = await api.get(`/credentials/cloudflare/${credentialID}/dns-records${qs}`);
+      const data = await api.get(
+        `/credentials/cloudflare/${credentialID}/dns-records${qs}`,
+      );
       setDNSRecords(data.data || []);
     } catch (err) {
       setError(err.message);
@@ -715,19 +898,28 @@ function App() {
       setLoading(false);
     }
   }
-
   async function saveDNSRecord(event) {
     event.preventDefault();
     if (!selectedCloudflareID) return;
-    const body = Object.fromEntries(new FormData(event.currentTarget).entries());
+    const body = Object.fromEntries(
+      new FormData(event.currentTarget).entries(),
+    );
     body.ttl = Number(body.ttl || 1);
     body.proxied = Boolean(body.proxied);
     try {
-      const qs = selectedCloudflareZoneID ? `?zone_id=${encodeURIComponent(selectedCloudflareZoneID)}` : "";
+      const qs = selectedCloudflareZoneID
+        ? `?zone_id=${encodeURIComponent(selectedCloudflareZoneID)}`
+        : "";
       if (editingDNSRecord?.id) {
-        await api.put(`/credentials/cloudflare/${selectedCloudflareID}/dns-records/${editingDNSRecord.id}${qs}`, body);
+        await api.put(
+          `/credentials/cloudflare/${selectedCloudflareID}/dns-records/${editingDNSRecord.id}${qs}`,
+          body,
+        );
       } else {
-        await api.post(`/credentials/cloudflare/${selectedCloudflareID}/dns-records${qs}`, body);
+        await api.post(
+          `/credentials/cloudflare/${selectedCloudflareID}/dns-records${qs}`,
+          body,
+        );
       }
       event.currentTarget.reset();
       setEditingDNSRecord(null);
@@ -736,21 +928,26 @@ function App() {
       setError(err.message);
     }
   }
-
   async function deleteDNSRecord(record) {
-    if (!selectedCloudflareID || !confirm(`Delete DNS record ${record.name}?`)) return;
+    if (!selectedCloudflareID || !confirm(`Delete DNS record ${record.name}?`))
+      return;
     try {
-      const qs = selectedCloudflareZoneID ? `?zone_id=${encodeURIComponent(selectedCloudflareZoneID)}` : "";
-      await api.delete(`/credentials/cloudflare/${selectedCloudflareID}/dns-records/${record.id}${qs}`);
+      const qs = selectedCloudflareZoneID
+        ? `?zone_id=${encodeURIComponent(selectedCloudflareZoneID)}`
+        : "";
+      await api.delete(
+        `/credentials/cloudflare/${selectedCloudflareID}/dns-records/${record.id}${qs}`,
+      );
       await loadDNSRecords(selectedCloudflareID);
     } catch (err) {
       setError(err.message);
     }
   }
-
   async function createNamespace(event) {
     event.preventDefault();
-    const body = Object.fromEntries(new FormData(event.currentTarget).entries());
+    const body = Object.fromEntries(
+      new FormData(event.currentTarget).entries(),
+    );
     body.labels = parseKeyValues(body.labels);
     delete body.labels_raw;
     try {
@@ -761,117 +958,159 @@ function App() {
       setError(err.message);
     }
   }
-
   async function patchNamespaceLabels(namespace, labelsText) {
     try {
-      await api.patch(`/runtime/namespaces/${namespace}`, {labels: parseKeyValues(labelsText)});
+      await api.patch(`/runtime/namespaces/${namespace}`, {
+        labels: parseKeyValues(labelsText),
+      });
       await loadWorkspace();
     } catch (err) {
       setError(err.message);
     }
   }
-
   async function loadNamespaceDetail(namespace) {
-    setRuntimeDetail({kind: "namespace-detail", row: {name: namespace}, loading: true});
+    setRuntimeDetail({
+      kind: "namespace-detail",
+      row: {
+        name: namespace,
+      },
+      loading: true,
+    });
     try {
-      const data = await api.get(`/runtime/namespaces/${encodeURIComponent(namespace)}`);
-      setRuntimeDetail({kind: "namespace-detail", row: data.data || {name: namespace}, loading: false});
+      const data = await api.get(
+        `/runtime/namespaces/${encodeURIComponent(namespace)}`,
+      );
+      setRuntimeDetail({
+        kind: "namespace-detail",
+        row: data.data || {
+          name: namespace,
+        },
+        loading: false,
+      });
     } catch (err) {
-      setRuntimeDetail({kind: "namespace-detail", row: {name: namespace}, loading: false, error: err.message});
+      setRuntimeDetail({
+        kind: "namespace-detail",
+        row: {
+          name: namespace,
+        },
+        loading: false,
+        error: err.message,
+      });
     }
   }
-
   async function saveResourceQuota(namespace, event) {
     event.preventDefault();
-    const body = Object.fromEntries(new FormData(event.currentTarget).entries());
+    const body = Object.fromEntries(
+      new FormData(event.currentTarget).entries(),
+    );
     body.hard = parseKeyValues(body.hard);
     try {
-      await api.put(`/runtime/namespaces/${encodeURIComponent(namespace)}/resource-quotas`, body);
+      await api.put(
+        `/runtime/namespaces/${encodeURIComponent(namespace)}/resource-quotas`,
+        body,
+      );
       await loadNamespaceDetail(namespace);
       await loadWorkspace();
     } catch (err) {
       setError(err.message);
     }
   }
-
   async function deleteResourceQuota(namespace, name) {
     if (!confirm(`Delete ResourceQuota ${name}?`)) return;
     try {
-      await api.delete(`/runtime/namespaces/${encodeURIComponent(namespace)}/resource-quotas/${encodeURIComponent(name)}`);
+      await api.delete(
+        `/runtime/namespaces/${encodeURIComponent(namespace)}/resource-quotas/${encodeURIComponent(name)}`,
+      );
       await loadNamespaceDetail(namespace);
     } catch (err) {
       setError(err.message);
     }
   }
-
   async function saveLimitRange(namespace, event) {
     event.preventDefault();
-    const body = Object.fromEntries(new FormData(event.currentTarget).entries());
+    const body = Object.fromEntries(
+      new FormData(event.currentTarget).entries(),
+    );
     body.default = parseKeyValues(body.default);
     body.default_request = parseKeyValues(body.default_request);
     body.min = parseKeyValues(body.min);
     body.max = parseKeyValues(body.max);
     try {
-      await api.put(`/runtime/namespaces/${encodeURIComponent(namespace)}/limit-ranges`, body);
+      await api.put(
+        `/runtime/namespaces/${encodeURIComponent(namespace)}/limit-ranges`,
+        body,
+      );
       await loadNamespaceDetail(namespace);
     } catch (err) {
       setError(err.message);
     }
   }
-
   async function deleteLimitRange(namespace, name) {
     if (!confirm(`Delete LimitRange ${name}?`)) return;
     try {
-      await api.delete(`/runtime/namespaces/${encodeURIComponent(namespace)}/limit-ranges/${encodeURIComponent(name)}`);
+      await api.delete(
+        `/runtime/namespaces/${encodeURIComponent(namespace)}/limit-ranges/${encodeURIComponent(name)}`,
+      );
       await loadNamespaceDetail(namespace);
     } catch (err) {
       setError(err.message);
     }
   }
-
   async function saveNamespacePermission(namespace, event) {
     event.preventDefault();
-    const body = Object.fromEntries(new FormData(event.currentTarget).entries());
+    const body = Object.fromEntries(
+      new FormData(event.currentTarget).entries(),
+    );
     body.verbs = parseCSV(body.verbs);
     body.resources = parseCSV(body.resources);
     body.api_groups = parseCSV(body.api_groups);
     body.subjects = parsePermissionSubjects(body.subjects, namespace);
     try {
-      await api.put(`/runtime/namespaces/${encodeURIComponent(namespace)}/permissions`, body);
+      await api.put(
+        `/runtime/namespaces/${encodeURIComponent(namespace)}/permissions`,
+        body,
+      );
       await loadNamespaceDetail(namespace);
     } catch (err) {
       setError(err.message);
     }
   }
-
   async function deleteNamespacePermission(namespace, name) {
     if (!confirm(`Delete namespace permission ${name}?`)) return;
     try {
-      await api.delete(`/runtime/namespaces/${encodeURIComponent(namespace)}/permissions/${encodeURIComponent(name)}`);
+      await api.delete(
+        `/runtime/namespaces/${encodeURIComponent(namespace)}/permissions/${encodeURIComponent(name)}`,
+      );
       await loadNamespaceDetail(namespace);
     } catch (err) {
       setError(err.message);
     }
   }
-
   async function saveNamespaceIsolation(namespace, event) {
     event.preventDefault();
     const form = event.currentTarget;
     try {
-      await api.put(`/runtime/namespaces/${encodeURIComponent(namespace)}/isolation`, {
-        enabled: Boolean(form.enabled.checked),
-        allow_same_namespace: Boolean(form.allow_same_namespace.checked),
-        allow_dns: Boolean(form.allow_dns.checked),
-      });
+      await api.put(
+        `/runtime/namespaces/${encodeURIComponent(namespace)}/isolation`,
+        {
+          enabled: Boolean(form.enabled.checked),
+          allow_same_namespace: Boolean(form.allow_same_namespace.checked),
+          allow_dns: Boolean(form.allow_dns.checked),
+        },
+      );
       await loadNamespaceDetail(namespace);
       await loadNetwork();
     } catch (err) {
       setError(err.message);
     }
   }
-
   async function deleteNamespace(namespace) {
-    if (!confirm(`Delete namespace ${namespace}? This removes resources inside it.`)) return;
+    if (
+      !confirm(
+        `Delete namespace ${namespace}? This removes resources inside it.`,
+      )
+    )
+      return;
     try {
       await api.delete(`/runtime/namespaces/${namespace}`);
       await loadWorkspace();
@@ -879,7 +1118,6 @@ function App() {
       setError(err.message);
     }
   }
-
   async function deletePod(pod) {
     if (!confirm(`Delete pod ${pod.name}? Kubernetes may recreate it.`)) return;
     try {
@@ -889,85 +1127,134 @@ function App() {
       setError(err.message);
     }
   }
-
   async function loadNodeDetail(node, showModal = true) {
     if (nodeDetailLoadingRef.current) return;
     nodeDetailLoadingRef.current = true;
-    if (showModal) setRuntimeDetail({kind: "node", row: node, loading: true});
+    if (showModal)
+      setRuntimeDetail({
+        kind: "node",
+        row: node,
+        loading: true,
+      });
     if (showModal) setNodeHealth(null);
     try {
-      const data = await api.get(`/runtime/nodes/${encodeURIComponent(node.name)}`);
-      setRuntimeDetail({kind: "node", row: data.data || node, loading: false});
+      const data = await api.get(
+        `/runtime/nodes/${encodeURIComponent(node.name)}`,
+      );
+      setRuntimeDetail({
+        kind: "node",
+        row: data.data || node,
+        loading: false,
+      });
     } catch (err) {
-      setRuntimeDetail({kind: "node", row: node, loading: false, error: err.message});
+      setRuntimeDetail({
+        kind: "node",
+        row: node,
+        loading: false,
+        error: err.message,
+      });
     } finally {
       nodeDetailLoadingRef.current = false;
     }
   }
-
   async function loadNodeHealth(nodeName) {
     try {
-      const data = await api.get(`/runtime/nodes/${encodeURIComponent(nodeName)}/health`);
+      const data = await api.get(
+        `/runtime/nodes/${encodeURIComponent(nodeName)}/health`,
+      );
       setNodeHealth(data.data || null);
     } catch (err) {
       setError(err.message);
     }
   }
-
   async function loadNodeJoinCommand(role = "agent") {
     try {
-      const data = await api.get(`/runtime/nodes/join-command?role=${encodeURIComponent(role)}`);
+      const data = await api.get(
+        `/runtime/nodes/join-command?role=${encodeURIComponent(role)}`,
+      );
       setNodeJoinCommand(data.data || null);
     } catch (err) {
       setError(err.message);
     }
   }
-
   async function saveNodeLabels(nodeName, labelsText) {
     try {
-      await api.patch(`/runtime/nodes/${encodeURIComponent(nodeName)}/labels`, {labels: parseKeyValues(labelsText)});
+      await api.patch(`/runtime/nodes/${encodeURIComponent(nodeName)}/labels`, {
+        labels: parseKeyValues(labelsText),
+      });
       setNotice(`${nodeName} labels updated.`);
       await loadWorkspace();
-      await loadNodeDetail({name: nodeName}, false);
+      await loadNodeDetail(
+        {
+          name: nodeName,
+        },
+        false,
+      );
     } catch (err) {
       setError(err.message);
     }
   }
-
   async function saveNodeTaints(nodeName, taintsText) {
     try {
-      await api.put(`/runtime/nodes/${encodeURIComponent(nodeName)}/taints`, {taints: parseTaints(taintsText)});
+      await api.put(`/runtime/nodes/${encodeURIComponent(nodeName)}/taints`, {
+        taints: parseTaints(taintsText),
+      });
       setNotice(`${nodeName} taints updated.`);
       await loadWorkspace();
-      await loadNodeDetail({name: nodeName}, false);
+      await loadNodeDetail(
+        {
+          name: nodeName,
+        },
+        false,
+      );
     } catch (err) {
       setError(err.message);
     }
   }
-
   async function cordonNode(nodeName, schedulable) {
     try {
-      await api.post(`/runtime/nodes/${encodeURIComponent(nodeName)}/${schedulable ? "uncordon" : "cordon"}`, {});
+      await api.post(
+        `/runtime/nodes/${encodeURIComponent(nodeName)}/${schedulable ? "uncordon" : "cordon"}`,
+        {},
+      );
       setNotice(`${nodeName} ${schedulable ? "uncordoned" : "cordoned"}.`);
       await loadWorkspace();
-      await loadNodeDetail({name: nodeName}, false);
+      await loadNodeDetail(
+        {
+          name: nodeName,
+        },
+        false,
+      );
     } catch (err) {
       setError(err.message);
     }
   }
-
   async function drainNode(nodeName, options) {
-    if (!confirm(`Drain node ${nodeName}? Workloads will be evicted from this node.`)) return;
+    if (
+      !confirm(
+        `Drain node ${nodeName}? Workloads will be evicted from this node.`,
+      )
+    )
+      return;
     try {
-      const data = await api.post(`/runtime/nodes/${encodeURIComponent(nodeName)}/drain`, options);
-      setNotice(`Drain started for ${nodeName}: ${(data.data?.evicted_pods || []).length} pods evicted, ${(data.data?.skipped_pods || []).length} skipped.`);
+      const data = await api.post(
+        `/runtime/nodes/${encodeURIComponent(nodeName)}/drain`,
+        options,
+      );
+      setNotice(
+        `Drain started for ${nodeName}: ${(data.data?.evicted_pods || []).length} pods evicted, ${(data.data?.skipped_pods || []).length} skipped.`,
+      );
       await loadWorkspace();
-      await loadNodeDetail({name: nodeName}, false);
+      await loadNodeDetail(
+        {
+          name: nodeName,
+        },
+        false,
+      );
     } catch (err) {
       setError(err.message);
     }
   }
-
   async function deleteNode(nodeName) {
     try {
       await api.delete(`/runtime/nodes/${encodeURIComponent(nodeName)}`);
@@ -978,18 +1265,25 @@ function App() {
       setError(err.message);
     }
   }
-
   async function loadPodLogs(pod) {
     stopRuntimeLogFollow();
-    setRuntimeDetail({kind: "pod", row: pod});
+    setRuntimeDetail({
+      kind: "pod",
+      row: pod,
+    });
     setRuntimeLogs("");
     setRuntimeLogContainer("");
     setRuntimeLogTail(200);
     setRuntimeLogLoaded(false);
-    setRuntimeLogStatus("Choose a container to load logs. Logs are loaded lazily to keep the browser responsive.");
+    setRuntimeLogStatus(
+      "Choose a container to load logs. Logs are loaded lazily to keep the browser responsive.",
+    );
   }
-
-  async function loadRuntimeContainerLogs(pod, container = runtimeLogContainer, tail = runtimeLogTail) {
+  async function loadRuntimeContainerLogs(
+    pod,
+    container = runtimeLogContainer,
+    tail = runtimeLogTail,
+  ) {
     stopRuntimeLogFollow();
     if (!container) {
       setRuntimeLogStatus("Choose a container first.");
@@ -1004,16 +1298,23 @@ function App() {
       const namespace = encodeURIComponent(pod.namespace);
       const name = encodeURIComponent(pod.name);
       const selected = encodeURIComponent(container);
-      const data = await api.get(`/runtime/pods/${namespace}/${name}/logs?tail=${Number(tail || 200)}&container=${selected}`);
+      const data = await api.get(
+        `/runtime/pods/${namespace}/${name}/logs?tail=${Number(tail || 200)}&container=${selected}`,
+      );
       setRuntimeLogs(trimLiveLog(data.logs || ""));
-      setRuntimeLogStatus(`Loaded last ${Number(tail || 200)} lines from ${container}.`);
+      setRuntimeLogStatus(
+        `Loaded last ${Number(tail || 200)} lines from ${container}.`,
+      );
     } catch (err) {
       setRuntimeLogs("");
       setRuntimeLogStatus(err.message);
     }
   }
-
-  async function startRuntimeLogFollow(pod, container = runtimeLogContainer, tail = runtimeLogTail) {
+  async function startRuntimeLogFollow(
+    pod,
+    container = runtimeLogContainer,
+    tail = runtimeLogTail,
+  ) {
     if (!container) {
       setRuntimeLogStatus("Choose a container first.");
       return;
@@ -1031,9 +1332,16 @@ function App() {
       const namespace = encodeURIComponent(pod.namespace);
       const name = encodeURIComponent(pod.name);
       const selected = encodeURIComponent(container);
-      const res = await api.stream(`/runtime/pods/${namespace}/${name}/logs?tail=${Number(tail || 200)}&container=${selected}&follow=true`, {signal: controller.signal});
+      const res = await api.stream(
+        `/runtime/pods/${namespace}/${name}/logs?tail=${Number(tail || 200)}&container=${selected}&follow=true`,
+        {
+          signal: controller.signal,
+        },
+      );
       setRuntimeLogStatus(`Following live logs for ${container}`);
-      await consumeTextStream(res, (chunk) => setRuntimeLogs((current) => trimLiveLog(current + chunk)));
+      await consumeTextStream(res, (chunk) =>
+        setRuntimeLogs((current) => trimLiveLog(current + chunk)),
+      );
       setRuntimeLogStatus("Log stream ended");
     } catch (err) {
       if (err.name !== "AbortError") setRuntimeLogStatus(err.message);
@@ -1044,23 +1352,26 @@ function App() {
       }
     }
   }
-
   function stopRuntimeLogFollow() {
     runtimeLogController.current?.abort();
     runtimeLogController.current = null;
     setRuntimeLogFollow(false);
   }
-
   async function saveService(event, existing = null) {
     event.preventDefault();
-    const body = Object.fromEntries(new FormData(event.currentTarget).entries());
+    const body = Object.fromEntries(
+      new FormData(event.currentTarget).entries(),
+    );
     body.selector = parseKeyValues(body.selector);
     body.labels = parseKeyValues(body.labels);
     body.ports = parseServicePorts(body.ports);
     body.external_ips = parseCSV(body.external_ips);
     try {
       if (existing) {
-        await api.put(`/runtime/services/${existing.namespace}/${existing.name}`, body);
+        await api.put(
+          `/runtime/services/${existing.namespace}/${existing.name}`,
+          body,
+        );
       } else {
         await api.post("/runtime/services", body);
         event.currentTarget.reset();
@@ -1071,26 +1382,31 @@ function App() {
       setError(err.message);
     }
   }
-
   async function deleteService(service) {
     if (!confirm(`Delete service ${service.name}?`)) return;
     try {
-      await api.delete(`/runtime/services/${service.namespace}/${service.name}`);
+      await api.delete(
+        `/runtime/services/${service.namespace}/${service.name}`,
+      );
       await loadWorkspace();
     } catch (err) {
       setError(err.message);
     }
   }
-
   async function saveIngress(event, existing = null) {
     event.preventDefault();
-    const body = Object.fromEntries(new FormData(event.currentTarget).entries());
+    const body = Object.fromEntries(
+      new FormData(event.currentTarget).entries(),
+    );
     body.service_port = Number(body.service_port || 80);
     body.annotations = parseKeyValues(body.annotations);
     body.labels = parseKeyValues(body.labels);
     try {
       if (existing) {
-        await api.put(`/runtime/ingresses/${existing.namespace}/${existing.name}`, body);
+        await api.put(
+          `/runtime/ingresses/${existing.namespace}/${existing.name}`,
+          body,
+        );
       } else {
         await api.post("/runtime/ingresses", body);
         event.currentTarget.reset();
@@ -1101,28 +1417,38 @@ function App() {
       setError(err.message);
     }
   }
-
   async function deleteIngress(ingress) {
-    if (!confirm(`Delete ingress ${ingress.namespace}/${ingress.name}?`)) return;
+    if (!confirm(`Delete ingress ${ingress.namespace}/${ingress.name}?`))
+      return;
     try {
-      await api.delete(`/runtime/ingresses/${ingress.namespace}/${ingress.name}`);
+      await api.delete(
+        `/runtime/ingresses/${ingress.namespace}/${ingress.name}`,
+      );
       await loadWorkspace();
     } catch (err) {
       setError(err.message);
     }
   }
-
   async function saveNetworkPolicy(event, existing = null) {
     event.preventDefault();
-    const body = Object.fromEntries(new FormData(event.currentTarget).entries());
+    const body = Object.fromEntries(
+      new FormData(event.currentTarget).entries(),
+    );
     body.pod_selector = parseKeyValues(body.pod_selector);
     body.labels = parseKeyValues(body.labels);
-    body.policy_types = Array.from(event.currentTarget.querySelectorAll("input[name='policy_types']:checked")).map((input) => input.value);
+    body.policy_types = Array.from(
+      event.currentTarget.querySelectorAll(
+        "input[name='policy_types']:checked",
+      ),
+    ).map((input) => input.value);
     body.allow_same_namespace = Boolean(body.allow_same_namespace);
     body.allow_dns = Boolean(body.allow_dns);
     try {
       if (existing) {
-        await api.put(`/runtime/network-policies/${existing.namespace}/${existing.name}`, body);
+        await api.put(
+          `/runtime/network-policies/${existing.namespace}/${existing.name}`,
+          body,
+        );
       } else {
         await api.post("/runtime/network-policies", body);
         event.currentTarget.reset();
@@ -1133,50 +1459,59 @@ function App() {
       setError(err.message);
     }
   }
-
   async function deleteNetworkPolicy(policy) {
-    if (!confirm(`Delete NetworkPolicy ${policy.namespace}/${policy.name}?`)) return;
+    if (!confirm(`Delete NetworkPolicy ${policy.namespace}/${policy.name}?`))
+      return;
     try {
-      await api.delete(`/runtime/network-policies/${policy.namespace}/${policy.name}`);
+      await api.delete(
+        `/runtime/network-policies/${policy.namespace}/${policy.name}`,
+      );
       await loadWorkspace();
     } catch (err) {
       setError(err.message);
     }
   }
-
   async function analyzeRepo(repoFullName = selectedRepo, branchOverride = "") {
-	if (!selectedCredential || !repoFullName) return;
-	setError("");
-	setNotice("");
-	const branch = branchOverride || deployForm.github_branch || "main";
-	try {
+    if (!selectedCredential || !repoFullName) return;
+    setError("");
+    setNotice("");
+    const branch = branchOverride || deployForm.github_branch || "main";
+    try {
       const specAnalysis = await analyzeApplicationSpec(repoFullName, branch);
       if (specAnalysis) return specAnalysis;
-	  const endpoint = deployForm.application_type === "monorepo" ? "/repositories/analyze-monorepo" : "/projects/analyze";
-	  const data = await api.post(endpoint, {
-	    github_credential_id: Number(selectedCredential),
-	    github_repo: repoFullName,
-	    github_branch: branch,
-	  });
+      const endpoint =
+        deployForm.application_type === "monorepo"
+          ? "/repositories/analyze-monorepo"
+          : "/projects/analyze";
+      const data = await api.post(endpoint, {
+        github_credential_id: Number(selectedCredential),
+        github_repo: repoFullName,
+        github_branch: branch,
+      });
       setAnalysis(data);
       setSelectedRepo(repoFullName);
       setDeployForm((current) => ({
-	    ...current,
-	    name: current.name || slugify(repoFullName.split("/")[1] || repoFullName),
-	    github_repo: repoFullName,
-	    github_branch: branch,
-	    dockerfile_path: data.dockerfile_path || current.dockerfile_path || "",
-	    port: data.default_port || current.port || 8080,
-	    components: data.components?.length ? monorepoComponentsFromAnalysis(slugify(repoFullName.split("/")[1] || repoFullName), data.components) : current.components,
-	  }));
+        ...current,
+        name:
+          current.name || slugify(repoFullName.split("/")[1] || repoFullName),
+        github_repo: repoFullName,
+        github_branch: branch,
+        dockerfile_path: data.dockerfile_path || current.dockerfile_path || "",
+        port: data.default_port || current.port || 8080,
+        components: data.components?.length
+          ? monorepoComponentsFromAnalysis(
+              slugify(repoFullName.split("/")[1] || repoFullName),
+              data.components,
+            )
+          : current.components,
+      }));
       return data;
-	} catch (err) {
-	  setAnalysis(null);
-	  setError(`Repository analysis failed: ${err.message}`);
-	  return null;
-	}
+    } catch (err) {
+      setAnalysis(null);
+      setError(`Repository analysis failed: ${err.message}`);
+      return null;
+    }
   }
-
   async function analyzeApplicationSpec(repoFullName, branch) {
     try {
       const data = await api.post("/application-specs/plan", {
@@ -1187,7 +1522,9 @@ function App() {
       const specAnalysis = applicationSpecAnalysis(data);
       setAnalysis(specAnalysis);
       setSelectedRepo(repoFullName);
-      setDeployForm((current) => deployFormFromApplicationSpec(current, repoFullName, branch, data));
+      setDeployForm((current) =>
+        deployFormFromApplicationSpec(current, repoFullName, branch, data),
+      );
       return specAnalysis;
     } catch (err) {
       const message = String(err.message || "");
@@ -1210,13 +1547,15 @@ function App() {
       return specAnalysis;
     }
   }
-
   function checkInstallSource(nextForm = deployForm) {
     const source = nextForm.deploy_source === "gitops" ? "github" : "registry";
     setError("");
     setNotice("");
     if (source === "github") {
-      return analyzeRepo(nextForm.github_repo || selectedRepo, nextForm.github_branch);
+      return analyzeRepo(
+        nextForm.github_repo || selectedRepo,
+        nextForm.github_branch,
+      );
     }
     const image = (nextForm.image_reference || "").trim();
     if (!image) {
@@ -1233,19 +1572,29 @@ function App() {
       warnings: [],
     });
     if (!nextForm.name) {
-      setDeployForm((current) => ({...current, name: slugify(imageName(image))}));
+      setDeployForm((current) => ({
+        ...current,
+        name: slugify(imageName(image)),
+      }));
     }
     return true;
   }
-
   async function deployProject(event) {
     event.preventDefault();
     if (deployForm.application_type === "monorepo") {
-      if (!analysis?.is_monorepo || analysis?.deployable === false || !(deployForm.components || []).some((component) => component.enabled)) return;
+      if (
+        !analysis?.is_monorepo ||
+        analysis?.deployable === false ||
+        !(deployForm.components || []).some((component) => component.enabled)
+      )
+        return;
       return deployMonorepoApplication();
     }
     if (!analysis?.deployable) return;
-    const payload = buildProjectPayload(deployForm, selectedCredential, {...credentials, domains});
+    const payload = buildProjectPayload(deployForm, selectedCredential, {
+      ...credentials,
+      domains,
+    });
     setLoading(true);
     setError("");
     setInstallProgress({
@@ -1257,28 +1606,75 @@ function App() {
         `Namespace: ${payload.namespace || `proj-${payload.name}`}`,
       ],
       steps: [
-        {label: "Validate install source", state: "done"},
-        {label: "Create project resources", state: "running"},
-        {label: "Apply service and ingress", state: "pending"},
-        {label: "Apply deployment or GitOps manifests", state: "pending"},
+        {
+          label: "Validate install source",
+          state: "done",
+        },
+        {
+          label: "Create project resources",
+          state: "running",
+        },
+        {
+          label: "Apply service and ingress",
+          state: "pending",
+        },
+        {
+          label: "Apply deployment or GitOps manifests",
+          state: "pending",
+        },
       ],
     });
     setView("progress");
     try {
-      const created = await api.post("/projects", {...payload, auto_deploy: false});
-      const deploymentResult = await api.post(`/projects/${created.id}/deployments`, {tag: payload.image_reference || "", commit_sha: payload.github_branch || ""});
-      if (deploymentResult.process?.id) setActiveProcessID(String(deploymentResult.process.id));
+      const created = await api.post("/projects", {
+        ...payload,
+        auto_deploy: false,
+      });
+      const deploymentResult = await api.post(
+        `/projects/${created.id}/deployments`,
+        {
+          tag: payload.image_reference || "",
+          commit_sha: payload.github_branch || "",
+        },
+      );
+      if (deploymentResult.process?.id)
+        setActiveProcessID(String(deploymentResult.process.id));
       setNotice("Project created. Deployment process queued.");
       setActiveProgressProjectID(String(created.id));
-      setInstallProgress((current) => current ? {
-        ...current,
-        logs: [...(current.logs || []), `Project created with id ${created.id}`, "Deployment process submitted to the executor.", "Waiting for process jobs to write logs."],
-        steps: current.steps.map((step) => {
-          if (step.label === "Validate install source" || step.label === "Create project resources") return {...step, state: "done"};
-          if (step.label === "Apply service and ingress") return {...step, state: "running", log: "Waiting for Services, Ingresses, and Kubernetes events to confirm the route."};
-          return {...step, state: "pending", log: "Waiting for a direct Deployment, GitHub Actions build, or Argo CD sync to create workload resources."};
-        }),
-      } : null);
+      setInstallProgress((current) =>
+        current
+          ? {
+              ...current,
+              logs: [
+                ...(current.logs || []),
+                `Project created with id ${created.id}`,
+                "Deployment process submitted to the executor.",
+                "Waiting for process jobs to write logs.",
+              ],
+              steps: current.steps.map((step) => {
+                if (
+                  step.label === "Validate install source" ||
+                  step.label === "Create project resources"
+                )
+                  return {
+                    ...step,
+                    state: "done",
+                  };
+                if (step.label === "Apply service and ingress")
+                  return {
+                    ...step,
+                    state: "running",
+                    log: "Waiting for Services, Ingresses, and Kubernetes events to confirm the route.",
+                  };
+                return {
+                  ...step,
+                  state: "pending",
+                  log: "Waiting for a direct Deployment, GitHub Actions build, or Argo CD sync to create workload resources.",
+                };
+              }),
+            }
+          : null,
+      );
       setDeployForm(defaultDeployForm());
       setAnalysis(null);
       setSelectedRepo("");
@@ -1287,21 +1683,39 @@ function App() {
       await loadProjectProgress(String(created.id));
     } catch (err) {
       setError(err.message);
-      setInstallProgress((current) => current ? {
-        ...current,
-        logs: [...(current.logs || []), `ERROR: ${err.message}`],
-        steps: current.steps.map((step) => step.state === "running" ? {...step, state: "failed", log: err.message} : step),
-      } : null);
+      setInstallProgress((current) =>
+        current
+          ? {
+              ...current,
+              logs: [...(current.logs || []), `ERROR: ${err.message}`],
+              steps: current.steps.map((step) =>
+                step.state === "running"
+                  ? {
+                      ...step,
+                      state: "failed",
+                      log: err.message,
+                    }
+                  : step,
+              ),
+            }
+          : null,
+      );
     } finally {
       setLoading(false);
     }
   }
-
   async function deployMonorepoApplication() {
     if (analysis?.source === "beancs_spec") {
       return deployApplicationFromRepoConfig();
     }
-    const payload = buildMonorepoApplicationPayload(deployForm, selectedCredential, {...credentials, domains});
+    const payload = buildMonorepoApplicationPayload(
+      deployForm,
+      selectedCredential,
+      {
+        ...credentials,
+        domains,
+      },
+    );
     if (!payload.components.length) {
       setError("Select at least one monorepo component.");
       return;
@@ -1318,31 +1732,59 @@ function App() {
         `Components: ${payload.components.map((component) => component.project_name).join(", ")}`,
       ],
       steps: [
-        {label: "Create application record", state: "running"},
-        {label: "Create dependency components", state: (payload.dependencies || []).length ? "pending" : "done"},
-        {label: "Create component projects", state: "pending"},
-        {label: "Queue component deployments", state: "pending"},
-        {label: "Wait for GitOps and runtime status", state: "pending"},
+        {
+          label: "Create application record",
+          state: "running",
+        },
+        {
+          label: "Create dependency components",
+          state: (payload.dependencies || []).length ? "pending" : "done",
+        },
+        {
+          label: "Create component projects",
+          state: "pending",
+        },
+        {
+          label: "Queue component deployments",
+          state: "pending",
+        },
+        {
+          label: "Wait for GitOps and runtime status",
+          state: "pending",
+        },
       ],
     });
     setView("progress");
     try {
       const created = await api.post("/applications/monorepo", payload);
       const projects = created.projects || created.data?.projects || [];
-      const dependencies = created.dependencies || created.data?.dependencies || [];
+      const dependencies =
+        created.dependencies || created.data?.dependencies || [];
       const firstProject = projects[0];
-      setNotice(`Application ${payload.name} created with ${projects.length} components and ${dependencies.length} dependencies.`);
+      setNotice(
+        `Application ${payload.name} created with ${projects.length} components and ${dependencies.length} dependencies.`,
+      );
       if (firstProject?.id) setActiveProgressProjectID(String(firstProject.id));
-      setInstallProgress((current) => current ? {
-        ...current,
-        logs: [
-          ...(current.logs || []),
-          `Application created with id ${created.id || created.data?.id || "-"}`,
-          `${dependencies.length} dependency component(s) created.`,
-          `${projects.length} component project(s) created.`,
-        ],
-        steps: current.steps.map((step) => ({...step, state: step.state === "running" || step.state === "pending" ? "done" : step.state})),
-      } : null);
+      setInstallProgress((current) =>
+        current
+          ? {
+              ...current,
+              logs: [
+                ...(current.logs || []),
+                `Application created with id ${created.id || created.data?.id || "-"}`,
+                `${dependencies.length} dependency component(s) created.`,
+                `${projects.length} component project(s) created.`,
+              ],
+              steps: current.steps.map((step) => ({
+                ...step,
+                state:
+                  step.state === "running" || step.state === "pending"
+                    ? "done"
+                    : step.state,
+              })),
+            }
+          : null,
+      );
       setDeployForm(defaultDeployForm());
       setAnalysis(null);
       setSelectedRepo("");
@@ -1351,31 +1793,52 @@ function App() {
       if (firstProject?.id) await loadProjectProgress(String(firstProject.id));
     } catch (err) {
       setError(err.message);
-      setInstallProgress((current) => current ? {
-        ...current,
-        logs: [...(current.logs || []), `ERROR: ${err.message}`],
-        steps: current.steps.map((step) => step.state === "running" ? {...step, state: "failed", log: err.message} : step),
-      } : null);
+      setInstallProgress((current) =>
+        current
+          ? {
+              ...current,
+              logs: [...(current.logs || []), `ERROR: ${err.message}`],
+              steps: current.steps.map((step) =>
+                step.state === "running"
+                  ? {
+                      ...step,
+                      state: "failed",
+                      log: err.message,
+                    }
+                  : step,
+              ),
+            }
+          : null,
+      );
     } finally {
       setLoading(false);
     }
   }
-
   async function deployApplicationFromRepoConfig() {
     const payload = {
       github_credential_id: Number(selectedCredential),
       github_repo: deployForm.github_repo,
       github_branch: deployForm.github_branch || "main",
       config_path: analysis?.config_path || ".beancs/app.yaml",
-      basaltpass_instance_id: deployForm.basaltpass_instance_id ? Number(deployForm.basaltpass_instance_id) : undefined,
-      cloudflare_credential_id: deployForm.cloudflare_credential_id ? Number(deployForm.cloudflare_credential_id) : undefined,
+      basaltpass_instance_id: deployForm.basaltpass_instance_id
+        ? Number(deployForm.basaltpass_instance_id)
+        : undefined,
+      cloudflare_credential_id: deployForm.cloudflare_credential_id
+        ? Number(deployForm.cloudflare_credential_id)
+        : undefined,
       cloudflare_zone_id: deployForm.cloudflare_zone_id || undefined,
-      component_domains: monorepoComponentDomainOverrides(deployForm, {...credentials, domains}),
+      component_domains: monorepoComponentDomainOverrides(deployForm, {
+        ...credentials,
+        domains,
+      }),
     };
     setLoading(true);
     setError("");
     setInstallProgress({
-      project: deployForm.name || analysis?.plan?.application?.name || payload.github_repo,
+      project:
+        deployForm.name ||
+        analysis?.plan?.application?.name ||
+        payload.github_repo,
       started_at: new Date().toISOString(),
       logs: [
         `Starting .beancs application deploy for ${deployForm.name || analysis?.plan?.application?.name || payload.github_repo}`,
@@ -1383,11 +1846,26 @@ function App() {
         `Config: ${payload.config_path}`,
       ],
       steps: [
-        {label: "Read .beancs/app.yaml", state: "done"},
-        {label: "Validate application spec", state: "done"},
-        {label: "Apply application plan", state: "running"},
-        {label: "Create dependencies and projects", state: "pending"},
-        {label: "Wait for GitOps and runtime status", state: "pending"},
+        {
+          label: "Read .beancs/app.yaml",
+          state: "done",
+        },
+        {
+          label: "Validate application spec",
+          state: "done",
+        },
+        {
+          label: "Apply application plan",
+          state: "running",
+        },
+        {
+          label: "Create dependencies and projects",
+          state: "pending",
+        },
+        {
+          label: "Wait for GitOps and runtime status",
+          state: "pending",
+        },
       ],
     });
     setView("progress");
@@ -1397,18 +1875,30 @@ function App() {
       const projects = app.projects || [];
       const dependencies = app.dependencies || [];
       const firstProject = projects[0];
-      setNotice(`Application ${app.name || deployForm.name} applied from ${payload.config_path}.`);
+      setNotice(
+        `Application ${app.name || deployForm.name} applied from ${payload.config_path}.`,
+      );
       if (firstProject?.id) setActiveProgressProjectID(String(firstProject.id));
-      setInstallProgress((current) => current ? {
-        ...current,
-        logs: [
-          ...(current.logs || []),
-          `Application applied with id ${app.id || "-"}.`,
-          `${dependencies.length} dependency component(s) created.`,
-          `${projects.length} project component(s) created.`,
-        ],
-        steps: current.steps.map((step) => ({...step, state: step.state === "running" || step.state === "pending" ? "done" : step.state})),
-      } : null);
+      setInstallProgress((current) =>
+        current
+          ? {
+              ...current,
+              logs: [
+                ...(current.logs || []),
+                `Application applied with id ${app.id || "-"}.`,
+                `${dependencies.length} dependency component(s) created.`,
+                `${projects.length} project component(s) created.`,
+              ],
+              steps: current.steps.map((step) => ({
+                ...step,
+                state:
+                  step.state === "running" || step.state === "pending"
+                    ? "done"
+                    : step.state,
+              })),
+            }
+          : null,
+      );
       setDeployForm(defaultDeployForm());
       setAnalysis(null);
       setSelectedRepo("");
@@ -1417,16 +1907,27 @@ function App() {
       if (firstProject?.id) await loadProjectProgress(String(firstProject.id));
     } catch (err) {
       setError(err.message);
-      setInstallProgress((current) => current ? {
-        ...current,
-        logs: [...(current.logs || []), `ERROR: ${err.message}`],
-        steps: current.steps.map((step) => step.state === "running" ? {...step, state: "failed", log: err.message} : step),
-      } : null);
+      setInstallProgress((current) =>
+        current
+          ? {
+              ...current,
+              logs: [...(current.logs || []), `ERROR: ${err.message}`],
+              steps: current.steps.map((step) =>
+                step.state === "running"
+                  ? {
+                      ...step,
+                      state: "failed",
+                      log: err.message,
+                    }
+                  : step,
+              ),
+            }
+          : null,
+      );
     } finally {
       setLoading(false);
     }
   }
-
   async function loadProjectProgress(projectID = activeProgressProjectID) {
     if (progressLoadingRef.current) return;
     progressLoadingRef.current = true;
@@ -1449,7 +1950,11 @@ function App() {
     }
     setActiveProgressProjectID(String(selected.id));
     try {
-      const logRequest = projectLogFollow ? Promise.resolve({logs: projectProgress?.logs || ""}) : api.get(`/projects/${selected.id}/logs?tail=160`);
+      const logRequest = projectLogFollow
+        ? Promise.resolve({
+            logs: projectProgress?.logs || "",
+          })
+        : api.get(`/projects/${selected.id}/logs?tail=160`);
       const [status, deployments, logData] = await Promise.all([
         api.get(`/projects/${selected.id}/status`),
         api.get(`/projects/${selected.id}/deployments`),
@@ -1457,10 +1962,17 @@ function App() {
       ]);
       const deploymentRows = deployments.data || [];
       let workflowLogs = "";
-      const latestWorkflow = deploymentRows.find((deployment) => deployment.workflow_run_id || deployment.workflow_url || deployment.failure_reason);
+      const latestWorkflow = deploymentRows.find(
+        (deployment) =>
+          deployment.workflow_run_id ||
+          deployment.workflow_url ||
+          deployment.failure_reason,
+      );
       if (!projectLogFollow && latestWorkflow?.id) {
         try {
-          const workflowLogData = await api.get(`/projects/${selected.id}/deployments/${latestWorkflow.id}/logs`);
+          const workflowLogData = await api.get(
+            `/projects/${selected.id}/deployments/${latestWorkflow.id}/logs`,
+          );
           workflowLogs = workflowLogData.logs || "";
         } catch (err) {
           workflowLogs = `GitHub Actions/deployment logs unavailable: ${err.message}\n`;
@@ -1478,12 +1990,17 @@ function App() {
         checked_at: new Date().toISOString(),
       });
     } catch (err) {
-      setProjectProgress({project: selected, pods: [], deployments: [], error: err.message, checked_at: new Date().toISOString()});
+      setProjectProgress({
+        project: selected,
+        pods: [],
+        deployments: [],
+        error: err.message,
+        checked_at: new Date().toISOString(),
+      });
     } finally {
       progressLoadingRef.current = false;
     }
   }
-
   async function startProjectLogFollow(projectID = activeProgressProjectID) {
     let selected = projectID
       ? projects.find((project) => String(project.id) === String(projectID))
@@ -1508,9 +2025,16 @@ function App() {
     setProjectLiveLogs("");
     setProjectLogStatus("Connecting...");
     try {
-      const res = await api.stream(`/projects/${selected.id}/logs?tail=160&follow=true`, {signal: controller.signal});
+      const res = await api.stream(
+        `/projects/${selected.id}/logs?tail=160&follow=true`,
+        {
+          signal: controller.signal,
+        },
+      );
       setProjectLogStatus("Following live logs");
-      await consumeTextStream(res, (chunk) => setProjectLiveLogs((current) => trimLiveLog(current + chunk)));
+      await consumeTextStream(res, (chunk) =>
+        setProjectLiveLogs((current) => trimLiveLog(current + chunk)),
+      );
       setProjectLogStatus("Log stream ended");
     } catch (err) {
       if (err.name !== "AbortError") setProjectLogStatus(err.message);
@@ -1521,22 +2045,21 @@ function App() {
       }
     }
   }
-
   function stopProjectLogFollow() {
     projectLogController.current?.abort();
     projectLogController.current = null;
     setProjectLogFollow(false);
     setProjectLogStatus("");
   }
-
   async function loadProjectEnv(project) {
     const data = await api.get(`/projects/${project.id}/env`);
     return data.data || {};
   }
-
   async function updateProject(event, envData) {
     event.preventDefault();
-    const body = Object.fromEntries(new FormData(event.currentTarget).entries());
+    const body = Object.fromEntries(
+      new FormData(event.currentTarget).entries(),
+    );
     body.replicas = Number(body.replicas || 1);
     body.auto_deploy = body.auto_deploy === "on";
     await api.patch(`/projects/${editingProject.id}`, body);
@@ -1547,11 +2070,9 @@ function App() {
     setEditingProject(null);
     await loadWorkspace();
   }
-
   async function deleteProject(project) {
     setDeletingProject(project);
   }
-
   async function confirmDeleteProject() {
     if (!deletingProject) return;
     setLoading(true);
@@ -1571,11 +2092,9 @@ function App() {
       setLoading(false);
     }
   }
-
   async function deleteApplication(application) {
     setDeletingApplication(application);
   }
-
   async function confirmDeleteApplication() {
     if (!deletingApplication) return;
     setLoading(true);
@@ -1591,20 +2110,22 @@ function App() {
       setLoading(false);
     }
   }
-
   async function scaleProject(project, replicas) {
-    await api.post(`/projects/${project.id}/scale`, {replicas});
+    await api.post(`/projects/${project.id}/scale`, {
+      replicas,
+    });
     await loadWorkspace();
   }
-
   async function restartProject(project) {
     await api.post(`/projects/${project.id}/restart`, {});
     setNotice(`${project.name} restarted.`);
   }
-
   async function buildProject(project) {
     try {
-      const result = await api.post(`/projects/${project.id}/deployments`, {tag: project.image_reference || "github-actions", commit_sha: project.github_branch || ""});
+      const result = await api.post(`/projects/${project.id}/deployments`, {
+        tag: project.image_reference || "github-actions",
+        commit_sha: project.github_branch || "",
+      });
       setNotice(`${project.name} build started.`);
       setActiveProgressProjectID(String(project.id));
       if (result.process?.id) setActiveProcessID(String(result.process.id));
@@ -1615,7 +2136,6 @@ function App() {
       setError(err.message);
     }
   }
-
   async function openProjectTracking(project) {
     setTrackingProject(project);
     setProjectTracking(null);
@@ -1630,7 +2150,6 @@ function App() {
       setTrackingLoading(false);
     }
   }
-
   function selectNav(item) {
     if (item.id === "progress") {
       setActiveProgressProjectID("");
@@ -1641,64 +2160,116 @@ function App() {
     setSidebarOpen(false);
     setView(item.id);
   }
-
   if (!token) {
     return (
       <main className="login-screen">
         <section className="login-copy">
           <h1>BeanCS</h1>
-          <p>Operate k3s projects, GitHub App deployments, DNS, and traffic routes from one console.</p>
-          <button className="primary" onClick={startLogin}>
+          <p>
+            Operate k3s projects, GitHub App deployments, DNS, and traffic
+            routes from one console.
+          </p>
+          <Button onClick={startLogin} variant="primary">
             <Lock size={18} /> Sign in with BasaltPass
-          </button>
+          </Button>
           {error && <p className="error-text">{error}</p>}
         </section>
       </main>
     );
   }
-
   return (
     <div className="app-shell">
-      <div className={sidebarOpen ? "sidebar-overlay active" : "sidebar-overlay"} onClick={() => setSidebarOpen(false)} />
+      <div
+        className={sidebarOpen ? "sidebar-overlay active" : "sidebar-overlay"}
+        onClick={() => setSidebarOpen(false)}
+      />
       <aside className={sidebarOpen ? "sidebar open" : "sidebar"}>
         <div className="sidebar-product">
-          <span className="brand-orb"><Coffee size={16} /></span>
+          <span className="brand-orb">
+            <Coffee size={16} />
+          </span>
           <b>BeanCS</b>
         </div>
         <label className="sidebar-search">
           <Search size={19} />
-          <input value={sidebarQuery} onChange={(event) => setSidebarQuery(event.target.value)} placeholder="Find..." />
+          <Input
+            value={sidebarQuery}
+            onChange={(event) => setSidebarQuery(event.target.value)}
+            placeholder="Find..."
+          />
           <kbd>F</kbd>
         </label>
         <div className="sidebar-nav">
-          {filteredOverview.length > 0 && <SidebarNavGroup items={filteredOverview} view={view} onSelect={selectNav} />}
+          {filteredOverview.length > 0 && (
+            <SidebarNavGroup
+              items={filteredOverview}
+              view={view}
+              onSelect={selectNav}
+            />
+          )}
           {filteredNavSections.map((section) => (
-            <SidebarNavGroup key={section.id} label={section.label} items={section.items} view={view} onSelect={selectNav} />
+            <SidebarNavGroup
+              key={section.id}
+              label={section.label}
+              items={section.items}
+              view={view}
+              onSelect={selectNav}
+            />
           ))}
-          {sidebarQuery && filteredOverview.length === 0 && filteredNavSections.length === 0 && <div className="nav-empty">No matches</div>}
+          {sidebarQuery &&
+            filteredOverview.length === 0 &&
+            filteredNavSections.length === 0 && (
+              <div className="nav-empty">No matches</div>
+            )}
         </div>
         <div className="sidebar-user">
           <div className="user-avatar">
-            {userProfile.avatar ? <img src={userProfile.avatar} alt={userProfile.name || "User avatar"} /> : userProfile.initial}
+            {userProfile.avatar ? (
+              <img
+                src={userProfile.avatar}
+                alt={userProfile.name || "User avatar"}
+              />
+            ) : (
+              userProfile.initial
+            )}
           </div>
           <div className="user-copy">
             <b>{userProfile.name}</b>
             <span>{userProfile.detail}</span>
           </div>
-          <button className="icon-button" type="button" aria-label="More account actions"><MoreHorizontal size={16} /></button>
-          <button className="icon-button" type="button" aria-label="Notifications"><Bell size={16} /></button>
-          <button className="signout-button" onClick={logout}>Sign out</button>
+          <Button
+            type="button"
+            aria-label="More account actions"
+            variant="icon"
+          >
+            <MoreHorizontal size={16} />
+          </Button>
+          <Button type="button" aria-label="Notifications" variant="icon">
+            <Bell size={16} />
+          </Button>
+          <Button className="signout-button" onClick={logout}>
+            Sign out
+          </Button>
         </div>
       </aside>
       <main className="workspace">
         <div className="mobile-topbar">
-          <button className="icon-button ghost" type="button" aria-label="Open navigation" onClick={() => setSidebarOpen(true)}>
+          <Button
+            type="button"
+            aria-label="Open navigation"
+            onClick={() => setSidebarOpen(true)}
+            variant="icon"
+          >
             <Menu size={18} />
-          </button>
+          </Button>
           <span className="mobile-brand">BeanCS</span>
         </div>
         <PageHeading
-          title={view === "dashboard" ? (dashboard?.cluster_name || "Overview") : titleFor(view)}
+          title={
+            view === "dashboard"
+              ? dashboard?.cluster_name || "Overview"
+              : titleFor(view)
+          }
           topLabel={view === "dashboard" ? "Overview" : undefined}
           subtitle={
             view === "dashboard"
@@ -1706,7 +2277,11 @@ function App() {
               : subtitleFor(view, runtime, projects)
           }
           actions={
-            view === "dashboard" ? null : <button onClick={loadWorkspace} disabled={loading}><RefreshCw size={15} /> Refresh</button>
+            view === "dashboard" ? null : (
+              <Button onClick={loadWorkspace} disabled={loading}>
+                <RefreshCw size={15} /> Refresh
+              </Button>
+            )
           }
         />
         {notice && <div className="notice">{notice}</div>}
@@ -1715,7 +2290,9 @@ function App() {
           <SkeletonPage />
         ) : (
           <>
-            {view === "dashboard" && <DashboardView dashboard={dashboard} refresh={loadDashboard} />}
+            {view === "dashboard" && (
+              <DashboardView dashboard={dashboard} refresh={loadDashboard} />
+            )}
             {view === "deploy" && (
               <DeployView
                 credentials={credentials}
@@ -1761,10 +2338,46 @@ function App() {
               />
             )}
             {view === "projects" && (
-              <ProjectsView applications={applications} projects={projects} onDeleteApplication={deleteApplication} onEdit={setEditingProject} onDelete={deleteProject} onScale={scaleProject} onRestart={restartProject} onBuild={buildProject} onTracking={openProjectTracking} onProgress={(project) => { setActiveProgressProjectID(String(project.id)); setView("progress"); }} />
+              <ProjectsView
+                applications={applications}
+                projects={projects}
+                onDeleteApplication={deleteApplication}
+                onEdit={setEditingProject}
+                onDelete={deleteProject}
+                onScale={scaleProject}
+                onRestart={restartProject}
+                onBuild={buildProject}
+                onTracking={openProjectTracking}
+                onProgress={(project) => {
+                  setActiveProgressProjectID(String(project.id));
+                  setView("progress");
+                }}
+              />
             )}
-            {view === "deployments" && <DeploymentsView projects={projects} processes={processRecords} runtimeDeployments={runtime.deployments || []} refresh={loadWorkspace} onOpenProcess={(process) => { setActiveProcessID(String(process.id)); setActiveProgressProjectID(String(process.project_id || "")); setView("progress"); }} />}
-            {view === "apiKeys" && <APIKeysView keys={apiKeys} scopeCatalog={apiKeyScopeCatalog} createdKey={createdAPIKey} onDismissCreated={() => setCreatedAPIKey(null)} onCreate={createAPIKey} onRevoke={revokeAPIKey} onRefresh={loadAPIKeys} />}
+            {view === "deployments" && (
+              <DeploymentsView
+                projects={projects}
+                processes={processRecords}
+                runtimeDeployments={runtime.deployments || []}
+                refresh={loadWorkspace}
+                onOpenProcess={(process) => {
+                  setActiveProcessID(String(process.id));
+                  setActiveProgressProjectID(String(process.project_id || ""));
+                  setView("progress");
+                }}
+              />
+            )}
+            {view === "apiKeys" && (
+              <APIKeysView
+                keys={apiKeys}
+                scopeCatalog={apiKeyScopeCatalog}
+                createdKey={createdAPIKey}
+                onDismissCreated={() => setCreatedAPIKey(null)}
+                onCreate={createAPIKey}
+                onRevoke={revokeAPIKey}
+                onRefresh={loadAPIKeys}
+              />
+            )}
             {view === "registries" && (
               <ContainerRegistriesView
                 presets={registryPresets}
@@ -1800,8 +2413,12 @@ function App() {
                 description="Kubernetes Secret inspection and rotation workflows are not wired in this console yet. Use kubectl or your GitOps pipeline for now."
               />
             )}
-            {view === "alerts" && <AlertsView dashboard={dashboard} refresh={loadDashboard} />}
-            {view === "events" && <EventsView dashboard={dashboard} refresh={loadDashboard} />}
+            {view === "alerts" && (
+              <AlertsView dashboard={dashboard} refresh={loadDashboard} />
+            )}
+            {view === "events" && (
+              <EventsView dashboard={dashboard} refresh={loadDashboard} />
+            )}
             {view === "logs" && (
               <LogsView
                 projects={projects}
@@ -1817,26 +2434,167 @@ function App() {
                 onOpenPods={() => setView("pods")}
               />
             )}
-            {view === "metrics" && <MetricsView dashboard={dashboard} runtime={runtime} refresh={loadDashboard} />}
+            {view === "metrics" && (
+              <MetricsView
+                dashboard={dashboard}
+                runtime={runtime}
+                refresh={loadDashboard}
+              />
+            )}
             {view === "settings" && <SettingsView version={appVersion} />}
             {view === "github" && (
-              <GitHubView credentials={credentials.github} onConnect={connectGitHubApp} onUpdate={updateGitHubCredential} onRepos={loadRepos} onDelete={(id) => deleteCredential("github", id)} reposByCredential={reposByCredential} repoFilters={repoFilters} setRepoFilters={setRepoFilters} />
+              <GitHubView
+                credentials={credentials.github}
+                onConnect={connectGitHubApp}
+                onUpdate={updateGitHubCredential}
+                onRepos={loadRepos}
+                onDelete={(id) => deleteCredential("github", id)}
+                reposByCredential={reposByCredential}
+                repoFilters={repoFilters}
+                setRepoFilters={setRepoFilters}
+              />
             )}
             {view === "domains" && <DomainsView domains={domains} />}
-            {view === "networking" && <NetworkingView network={network} refresh={loadNetwork} onSaveService={saveService} onDeleteService={deleteService} onSaveIngress={saveIngress} onDeleteIngress={deleteIngress} onSaveNetworkPolicy={saveNetworkPolicy} onDeleteNetworkPolicy={deleteNetworkPolicy} onDetail={setRuntimeDetail} />}
-            {view === "cloudflare" && <CloudflareView credentials={credentials.cloudflare} domains={domains} selectedID={selectedCloudflareID} selectedZoneID={selectedCloudflareZoneID} setSelectedID={setSelectedCloudflareID} setSelectedZoneID={setSelectedCloudflareZoneID} dnsRecords={dnsRecords} editingRecord={editingDNSRecord} setEditingRecord={setEditingDNSRecord} onCreate={createCredential} onDelete={(id) => deleteCredential("cloudflare", id)} onLoadDNS={loadDNSRecords} onSaveDNS={saveDNSRecord} onDeleteDNS={deleteDNSRecord} />}
-            {view === "accessControl" && <CredentialManager kind="basaltpass" rows={credentials.basaltpass} onCreate={createCredential} onDelete={deleteCredential} />}
-            {["namespaces", "pods", "nodes", "ingresses", "services"].includes(view) && <RuntimeTable kind={view} rows={runtime[view] || []} nodeJoinCommand={nodeJoinCommand} onLoadNodeJoinCommand={loadNodeJoinCommand} onCreateNamespace={createNamespace} onPatchNamespace={patchNamespaceLabels} onNamespaceDetail={loadNamespaceDetail} onDeleteNamespace={deleteNamespace} onDeletePod={deletePod} onNodeDetail={loadNodeDetail} onPodLogs={loadPodLogs} onSaveService={saveService} onDeleteService={deleteService} onDetail={setRuntimeDetail} />}
+            {view === "networking" && (
+              <NetworkingView
+                network={network}
+                refresh={loadNetwork}
+                onSaveService={saveService}
+                onDeleteService={deleteService}
+                onSaveIngress={saveIngress}
+                onDeleteIngress={deleteIngress}
+                onSaveNetworkPolicy={saveNetworkPolicy}
+                onDeleteNetworkPolicy={deleteNetworkPolicy}
+                onDetail={setRuntimeDetail}
+              />
+            )}
+            {view === "cloudflare" && (
+              <CloudflareView
+                credentials={credentials.cloudflare}
+                domains={domains}
+                selectedID={selectedCloudflareID}
+                selectedZoneID={selectedCloudflareZoneID}
+                setSelectedID={setSelectedCloudflareID}
+                setSelectedZoneID={setSelectedCloudflareZoneID}
+                dnsRecords={dnsRecords}
+                editingRecord={editingDNSRecord}
+                setEditingRecord={setEditingDNSRecord}
+                onCreate={createCredential}
+                onDelete={(id) => deleteCredential("cloudflare", id)}
+                onLoadDNS={loadDNSRecords}
+                onSaveDNS={saveDNSRecord}
+                onDeleteDNS={deleteDNSRecord}
+              />
+            )}
+            {view === "accessControl" && (
+              <CredentialManager
+                kind="basaltpass"
+                rows={credentials.basaltpass}
+                onCreate={createCredential}
+                onDelete={deleteCredential}
+              />
+            )}
+            {["namespaces", "pods", "nodes", "ingresses", "services"].includes(
+              view,
+            ) && (
+              <RuntimeTable
+                kind={view}
+                rows={runtime[view] || []}
+                nodeJoinCommand={nodeJoinCommand}
+                onLoadNodeJoinCommand={loadNodeJoinCommand}
+                onCreateNamespace={createNamespace}
+                onPatchNamespace={patchNamespaceLabels}
+                onNamespaceDetail={loadNamespaceDetail}
+                onDeleteNamespace={deleteNamespace}
+                onDeletePod={deletePod}
+                onNodeDetail={loadNodeDetail}
+                onPodLogs={loadPodLogs}
+                onSaveService={saveService}
+                onDeleteService={deleteService}
+                onDetail={setRuntimeDetail}
+              />
+            )}
           </>
         )}
       </main>
-      {editingProject && <ProjectModal project={editingProject} onClose={() => setEditingProject(null)} onSubmit={updateProject} onLoadEnv={loadProjectEnv} />}
-      {deletingProject && <DeleteProjectModal project={deletingProject} busy={loading} onClose={() => setDeletingProject(null)} onDelete={confirmDeleteProject} />}
-      {deletingApplication && <DeleteApplicationModal application={deletingApplication} busy={loading} onClose={() => setDeletingApplication(null)} onDelete={confirmDeleteApplication} />}
-      {trackingProject && <ProjectTrackingModal project={trackingProject} tracking={projectTracking} loading={trackingLoading} onRefresh={() => openProjectTracking(trackingProject)} onClose={() => { setTrackingProject(null); setProjectTracking(null); }} />}
-      {runtimeDetail && <RuntimeDetailDrawer detail={runtimeDetail} logs={runtimeLogs} logFollow={runtimeLogFollow} logStatus={runtimeLogStatus} selectedLogContainer={runtimeLogContainer} logTail={runtimeLogTail} logLoaded={runtimeLogLoaded} nodeHealth={nodeHealth} onLoadNodeHealth={loadNodeHealth} onSaveNodeLabels={saveNodeLabels} onSaveNodeTaints={saveNodeTaints} onCordonNode={cordonNode} onDrainNode={drainNode} onDeleteNode={deleteNode} onSaveResourceQuota={saveResourceQuota} onDeleteResourceQuota={deleteResourceQuota} onSaveLimitRange={saveLimitRange} onDeleteLimitRange={deleteLimitRange} onSaveNamespacePermission={saveNamespacePermission} onDeleteNamespacePermission={deleteNamespacePermission} onSaveNamespaceIsolation={saveNamespaceIsolation} onSelectLogContainer={setRuntimeLogContainer} onSetLogTail={setRuntimeLogTail} onLoadContainerLogs={loadRuntimeContainerLogs} onFollowPodLogs={startRuntimeLogFollow} onStopPodLogs={stopRuntimeLogFollow} onClose={() => { stopRuntimeLogFollow(); setRuntimeDetail(null); setRuntimeLogs(""); setRuntimeLogContainer(""); setRuntimeLogLoaded(false); setRuntimeLogStatus(""); setNodeHealth(null); }} onSaveService={saveService} onPatchNamespace={patchNamespaceLabels} />}
+      {editingProject && (
+        <ProjectModal
+          project={editingProject}
+          onClose={() => setEditingProject(null)}
+          onSubmit={updateProject}
+          onLoadEnv={loadProjectEnv}
+        />
+      )}
+      {deletingProject && (
+        <DeleteProjectModal
+          project={deletingProject}
+          busy={loading}
+          onClose={() => setDeletingProject(null)}
+          onDelete={confirmDeleteProject}
+        />
+      )}
+      {deletingApplication && (
+        <DeleteApplicationModal
+          application={deletingApplication}
+          busy={loading}
+          onClose={() => setDeletingApplication(null)}
+          onDelete={confirmDeleteApplication}
+        />
+      )}
+      {trackingProject && (
+        <ProjectTrackingModal
+          project={trackingProject}
+          tracking={projectTracking}
+          loading={trackingLoading}
+          onRefresh={() => openProjectTracking(trackingProject)}
+          onClose={() => {
+            setTrackingProject(null);
+            setProjectTracking(null);
+          }}
+        />
+      )}
+      {runtimeDetail && (
+        <RuntimeDetailDrawer
+          detail={runtimeDetail}
+          logs={runtimeLogs}
+          logFollow={runtimeLogFollow}
+          logStatus={runtimeLogStatus}
+          selectedLogContainer={runtimeLogContainer}
+          logTail={runtimeLogTail}
+          logLoaded={runtimeLogLoaded}
+          nodeHealth={nodeHealth}
+          onLoadNodeHealth={loadNodeHealth}
+          onSaveNodeLabels={saveNodeLabels}
+          onSaveNodeTaints={saveNodeTaints}
+          onCordonNode={cordonNode}
+          onDrainNode={drainNode}
+          onDeleteNode={deleteNode}
+          onSaveResourceQuota={saveResourceQuota}
+          onDeleteResourceQuota={deleteResourceQuota}
+          onSaveLimitRange={saveLimitRange}
+          onDeleteLimitRange={deleteLimitRange}
+          onSaveNamespacePermission={saveNamespacePermission}
+          onDeleteNamespacePermission={deleteNamespacePermission}
+          onSaveNamespaceIsolation={saveNamespaceIsolation}
+          onSelectLogContainer={setRuntimeLogContainer}
+          onSetLogTail={setRuntimeLogTail}
+          onLoadContainerLogs={loadRuntimeContainerLogs}
+          onFollowPodLogs={startRuntimeLogFollow}
+          onStopPodLogs={stopRuntimeLogFollow}
+          onClose={() => {
+            stopRuntimeLogFollow();
+            setRuntimeDetail(null);
+            setRuntimeLogs("");
+            setRuntimeLogContainer("");
+            setRuntimeLogLoaded(false);
+            setRuntimeLogStatus("");
+            setNodeHealth(null);
+          }}
+          onSaveService={saveService}
+          onPatchNamespace={patchNamespaceLabels}
+        />
+      )}
     </div>
   );
 }
-
 createRoot(document.getElementById("root")).render(<App />);
