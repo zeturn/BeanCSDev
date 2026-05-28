@@ -3,7 +3,12 @@
 
 :root {
   color-scheme: light;
-  font-family: "Manrope", "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-family:
+    "Manrope",
+    "Segoe UI",
+    system-ui,
+    -apple-system,
+    sans-serif;
   font-size: 14px;
   color: #1e293b;
   background: #f1f5f9;
@@ -105,8 +110,16 @@ button.ghost:hover,
   align-items: center;
   padding: 48px;
   background:
-    radial-gradient(1200px 600px at 15% 10%, rgba(167, 139, 250, 0.35), transparent 60%),
-    radial-gradient(900px 500px at 90% 0%, rgba(109, 40, 217, 0.35), transparent 55%),
+    radial-gradient(
+      1200px 600px at 15% 10%,
+      rgba(167, 139, 250, 0.35),
+      transparent 60%
+    ),
+    radial-gradient(
+      900px 500px at 90% 0%,
+      rgba(109, 40, 217, 0.35),
+      transparent 55%
+    ),
     linear-gradient(135deg, #1e293b 0%, #4c1d95 45%, #1e293b 100%);
 }
 
@@ -345,7 +358,10 @@ button.ghost:hover,
 
 .deploy-grid {
   display: grid;
-  grid-template-columns: minmax(280px, 0.9fr) minmax(260px, 0.7fr) minmax(360px, 1fr);
+  grid-template-columns: minmax(280px, 0.9fr) minmax(260px, 0.7fr) minmax(
+      360px,
+      1fr
+    );
   gap: 16px;
   align-items: start;
 }
@@ -1639,7 +1655,10 @@ button.domain-tile {
 
 .progress-grid {
   display: grid;
-  grid-template-columns: minmax(240px, 0.85fr) minmax(280px, 1fr) minmax(280px, 1fr);
+  grid-template-columns: minmax(240px, 0.85fr) minmax(280px, 1fr) minmax(
+      280px,
+      1fr
+    );
   gap: 16px;
   align-items: start;
 }
@@ -1878,7 +1897,12 @@ button.domain-tile {
   border-radius: 6px;
   background: #f8fafc;
   color: #0f172a;
-  font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font:
+    12px/1.55 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
   white-space: pre-wrap;
 }
 
@@ -1929,7 +1953,12 @@ button.domain-tile {
   padding: 12px 14px;
   background: #f8fafc;
   color: #0f172a;
-  font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font:
+    12px/1.55 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
   white-space: pre-wrap;
 }
 
@@ -1960,7 +1989,10 @@ button.domain-tile {
 .progress-list-head,
 .progress-list-row {
   display: grid;
-  grid-template-columns: minmax(180px, 1.2fr) minmax(180px, 1.2fr) minmax(140px, 1fr) minmax(100px, 0.6fr) auto;
+  grid-template-columns: minmax(180px, 1.2fr) minmax(180px, 1.2fr) minmax(
+      140px,
+      1fr
+    ) minmax(100px, 0.6fr) auto;
   gap: 14px;
   align-items: center;
   padding: 12px 18px;
@@ -2340,7 +2372,12 @@ button.domain-tile {
   border-radius: 7px;
   background: #0f172a;
   color: #dbeafe;
-  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font:
+    12px/1.5 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
   white-space: pre-wrap;
 }
 
@@ -2351,7 +2388,12 @@ button.domain-tile {
   border-radius: 7px;
   background: #0f172a;
   color: #dbeafe;
-  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font:
+    13px/1.5 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
   white-space: pre-wrap;
 }
 
@@ -2423,7 +2465,12 @@ button.domain-tile {
   border-radius: 8px;
   background: #0f172a;
   color: #dbeafe;
-  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font:
+    12px/1.5 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
 }
 
 .health-card {
@@ -2691,7 +2738,10 @@ button.domain-tile {
 .tracking-row {
   min-height: 70px;
   display: grid;
-  grid-template-columns: minmax(160px, 1fr) minmax(220px, 1.4fr) minmax(150px, 0.8fr) minmax(120px, 0.7fr);
+  grid-template-columns: minmax(160px, 1fr) minmax(220px, 1.4fr) minmax(
+      150px,
+      0.8fr
+    ) minmax(120px, 0.7fr);
   gap: 14px;
   align-items: center;
   padding: 12px 14px;
@@ -2733,7 +2783,12 @@ button.domain-tile {
   border-radius: 7px;
   background: #0f172a;
   color: #dbeafe;
-  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font:
+    12px/1.5 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
   white-space: pre-wrap;
 }
 
@@ -2878,7 +2933,9 @@ button:hover {
   border-right: 1px solid var(--bc-border);
   background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
   color: var(--bc-text);
-  transition: transform 200ms ease, box-shadow 200ms ease;
+  transition:
+    transform 200ms ease,
+    box-shadow 200ms ease;
 }
 
 .sidebar-product {
@@ -2925,7 +2982,11 @@ button:hover {
   justify-content: center;
   border-radius: 999px;
   background:
-    radial-gradient(circle at 34% 32%, rgba(255, 255, 255, 0.35), transparent 28%),
+    radial-gradient(
+      circle at 34% 32%,
+      rgba(255, 255, 255, 0.35),
+      transparent 28%
+    ),
     repeating-linear-gradient(135deg, #7c3aed 0 2px, #6d28d9 2px 4px);
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
   color: #ffffff;
@@ -3234,7 +3295,12 @@ button:hover {
 .skeleton-line {
   height: 12px;
   border-radius: 999px;
-  background: linear-gradient(90deg, rgba(226, 232, 240, 0.7) 0%, rgba(226, 232, 240, 0.25) 45%, rgba(226, 232, 240, 0.7) 100%);
+  background: linear-gradient(
+    90deg,
+    rgba(226, 232, 240, 0.7) 0%,
+    rgba(226, 232, 240, 0.25) 45%,
+    rgba(226, 232, 240, 0.7) 100%
+  );
   background-size: 200% 100%;
   animation: shimmer 1.6s ease infinite;
 }
@@ -3275,7 +3341,12 @@ button:hover {
   width: 17px;
   height: 17px;
   border-radius: 999px;
-  background: linear-gradient(90deg, rgba(226, 232, 240, 0.7), rgba(226, 232, 240, 0.25), rgba(226, 232, 240, 0.7));
+  background: linear-gradient(
+    90deg,
+    rgba(226, 232, 240, 0.7),
+    rgba(226, 232, 240, 0.25),
+    rgba(226, 232, 240, 0.7)
+  );
   background-size: 200% 100%;
   animation: shimmer 1.6s ease infinite;
 }
@@ -3284,7 +3355,12 @@ button:hover {
   width: 78px;
   height: 36px;
   border-radius: var(--bc-radius);
-  background: linear-gradient(90deg, rgba(226, 232, 240, 0.7), rgba(226, 232, 240, 0.25), rgba(226, 232, 240, 0.7));
+  background: linear-gradient(
+    90deg,
+    rgba(226, 232, 240, 0.7),
+    rgba(226, 232, 240, 0.25),
+    rgba(226, 232, 240, 0.7)
+  );
   background-size: 200% 100%;
   animation: shimmer 1.6s ease infinite;
 }
@@ -3363,7 +3439,10 @@ textarea {
 }
 
 .project-table-row {
-  grid-template-columns: minmax(150px, 1fr) minmax(220px, 1.35fr) minmax(160px, 1fr) minmax(110px, 0.75fr) minmax(90px, 0.65fr) minmax(360px, auto);
+  grid-template-columns: minmax(150px, 1fr) minmax(220px, 1.35fr) minmax(
+      160px,
+      1fr
+    ) minmax(110px, 0.75fr) minmax(90px, 0.65fr) minmax(360px, auto);
 }
 
 .deployments-page {
@@ -3447,7 +3526,10 @@ textarea {
   width: 100%;
   min-height: 76px;
   display: grid;
-  grid-template-columns: minmax(180px, 1.2fr) minmax(120px, 0.9fr) minmax(240px, 1.4fr) minmax(260px, 1.6fr) minmax(220px, auto);
+  grid-template-columns: minmax(180px, 1.2fr) minmax(120px, 0.9fr) minmax(
+      240px,
+      1.4fr
+    ) minmax(260px, 1.6fr) minmax(220px, auto);
   gap: 16px;
   align-items: center;
   border: 0;
