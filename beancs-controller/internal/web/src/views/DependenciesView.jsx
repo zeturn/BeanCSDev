@@ -1,6 +1,13 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Database, KeyRound, RefreshCw, Server, ShieldCheck } from "lucide-react";
-import { Button, Checkbox, Input, Select } from "../components/index";
+import {
+  Button,
+  Checkbox,
+  DependencyConfigEditor,
+  Input,
+  Select,
+} from "../components/index";
+import { dependencyDefaultConfig } from "../utils/index";
 
 const defaultPorts = {
   mysql: "3306",
@@ -20,10 +27,20 @@ function displayName(definitions, type) {
 export default function DependenciesView({
   definitions,
   dependencies,
+  githubCredentials,
   onCreateDependency,
   onCreateCredential,
   onRefresh,
 }) {
+  const clusterDefinitions = useMemo(
+    () =>
+      (definitions || []).filter((definition) =>
+        (definition.supported_deploy_methods || []).some(
+          (method) => method !== "external",
+        ),
+      ),
+    [definitions],
+  );
   const externalDefinitions = useMemo(
     () =>
       (definitions || []).filter((definition) =>
@@ -31,10 +48,37 @@ export default function DependenciesView({
       ),
     [definitions],
   );
-  const [type, setType] = useState(externalDefinitions[0]?.name || "mysql");
+  const [mode, setMode] = useState("cluster");
+  const activeDefinitions =
+    mode === "external" ? externalDefinitions : clusterDefinitions;
+  const [type, setType] = useState(activeDefinitions[0]?.name || "mysql");
+  const activeDefinition =
+    activeDefinitions.find((definition) => definition.name === type) ||
+    activeDefinitions[0];
+  const deployMethods = (activeDefinition?.supported_deploy_methods || []).filter(
+    (method) => (mode === "external" ? method === "external" : method !== "external"),
+  );
+  const defaultDeployMethod =
+    deployMethods.includes(activeDefinition?.default_deploy_method)
+      ? activeDefinition.default_deploy_method
+      : deployMethods[0] || (mode === "external" ? "external" : "helm");
+  const [deployMethod, setDeployMethod] = useState(defaultDeployMethod);
+  const [config, setConfig] = useState(() =>
+    dependencyDefaultConfig(activeDefinition),
+  );
   const [controlled, setControlled] = useState(true);
-  const activeType = type || externalDefinitions[0]?.name || "mysql";
+  const activeType = type || activeDefinition?.name || "mysql";
   const controlledSupported = controlledTypes.has(activeType);
+
+  useEffect(() => {
+    const next = activeDefinitions[0]?.name || "mysql";
+    setType(next);
+  }, [mode, activeDefinitions]);
+
+  useEffect(() => {
+    setDeployMethod(defaultDeployMethod);
+    setConfig(dependencyDefaultConfig(activeDefinition));
+  }, [activeDefinition, defaultDeployMethod]);
 
   return (
     <div className="dependencies-page">
@@ -42,10 +86,10 @@ export default function DependenciesView({
         <div className="panel-heading-inline">
           <div>
             <h2>
-              <Server size={18} /> Add External Dependency
+              <Server size={18} /> Add Dependency
             </h2>
             <p className="muted">
-              Register a service that runs outside this BeanCS cluster.
+              Deploy a managed dependency in this cluster or register an external service.
             </p>
           </div>
           <Button onClick={onRefresh}>
@@ -56,6 +100,25 @@ export default function DependenciesView({
           className="component-grid dependency-create-form"
           onSubmit={onCreateDependency}
         >
+          <label>Location</label>
+          <Select
+            name="location"
+            value={mode}
+            onChange={(event) => setMode(event.target.value)}
+          >
+            <option value="cluster">BeanCS cluster</option>
+            <option value="external">External service</option>
+          </Select>
+          <input
+            type="hidden"
+            name="external"
+            value={mode === "external" ? "true" : "false"}
+          />
+          <input
+            type="hidden"
+            name="config_json"
+            value={JSON.stringify(config || {})}
+          />
           <label>Name</label>
           <Input name="name" required placeholder="mysql-prod" />
           <label>Display name</label>
@@ -69,54 +132,102 @@ export default function DependenciesView({
               if (!controlledTypes.has(event.target.value)) setControlled(false);
             }}
           >
-            {externalDefinitions.map((definition) => (
+            {activeDefinitions.map((definition) => (
               <option key={definition.name} value={definition.name}>
                 {definition.display_name || definition.name}
               </option>
             ))}
           </Select>
-          <label>Host</label>
-          <Input name="host" required placeholder="10.0.0.20" />
-          <label>Port</label>
-          <Input
-            name="port"
-            defaultValue={defaultPorts[activeType] || ""}
-            placeholder={defaultPorts[activeType] || ""}
-          />
-          {activeType === "rabbitmq" && (
+          {mode === "cluster" && (
             <>
-              <label>Management port</label>
+              <label>Deploy method</label>
+              <Select
+                name="deploy_method"
+                value={deployMethod}
+                onChange={(event) => setDeployMethod(event.target.value)}
+              >
+                {deployMethods.map((method) => (
+                  <option key={method} value={method}>
+                    {method}
+                  </option>
+                ))}
+              </Select>
+              <label>Version</label>
+              <Input name="version" placeholder="default" />
+              <label>GitOps credential</label>
+              <Select name="github_credential_id">
+                <option value="">Create record only</option>
+                {(githubCredentials || []).map((credential) => (
+                  <option key={credential.id} value={credential.id}>
+                    {credential.name}
+                    {credential.gitops_repo ? ` · ${credential.gitops_repo}` : ""}
+                  </option>
+                ))}
+              </Select>
+            </>
+          )}
+          {mode === "external" && (
+            <>
+              <input type="hidden" name="deploy_method" value="external" />
+              <label>Host</label>
+              <Input name="host" required placeholder="10.0.0.20" />
+              <label>Port</label>
               <Input
-                name="management_port"
-                defaultValue="15672"
-                placeholder="15672"
+                name="port"
+                defaultValue={defaultPorts[activeType] || ""}
+                placeholder={defaultPorts[activeType] || ""}
               />
+              {activeType === "rabbitmq" && (
+                <>
+                  <label>Management port</label>
+                  <Input
+                    name="management_port"
+                    defaultValue="15672"
+                    placeholder="15672"
+                  />
+                </>
+              )}
             </>
           )}
           <label>App object</label>
           <Input name="application_name" placeholder={`dep-${activeType}`} />
           <label>Namespace</label>
           <Input name="namespace" placeholder={`dep-${activeType}`} />
-          <div />
-          <Checkbox
-            name="controlled"
-            checked={controlledSupported && controlled}
-            disabled={!controlledSupported}
-            onChange={(event) => setControlled(event.target.checked)}
-            label="BeanCS can create credentials"
-          />
-          {!controlledSupported && (
+          {mode === "cluster" && (
             <>
               <div />
-              <p className="muted">Credentials for this type must be entered manually.</p>
+              <Checkbox name="shared" defaultChecked label="Reusable by other apps" />
+              <DependencyConfigEditor
+                definition={activeDefinition}
+                value={config || {}}
+                onChange={setConfig}
+              />
             </>
           )}
-          {controlledSupported && controlled && (
+          {mode === "external" && (
             <>
-              <label>Admin username</label>
-              <Input name="admin_username" required placeholder="root" />
-              <label>Admin password</label>
-              <Input name="admin_password" type="password" required />
+              <div />
+              <Checkbox
+                name="controlled"
+                checked={controlledSupported && controlled}
+                disabled={!controlledSupported}
+                onChange={(event) => setControlled(event.target.checked)}
+                label="BeanCS can create credentials"
+              />
+              {!controlledSupported && (
+                <>
+                  <div />
+                  <p className="muted">Credentials for this type must be entered manually.</p>
+                </>
+              )}
+              {controlledSupported && controlled && (
+                <>
+                  <label>Admin username</label>
+                  <Input name="admin_username" required placeholder="root" />
+                  <label>Admin password</label>
+                  <Input name="admin_password" type="password" required />
+                </>
+              )}
             </>
           )}
           <div />

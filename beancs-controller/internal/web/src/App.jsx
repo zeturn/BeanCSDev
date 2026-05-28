@@ -666,32 +666,50 @@ function App() {
     const form = event.currentTarget;
     const data = new FormData(form);
     const type = String(data.get("type") || "").trim();
+    const deployMethod = String(data.get("deploy_method") || "helm").trim();
+    const external =
+      data.get("external") === "true" || deployMethod === "external";
     const controlled = data.get("controlled") === "on";
+    let config = {};
+    if (external) {
+      config = {
+        host: String(data.get("host") || "").trim(),
+        port: String(data.get("port") || "").trim(),
+      };
+      if (type === "rabbitmq") {
+        config.management_port = String(
+          data.get("management_port") || "",
+        ).trim();
+      }
+      if (controlled) {
+        config.admin_username = String(
+          data.get("admin_username") || "",
+        ).trim();
+        config.admin_password = String(data.get("admin_password") || "");
+      }
+    } else {
+      try {
+        config = JSON.parse(String(data.get("config_json") || "{}"));
+      } catch {
+        config = {};
+      }
+    }
     const body = {
       name: String(data.get("name") || "").trim(),
       display_name: String(data.get("display_name") || "").trim(),
       application_name: String(data.get("application_name") || "").trim(),
       namespace: String(data.get("namespace") || "").trim(),
       type,
-      deploy_method: "external",
-      external: true,
-      controlled,
-      shared: true,
-      config: {
-        host: String(data.get("host") || "").trim(),
-        port: String(data.get("port") || "").trim(),
-      },
+      version: String(data.get("version") || "").trim(),
+      deploy_method: deployMethod,
+      external,
+      controlled: external ? controlled : true,
+      shared: data.get("shared") === "on" || external,
+      config,
     };
-    if (type === "rabbitmq") {
-      body.config.management_port = String(
-        data.get("management_port") || "",
-      ).trim();
-    }
-    if (controlled) {
-      body.config.admin_username = String(
-        data.get("admin_username") || "",
-      ).trim();
-      body.config.admin_password = String(data.get("admin_password") || "");
+    const githubCredentialID = Number(data.get("github_credential_id") || 0);
+    if (!external && githubCredentialID) {
+      body.github_credential_id = githubCredentialID;
     }
     Object.keys(body).forEach((key) => {
       if (body[key] === "") delete body[key];
@@ -2433,6 +2451,7 @@ function App() {
               <DependenciesView
                 definitions={dependencyDefinitions}
                 dependencies={reusableDependencies}
+                githubCredentials={credentials.github}
                 onCreateDependency={createDependency}
                 onCreateCredential={createDependencyCredential}
                 onRefresh={loadWorkspace}
