@@ -1195,6 +1195,44 @@ export default function DeployView({
               placeholder="Defaults to Base URL"
             />
             <Field
+              label="Platform admin email"
+              type="email"
+              value={form.platform_admin_email}
+              onChange={(v) => {
+                const value = v.trim();
+                setForm({
+                  ...form,
+                  platform_admin_email: value,
+                  platform_admin_username:
+                    form.platform_admin_username || value.split("@")[0],
+                });
+              }}
+              required
+            />
+            <Field
+              label="Platform admin username"
+              value={form.platform_admin_username}
+              onChange={(v) =>
+                setForm({
+                  ...form,
+                  platform_admin_username: v.trim(),
+                })
+              }
+              required
+            />
+            <Field
+              label="Platform admin password"
+              type="password"
+              value={form.platform_admin_password}
+              onChange={(v) =>
+                setForm({
+                  ...form,
+                  platform_admin_password: v,
+                })
+              }
+              required
+            />
+            <Field
               label="JWT secret"
               type="password"
               value={form.jwt_secret}
@@ -1489,10 +1527,35 @@ export default function DeployView({
               label="Tenant admin email"
               type="email"
               value={form.owner_email}
+              onChange={(v) => {
+                const value = v.trim();
+                setForm({
+                  ...form,
+                  owner_email: value,
+                  owner_username: form.owner_username || value.split("@")[0],
+                });
+              }}
+              required
+            />
+            <Field
+              label="Tenant admin username"
+              value={form.owner_username}
               onChange={(v) =>
                 setForm({
                   ...form,
-                  owner_email: v.trim(),
+                  owner_username: v.trim(),
+                })
+              }
+              required
+            />
+            <Field
+              label="Tenant admin password"
+              type="password"
+              value={form.owner_password}
+              onChange={(v) =>
+                setForm({
+                  ...form,
+                  owner_password: v,
                 })
               }
               required
@@ -1532,7 +1595,7 @@ export default function DeployView({
               placeholder="500"
             />
             <Field
-              label="Platform management token"
+              label="Platform management token fallback"
               type="password"
               value={form.service_token}
               onChange={(v) =>
@@ -1541,7 +1604,6 @@ export default function DeployView({
                   service_token: v,
                 })
               }
-              required
             />
             <Field
               label="Tenant automation token fallback"
@@ -2119,6 +2181,12 @@ export default function DeployView({
             </span>
             <span>
               Tenant code <b>{form.tenant_code || "-"}</b>
+            </span>
+            <span>
+              Platform admin <b>{form.platform_admin_email || "-"}</b>
+            </span>
+            <span>
+              Tenant admin <b>{form.owner_email || "-"}</b>
             </span>
             <span>
               Database <b>{form.database_binding || "-"}</b>

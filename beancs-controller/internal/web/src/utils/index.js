@@ -310,6 +310,9 @@ export function canContinueDeployStep(
               form.cloudflare_credential_id &&
               form.cloudflare_zone_id &&
               form.subdomain)) &&
+          form.platform_admin_email &&
+          form.platform_admin_username &&
+          form.platform_admin_password &&
           form.backend_image &&
           form.frontend_image,
       );
@@ -334,7 +337,8 @@ export function canContinueDeployStep(
       return Boolean(
         form.database_binding &&
           form.owner_email &&
-          form.service_token,
+          form.owner_username &&
+          form.owner_password,
       );
     }
     return true;
@@ -449,8 +453,13 @@ export function defaultDeployForm() {
     backend_image: "",
     frontend_image: "",
     database_binding: "",
+    platform_admin_email: "",
+    platform_admin_username: "",
+    platform_admin_password: "",
     tenant_name: "",
     owner_email: "",
+    owner_username: "",
+    owner_password: "",
     tenant_code: "",
     description: "",
     max_apps: "",

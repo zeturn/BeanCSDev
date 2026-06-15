@@ -161,6 +161,8 @@ type CreateTenantRequest struct {
 	Code             string `json:"code"`
 	Description      string `json:"description,omitempty"`
 	OwnerEmail       string `json:"owner_email"`
+	OwnerUsername    string `json:"owner_username,omitempty"`
+	OwnerPassword    string `json:"owner_password,omitempty"`
 	MaxApps          int    `json:"max_apps"`
 	MaxUsers         int    `json:"max_users"`
 	MaxTokensPerHour int    `json:"max_tokens_per_hour"`

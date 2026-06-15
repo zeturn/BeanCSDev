@@ -32,6 +32,7 @@ type CredentialService struct {
 	cipher cryptoutil.Cipher
 	cfg    *config.Config
 	k8s    *k8s.Manager
+	dns    *DNSService
 }
 
 func NewCredentialService(db *gorm.DB, cipher cryptoutil.Cipher, cfg *config.Config) *CredentialService {
@@ -40,6 +41,10 @@ func NewCredentialService(db *gorm.DB, cipher cryptoutil.Cipher, cfg *config.Con
 
 func (s *CredentialService) SetK8sManager(k8sManager *k8s.Manager) {
 	s.k8s = k8sManager
+}
+
+func (s *CredentialService) SetDNSService(dns *DNSService) {
+	s.dns = dns
 }
 
 func (s *CredentialService) HasAccess(userID, typ string, id uint, ownerOnly bool) (bool, error) {
@@ -238,7 +243,10 @@ func (s *CredentialService) DeployBasaltPass(ctx context.Context, userID string,
 	}
 	req.JWTSecret = strings.TrimSpace(req.JWTSecret)
 	req.CORSAllowOrigins = strings.TrimSpace(req.CORSAllowOrigins)
+	req.PlatformAdminEmail = strings.TrimSpace(strings.ToLower(req.PlatformAdminEmail))
+	req.PlatformAdminUsername = strings.TrimSpace(req.PlatformAdminUsername)
 	req.OwnerEmail = strings.TrimSpace(req.OwnerEmail)
+	req.OwnerUsername = strings.TrimSpace(req.OwnerUsername)
 	req.Description = strings.TrimSpace(req.Description)
 	req.ClientID = strings.TrimSpace(req.ClientID)
 	if err := validateExternalHTTPSURL(req.BaseURL); err != nil {
@@ -249,6 +257,12 @@ func (s *CredentialService) DeployBasaltPass(ctx context.Context, userID string,
 	}
 	if req.TenantName == "" {
 		req.TenantName = req.Name
+	}
+	if req.OwnerUsername == "" {
+		req.OwnerUsername = strings.Split(req.OwnerEmail, "@")[0]
+	}
+	if req.PlatformAdminUsername == "" {
+		req.PlatformAdminUsername = strings.Split(req.PlatformAdminEmail, "@")[0]
 	}
 	if req.MaxApps <= 0 {
 		req.MaxApps = 50
@@ -263,6 +277,9 @@ func (s *CredentialService) DeployBasaltPass(ctx context.Context, userID string,
 		return nil, err
 	}
 	if err := s.deployManagedBasaltPass(ctx, userID, req); err != nil {
+		return nil, err
+	}
+	if err := s.ensureBasaltPassDNS(ctx, userID, req); err != nil {
 		return nil, err
 	}
 	if err := waitForBasaltPassHealth(ctx, req.BaseURL, req.ClientID, req.ClientSecret, req.ServiceToken); err != nil {
@@ -320,6 +337,31 @@ func (s *CredentialService) DeployBasaltPass(ctx context.Context, userID string,
 	return cred, err
 }
 
+func (s *CredentialService) ensureBasaltPassDNS(ctx context.Context, userID string, req dto.DeployBasaltPassRequest) error {
+	if req.ExposureMode != model.ExposurePublic || req.CloudflareCredentialID == 0 || strings.TrimSpace(req.CloudflareZoneID) == "" {
+		return nil
+	}
+	if s.dns == nil {
+		return fmt.Errorf("dns service is not configured")
+	}
+	host := strings.TrimSpace(req.PublicHost)
+	if host == "" {
+		host = hostFromURL(req.BaseURL)
+	}
+	if host == "" {
+		return fmt.Errorf("public_host is required to create BasaltPass DNS")
+	}
+	if err := s.RequireAccess(userID, model.CredentialTypeCloudflare, req.CloudflareCredentialID, false); err != nil {
+		return err
+	}
+	cred, token, err := s.cloudflareCredentialZoneToken(ctx, req.CloudflareCredentialID, req.CloudflareZoneID)
+	if err != nil {
+		return err
+	}
+	_, err = s.dns.CreateRecordForHost(ctx, token, cred, req.Name, host)
+	return err
+}
+
 func (s *CredentialService) createBasaltPassTenant(ctx context.Context, req dto.DeployBasaltPassRequest) (*basaltpass.CreateTenantResponse, error) {
 	tenantName := coalesce(req.TenantName, req.Name)
 	if strings.TrimSpace(req.ServiceToken) != "" {
@@ -329,6 +371,22 @@ func (s *CredentialService) createBasaltPassTenant(ctx context.Context, req dto.
 			Code:             req.TenantCode,
 			Description:      req.Description,
 			OwnerEmail:       req.OwnerEmail,
+			OwnerUsername:    req.OwnerUsername,
+			OwnerPassword:    req.OwnerPassword,
+			MaxApps:          req.MaxApps,
+			MaxUsers:         req.MaxUsers,
+			MaxTokensPerHour: req.MaxTokensPerHour,
+		})
+	}
+	if req.PlatformAdminEmail != "" && strings.TrimSpace(req.PlatformAdminPassword) != "" {
+		client := basaltpass.NewHTTPClientWithAdminCredentials(req.BaseURL, req.PlatformAdminEmail, req.PlatformAdminPassword)
+		return client.CreateTenant(ctx, &basaltpass.CreateTenantRequest{
+			Name:             tenantName,
+			Code:             req.TenantCode,
+			Description:      req.Description,
+			OwnerEmail:       req.OwnerEmail,
+			OwnerUsername:    req.OwnerUsername,
+			OwnerPassword:    req.OwnerPassword,
 			MaxApps:          req.MaxApps,
 			MaxUsers:         req.MaxUsers,
 			MaxTokensPerHour: req.MaxTokensPerHour,
@@ -343,6 +401,8 @@ func (s *CredentialService) createBasaltPassTenant(ctx context.Context, req dto.
 		Code:             req.TenantCode,
 		Description:      req.Description,
 		OwnerEmail:       req.OwnerEmail,
+		OwnerUsername:    req.OwnerUsername,
+		OwnerPassword:    req.OwnerPassword,
 		MaxApps:          req.MaxApps,
 		MaxUsers:         req.MaxUsers,
 		MaxTokensPerHour: req.MaxTokensPerHour,
@@ -396,6 +456,9 @@ func (s *CredentialService) deployManagedBasaltPass(ctx context.Context, userID 
 			"BASALTPASS_DATABASE_DSN":                 dsn,
 			"BASALTPASS_CORS_ALLOW_ORIGINS":           corsOrigins,
 			"BASALTPASS_SERVER_CORS_ALLOWED_ORIGINS":  corsOrigins,
+			"BASALTPASS_ADMIN_EMAIL":                  req.PlatformAdminEmail,
+			"BASALTPASS_ADMIN_USERNAME":               req.PlatformAdminUsername,
+			"BASALTPASS_ADMIN_PASSWORD":               req.PlatformAdminPassword,
 			"BEANCS_DATABASE_DEPENDENCY_ID":           strconv.FormatUint(uint64(dep.ID), 10),
 			"BEANCS_DATABASE_CREDENTIAL_ID":           strconv.FormatUint(uint64(cred.ID), 10),
 			"BEANCS_DATABASE_CREDENTIAL_NAME":         cred.Name,

@@ -1872,9 +1872,18 @@ function App() {
       frontend_image: deployForm.frontend_image,
       public_host: publicHost || undefined,
       exposure_mode: deployForm.exposure_mode || "public",
+      platform_admin_email: deployForm.platform_admin_email,
+      platform_admin_username: deployForm.platform_admin_username,
+      platform_admin_password: deployForm.platform_admin_password,
+      cloudflare_credential_id: deployForm.cloudflare_credential_id
+        ? Number(deployForm.cloudflare_credential_id)
+        : undefined,
+      cloudflare_zone_id: deployForm.cloudflare_zone_id || undefined,
       database_dependency_id: Number(dependencyID || 0),
       database_credential_id: Number(credentialID || 0),
       owner_email: deployForm.owner_email,
+      owner_username: deployForm.owner_username,
+      owner_password: deployForm.owner_password,
       description: deployForm.description || undefined,
       max_apps: deployForm.max_apps ? Number(deployForm.max_apps) : undefined,
       max_users: deployForm.max_users ? Number(deployForm.max_users) : undefined,
