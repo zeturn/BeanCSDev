@@ -12,11 +12,12 @@ type ProjectHealthCheck struct {
 }
 
 type ProjectVolume struct {
-	Name        string   `json:"name"`
-	Type        string   `json:"type"`
-	MountPath   string   `json:"mountPath"`
-	Size        string   `json:"size,omitempty"`
-	AccessModes []string `json:"accessModes,omitempty"`
+	Name             string   `json:"name"`
+	Type             string   `json:"type"`
+	MountPath        string   `json:"mountPath"`
+	Size             string   `json:"size,omitempty"`
+	StorageClassName string   `json:"storageClassName,omitempty"`
+	AccessModes      []string `json:"accessModes,omitempty"`
 }
 
 func (p Project) HealthCheckConfig() *ProjectHealthCheck {

@@ -47,6 +47,8 @@ spec:
           size:
             type: string
             default: 8Gi
+          storageClass:
+            type: string
       managementUI:
         type: object
         properties:

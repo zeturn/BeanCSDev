@@ -62,6 +62,7 @@ func main() {
 	k8sManager := k8s.NewManager(cfg)
 	registry := basaltpass.NewClientRegistry(db, cipher, cfg)
 	credentialSvc := service.NewCredentialService(db, cipher, cfg)
+	credentialSvc.SetK8sManager(k8sManager)
 	apiKeySvc := service.NewAPIKeyService(db)
 	registryImageSvc := service.NewContainerRegistryService(db, cipher)
 	quotaSvc := service.NewQuotaService(db)

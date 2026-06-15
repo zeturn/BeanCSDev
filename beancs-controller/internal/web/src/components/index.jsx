@@ -1145,12 +1145,30 @@ export function ServiceForm({ existing, onSubmit }) {
   );
 }
 
-export function CredentialManager({ kind, rows, onCreate, onDelete }) {
+export function CredentialManager({
+  kind,
+  rows,
+  onCreate,
+  onDelete,
+  dependencies = [],
+}) {
   const isCloudflare = kind === "cloudflare";
+  const [basaltDeployMode, setBasaltDeployMode] = useState("external");
+  const databaseDependencies = (dependencies || []).filter((dependency) =>
+    ["mysql", "postgresql"].includes(dependency.type),
+  );
   const title = isCloudflare ? "Cloudflare accounts" : "BasaltPass tenants";
   const columns = isCloudflare
     ? ["name", "account_id", "is_active"]
-    : ["name", "tenant_code", "tenant_id", "base_url", "is_active"];
+    : [
+        "name",
+        "tenant_code",
+        "tenant_id",
+        "deploy_mode",
+        "base_url",
+        "deploy_status",
+        "is_active",
+      ];
   return (
     <div className="stack">
       <section className="panel">
@@ -1177,12 +1195,78 @@ export function CredentialManager({ kind, rows, onCreate, onDelete }) {
                 placeholder="https://auth.example.com"
                 required
               />
+              <Select
+                name="deploy_mode"
+                value={basaltDeployMode}
+                onChange={(event) => setBasaltDeployMode(event.target.value)}
+              >
+                <option value="external">Existing tenant</option>
+                <option value="managed">BeanCS managed tenant</option>
+              </Select>
               <Input name="tenant_code" placeholder="Tenant code" required />
               <Input name="tenant_id" placeholder="Tenant ID, optional" />
+              {basaltDeployMode === "managed" && (
+                <>
+                  <Input
+                    name="owner_email"
+                    type="email"
+                    placeholder="Tenant owner email"
+                    required
+                  />
+                  <Input
+                    name="namespace"
+                    placeholder="Namespace, optional"
+                  />
+                  <Input
+                    name="backend_image"
+                    placeholder="ghcr.io/owner/basaltpass-backend:tag"
+                    required
+                  />
+                  <Input
+                    name="frontend_image"
+                    placeholder="ghcr.io/owner/basaltpass-frontend:tag"
+                    required
+                  />
+                  <Input
+                    name="public_host"
+                    placeholder="auth.example.com, optional"
+                  />
+                  <Select name="exposure_mode" defaultValue="public">
+                    <option value="public">Public ingress</option>
+                    <option value="private">Private ingress</option>
+                  </Select>
+                  <Select name="database_binding" required>
+                    <option value="">Database credential</option>
+                    {databaseDependencies.flatMap((dependency) =>
+                      (dependency.credentials || []).map((credential) => (
+                        <option
+                          key={`${dependency.id}:${credential.id}`}
+                          value={`${dependency.id}:${credential.id}`}
+                        >
+                          {dependency.name} / {credential.name}
+                        </option>
+                      )),
+                    )}
+                  </Select>
+                  <Input name="max_apps" type="number" placeholder="Max apps" />
+                  <Input name="max_users" type="number" placeholder="Max users" />
+                  <Input
+                    name="jwt_secret"
+                    type="password"
+                    placeholder="JWT secret, generated if empty"
+                  />
+                  <Input
+                    name="service_token"
+                    type="password"
+                    placeholder="Management service token"
+                    required
+                  />
+                </>
+              )}
               <Input
                 name="automation_token"
                 type="password"
-                placeholder="Automation token bpk_..."
+                placeholder="Tenant automation token bpk_..."
                 required
               />
             </>
@@ -1196,7 +1280,7 @@ export function CredentialManager({ kind, rows, onCreate, onDelete }) {
         <h2>
           <KeyRound size={18} /> {title}
         </h2>
-        <div className="table compact">
+        <div className={`table compact ${isCloudflare ? "" : "basaltpass-table"}`}>
           <div className="tr head">
             {columns.map((column) => (
               <span key={column}>{column.replaceAll("_", " ")}</span>

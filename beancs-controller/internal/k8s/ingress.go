@@ -3,6 +3,7 @@ package k8s
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/zeturn/beancs-controller/internal/model"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -63,7 +64,7 @@ func (m *Manager) applyIngressPort(ctx context.Context, namespace, projectName s
 		Spec: networkingv1.IngressSpec{
 			IngressClassName: &className,
 			Rules: []networkingv1.IngressRule{{
-				Host: port.Domain,
+				Host: ingressRuleHost(className, port.Domain),
 				IngressRuleValue: networkingv1.IngressRuleValue{HTTP: &networkingv1.HTTPIngressRuleValue{Paths: []networkingv1.HTTPIngressPath{{
 					Path:     "/",
 					PathType: &pathType,
@@ -75,7 +76,9 @@ func (m *Manager) applyIngressPort(ctx context.Context, namespace, projectName s
 			}},
 		},
 	}
-	if port.Exposure == model.ExposurePublic {
+	if port.Exposure == model.ExposurePrivate {
+		ing.Spec.TLS = []networkingv1.IngressTLS{{Hosts: []string{port.Domain}}}
+	} else if port.Exposure == model.ExposurePublic {
 		ing.Spec.TLS = []networkingv1.IngressTLS{{Hosts: []string{port.Domain}, SecretName: fmt.Sprintf("%s-%s-tls", projectName, port.Name)}}
 	}
 	_, err := m.Clientset.NetworkingV1().Ingresses(namespace).Create(ctx, ing, metav1.CreateOptions{})
@@ -90,4 +93,15 @@ func (m *Manager) applyIngressPort(ctx context.Context, namespace, projectName s
 		_, err = m.Clientset.NetworkingV1().Ingresses(namespace).Update(ctx, current, metav1.UpdateOptions{})
 	}
 	return err
+}
+
+func ingressRuleHost(className, host string) string {
+	if isTailscaleIngress(className) {
+		return ""
+	}
+	return strings.TrimSpace(host)
+}
+
+func isTailscaleIngress(className string) bool {
+	return strings.EqualFold(strings.TrimSpace(className), "tailscale")
 }

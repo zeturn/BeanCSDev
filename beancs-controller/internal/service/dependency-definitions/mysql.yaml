@@ -47,6 +47,8 @@ spec:
           size:
             type: string
             default: 20Gi
+          storageClass:
+            type: string
   services:
     - name: mysql
       port: 3306

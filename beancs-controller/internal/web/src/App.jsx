@@ -786,6 +786,15 @@ function App() {
       if (typeof body[key] === "string") body[key] = body[key].trim();
       if (body[key] === "") delete body[key];
     });
+    if (kind === "basaltpass" && body.database_binding) {
+      const [dependencyID, credentialID] = String(body.database_binding).split(":");
+      body.database_dependency_id = Number(dependencyID || 0);
+      body.database_credential_id = Number(credentialID || 0);
+      delete body.database_binding;
+      ["max_apps", "max_users", "max_tokens_per_hour"].forEach((key) => {
+        if (body[key]) body[key] = Number(body[key]);
+      });
+    }
     try {
       await api.post(`/credentials/${kind}/`, body);
       event.currentTarget.reset();
@@ -2629,6 +2638,7 @@ function App() {
               <CredentialManager
                 kind="basaltpass"
                 rows={credentials.basaltpass}
+                dependencies={reusableDependencies}
                 onCreate={createCredential}
                 onDelete={deleteCredential}
               />

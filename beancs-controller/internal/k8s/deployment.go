@@ -287,6 +287,9 @@ func (m *Manager) reconcilePVC(ctx context.Context, namespace, projectName, clai
 			},
 		},
 	}
+	if storageClass := strings.TrimSpace(spec.StorageClassName); storageClass != "" {
+		pvc.Spec.StorageClassName = &storageClass
+	}
 	_, err := m.Clientset.CoreV1().PersistentVolumeClaims(namespace).Create(ctx, pvc, metav1.CreateOptions{})
 	if apierrors.IsAlreadyExists(err) {
 		current, getErr := m.Clientset.CoreV1().PersistentVolumeClaims(namespace).Get(ctx, claimName, metav1.GetOptions{})

@@ -40,6 +40,8 @@ spec:
           size:
             type: string
             default: 8Gi
+          storageClass:
+            type: string
   services:
     - name: redis
       port: 6379

@@ -1466,6 +1466,13 @@ button.domain-tile {
   grid-template-columns: repeat(5, minmax(130px, 1fr));
 }
 
+.basaltpass-table .tr {
+  grid-template-columns:
+    minmax(130px, 1fr) minmax(120px, 1fr) minmax(90px, 0.7fr)
+    minmax(105px, 0.8fr) minmax(210px, 1.6fr) minmax(100px, 0.8fr)
+    minmax(80px, 0.6fr) minmax(70px, auto);
+}
+
 .tr.head {
   color: #475569;
   font-weight: 700;
