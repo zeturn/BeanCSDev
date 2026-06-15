@@ -89,6 +89,7 @@ type CreateBasaltPassCredentialRequest struct {
 type DeployBasaltPassRequest struct {
 	Name                 string `json:"name" validate:"required,max=128"`
 	BaseURL              string `json:"base_url" validate:"required,url"`
+	TenantName           string `json:"tenant_name" validate:"omitempty,max=128"`
 	TenantCode           string `json:"tenant_code" validate:"omitempty,max=128"`
 	Namespace            string `json:"namespace" validate:"omitempty,max=128"`
 	BackendImage         string `json:"backend_image" validate:"required,max=512"`

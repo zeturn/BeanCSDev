@@ -1505,6 +1505,7 @@ export function Field({
   onChange,
   type = "text",
   required = false,
+  placeholder = "",
 }) {
   return (
     <>
@@ -1513,6 +1514,7 @@ export function Field({
         type={type}
         value={value ?? ""}
         required={required}
+        placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
       />
     </>

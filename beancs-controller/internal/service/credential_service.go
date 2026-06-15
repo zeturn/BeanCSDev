@@ -223,6 +223,7 @@ func (s *CredentialService) CreateBasaltPass(ctx context.Context, userID string,
 func (s *CredentialService) DeployBasaltPass(ctx context.Context, userID string, req dto.DeployBasaltPassRequest) (*model.BasaltPassInstance, error) {
 	req.BaseURL = strings.TrimRight(strings.TrimSpace(req.BaseURL), "/")
 	req.Name = strings.TrimSpace(req.Name)
+	req.TenantName = strings.TrimSpace(req.TenantName)
 	req.TenantCode = strings.TrimSpace(req.TenantCode)
 	req.Namespace = strings.TrimSpace(req.Namespace)
 	if req.Namespace == "" {
@@ -245,6 +246,9 @@ func (s *CredentialService) DeployBasaltPass(ctx context.Context, userID string,
 	}
 	if req.TenantCode == "" {
 		req.TenantCode = harborName(req.Name)
+	}
+	if req.TenantName == "" {
+		req.TenantName = req.Name
 	}
 	if req.MaxApps <= 0 {
 		req.MaxApps = 50
@@ -289,7 +293,7 @@ func (s *CredentialService) DeployBasaltPass(ctx context.Context, userID string,
 		}
 	}
 	cred := &model.BasaltPassInstance{
-		Name:                 req.Name,
+		Name:                 req.TenantName,
 		BaseURL:              req.BaseURL,
 		TenantID:             tenantID,
 		TenantCode:           tenantCode,
@@ -317,10 +321,11 @@ func (s *CredentialService) DeployBasaltPass(ctx context.Context, userID string,
 }
 
 func (s *CredentialService) createBasaltPassTenant(ctx context.Context, req dto.DeployBasaltPassRequest) (*basaltpass.CreateTenantResponse, error) {
+	tenantName := coalesce(req.TenantName, req.Name)
 	if strings.TrimSpace(req.ServiceToken) != "" {
 		client := basaltpass.NewHTTPClientWithServiceToken(req.BaseURL, req.ClientID, req.ClientSecret, strings.TrimSpace(req.ServiceToken))
 		return client.CreateTenant(ctx, &basaltpass.CreateTenantRequest{
-			Name:             req.Name,
+			Name:             tenantName,
 			Code:             req.TenantCode,
 			Description:      req.Description,
 			OwnerEmail:       req.OwnerEmail,
@@ -334,7 +339,7 @@ func (s *CredentialService) createBasaltPassTenant(ctx context.Context, req dto.
 	}
 	client := basaltpass.NewHTTPClient(s.cfg.BPMgmtBaseURL, s.cfg.BPMgmtClientID, s.cfg.BPMgmtClientSecret)
 	return client.CreateTenant(ctx, &basaltpass.CreateTenantRequest{
-		Name:             req.Name,
+		Name:             tenantName,
 		Code:             req.TenantCode,
 		Description:      req.Description,
 		OwnerEmail:       req.OwnerEmail,

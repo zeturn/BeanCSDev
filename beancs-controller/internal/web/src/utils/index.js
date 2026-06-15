@@ -303,7 +303,13 @@ export function canContinueDeployStep(
     if (form.deploy_target === "basaltpass") {
       return Boolean(
         form.name &&
-          form.base_url &&
+          form.tenant_name &&
+          form.tenant_code &&
+          ((form.exposure_mode === "private" && form.public_host) ||
+            (form.exposure_mode !== "private" &&
+              form.cloudflare_credential_id &&
+              form.cloudflare_zone_id &&
+              form.subdomain)) &&
           form.backend_image &&
           form.frontend_image,
       );
@@ -443,6 +449,7 @@ export function defaultDeployForm() {
     backend_image: "",
     frontend_image: "",
     database_binding: "",
+    tenant_name: "",
     owner_email: "",
     tenant_code: "",
     description: "",

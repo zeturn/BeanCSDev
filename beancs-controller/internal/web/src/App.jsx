@@ -1844,14 +1844,33 @@ function App() {
     const [dependencyID, credentialID] = String(
       deployForm.database_binding || "",
     ).split(":");
+    const selectedCF =
+      (domains || []).find(
+        (domain) =>
+          String(domain.credential_id) ===
+            String(deployForm.cloudflare_credential_id) &&
+          String(domain.zone_id) === String(deployForm.cloudflare_zone_id),
+      ) ||
+      credentials.cloudflare.find(
+        (cred) =>
+          String(cred.id) === String(deployForm.cloudflare_credential_id),
+      );
+    const publicHost =
+      deployForm.exposure_mode === "public" && selectedCF?.domain
+        ? `${deployForm.subdomain}.${selectedCF.domain}`
+        : deployForm.public_host || "";
+    const baseURL = publicHost
+      ? `https://${publicHost.replace(/^https?:\/\//, "")}`
+      : deployForm.base_url;
     const body = {
       name: deployForm.name,
-      base_url: deployForm.base_url,
+      base_url: baseURL,
+      tenant_name: deployForm.tenant_name,
       tenant_code: deployForm.tenant_code,
       namespace: deployForm.namespace || undefined,
       backend_image: deployForm.backend_image,
       frontend_image: deployForm.frontend_image,
-      public_host: deployForm.public_host || undefined,
+      public_host: publicHost || undefined,
       exposure_mode: deployForm.exposure_mode || "public",
       database_dependency_id: Number(dependencyID || 0),
       database_credential_id: Number(credentialID || 0),

@@ -249,11 +249,18 @@ export default function DeployView({
       .toLowerCase()
       .includes(repoSearch.toLowerCase()),
   );
+  const isBasaltPassDeploy = form.deploy_target === "basaltpass";
   const publicHost =
     form.subdomain && selectedCloudflareDomain
       ? `${form.subdomain}.${selectedCloudflareDomain.domain}`
       : "";
-  const isBasaltPassDeploy = form.deploy_target === "basaltpass";
+  const basaltPassPublicHost =
+    isBasaltPassDeploy && form.subdomain && selectedCloudflareDomain
+      ? `${form.subdomain}.${selectedCloudflareDomain.domain}`
+      : form.public_host || "";
+  const basaltPassBaseURL = basaltPassPublicHost
+    ? `https://${basaltPassPublicHost}`
+    : form.base_url || "";
   const activeSteps = isBasaltPassDeploy ? basaltPassDeploySteps : deploySteps;
   const step = activeSteps[stepIndex] || activeSteps[0];
   const canContinue = canContinueDeployStep(
@@ -394,6 +401,7 @@ export default function DeployView({
       github_repo: repo.full_name,
       github_branch: branch,
       name: nextName,
+      tenant_name: form.tenant_name || nextName,
     };
     if (isBasaltPassDeploy) {
       const owner = (repo.full_name || "").split("/")[0]?.toLowerCase();
@@ -1049,29 +1057,21 @@ export default function DeployView({
                 setForm({
                   ...form,
                   name: slugify(v),
+                  tenant_name: form.tenant_name || v.trim(),
                   tenant_code: form.tenant_code || slugify(v),
                 })
               }
               required
             />
             <Field
-              label="Base URL"
-              value={form.base_url}
-              onChange={(v) => {
-                const value = v.trim();
-                let host = "";
-                try {
-                  host = new URL(value).hostname;
-                } catch {
-                  host = "";
-                }
+              label="Tenant name"
+              value={form.tenant_name}
+              onChange={(v) =>
                 setForm({
                   ...form,
-                  base_url: value,
-                  public_host: form.public_host || host,
-                });
-              }}
-              placeholder="https://auth.example.com"
+                  tenant_name: v.trim(),
+                })
+              }
               required
             />
             <Field
@@ -1120,18 +1120,69 @@ export default function DeployView({
               <option value="public">Traefik public ingress</option>
               <option value="private">Tailscale private ingress</option>
             </Select>
-            <Field
-              label="Public host"
-              value={form.public_host}
-              onChange={(v) =>
-                setForm({
-                  ...form,
-                  public_host: v.trim().toLowerCase(),
-                })
-              }
-              placeholder="auth.example.com"
-              required={form.exposure_mode === "public"}
-            />
+            {form.exposure_mode === "public" && (
+              <>
+                <label>Domain</label>
+                <Select
+                  value={
+                    form.cloudflare_zone_id
+                      ? `${form.cloudflare_credential_id}:${form.cloudflare_zone_id}`
+                      : ""
+                  }
+                  onChange={(event) => {
+                    const [credentialID, zoneID] = event.target.value.split(":");
+                    setForm({
+                      ...form,
+                      cloudflare_credential_id: credentialID || "",
+                      cloudflare_zone_id: zoneID || "",
+                    });
+                  }}
+                  required
+                >
+                  <option value="">Choose Cloudflare zone</option>
+                  {(domains || []).map((domain) => (
+                    <option
+                      key={`${domain.credential_id}:${domain.zone_id}`}
+                      value={`${domain.credential_id}:${domain.zone_id}`}
+                    >
+                      {domain.credential} · {domain.domain}
+                    </option>
+                  ))}
+                </Select>
+                <Field
+                  label="Subdomain"
+                  value={form.subdomain}
+                  onChange={(v) =>
+                    setForm({
+                      ...form,
+                      subdomain: slugify(v),
+                    })
+                  }
+                  placeholder="basaltpasstest"
+                  required
+                />
+                <div className="computed-host">
+                  {basaltPassPublicHost || "Choose a domain"}
+                </div>
+                <div className="computed-host">
+                  {basaltPassBaseURL || "Base URL preview"}
+                </div>
+              </>
+            )}
+            {form.exposure_mode === "private" && (
+              <Field
+                label="Private host"
+                value={form.public_host}
+                onChange={(v) =>
+                  setForm({
+                    ...form,
+                    public_host: v.trim().toLowerCase(),
+                  })
+                }
+                placeholder="basaltpass.internal.example"
+                required
+              />
+            )}
             <Field
               label="CORS origins"
               value={form.cors_allow_origins}
@@ -1435,7 +1486,7 @@ export default function DeployView({
               required
             />
             <Field
-              label="Tenant owner email"
+              label="Tenant admin email"
               type="email"
               value={form.owner_email}
               onChange={(v) =>
@@ -1481,7 +1532,7 @@ export default function DeployView({
               placeholder="500"
             />
             <Field
-              label="Management service token"
+              label="Platform management token"
               type="password"
               value={form.service_token}
               onChange={(v) =>
@@ -2052,10 +2103,10 @@ export default function DeployView({
               <b>{form.namespace || (form.name ? `bp-${form.name}` : "-")}</b>
             </span>
             <span>
-              Base URL <b>{form.base_url || "-"}</b>
+              Base URL <b>{basaltPassBaseURL || "-"}</b>
             </span>
             <span>
-              Host <b>{form.public_host || "private ingress"}</b>
+              Host <b>{basaltPassPublicHost || "private ingress"}</b>
             </span>
             <span>
               Backend image <b>{form.backend_image || "-"}</b>
@@ -2064,7 +2115,10 @@ export default function DeployView({
               Frontend image <b>{form.frontend_image || "-"}</b>
             </span>
             <span>
-              Tenant <b>{form.tenant_code || "-"}</b>
+              Tenant <b>{form.tenant_name || "-"}</b>
+            </span>
+            <span>
+              Tenant code <b>{form.tenant_code || "-"}</b>
             </span>
             <span>
               Database <b>{form.database_binding || "-"}</b>
