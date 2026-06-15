@@ -9,7 +9,6 @@ import {
   MetricCard,
   IndustrialMeter,
   AlertList,
-  Button,
 } from "../components/index";
 import {
   Activity,
@@ -47,7 +46,6 @@ import {
   Package,
   Play,
   Plus,
-  RefreshCw,
   RotateCcw,
   Rocket,
   ScrollText,
@@ -60,7 +58,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
-export default function DashboardView({ dashboard, refresh }) {
+export default function DashboardView({ dashboard }) {
   if (!dashboard) {
     return (
       <section className="panel">
@@ -75,28 +73,6 @@ export default function DashboardView({ dashboard, refresh }) {
   const events = dashboard.events || [];
   return (
     <div className="dashboard-shell">
-      <section className="dashboard-hero">
-        <div>
-          <span className="eyebrow">Cluster Operations</span>
-          <h2>{dashboard.cluster_name}</h2>
-          <p>
-            Kubernetes {dashboard.kubernetes_version || "-"}
-            {dashboard.k3s_version ? ` · K3s ${dashboard.k3s_version}` : ""}
-          </p>
-        </div>
-        <div
-          className={
-            dashboard.healthy ? "health-badge good" : "health-badge bad"
-          }
-        >
-          <span>{dashboard.status || "Unknown"}</span>
-          <b>{dashboard.healthy ? "Ready" : "NotReady"}</b>
-        </div>
-        <Button onClick={refresh}>
-          <RefreshCw size={15} /> Refresh
-        </Button>
-      </section>
-
       <section className="dashboard-kpis">
         <MetricCard
           icon={Server}

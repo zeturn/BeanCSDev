@@ -1005,6 +1005,11 @@ button.ghost:hover,
   gap: 14px;
 }
 
+.dependencies-toolbar {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .dependency-create-form,
 .dependency-credential-form {
   grid-template-columns: 180px minmax(0, 1fr);

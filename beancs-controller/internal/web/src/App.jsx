@@ -2437,7 +2437,7 @@ function App() {
         ) : (
           <>
             {view === "dashboard" && (
-              <DashboardView dashboard={dashboard} refresh={loadDashboard} />
+              <DashboardView dashboard={dashboard} />
             )}
             {view === "deploy" && (
               <DeployView
@@ -2472,7 +2472,6 @@ function App() {
                 githubCredentials={credentials.github}
                 onCreateDependency={createDependency}
                 onCreateCredential={createDependencyCredential}
-                onRefresh={loadWorkspace}
               />
             )}
             {view === "progress" && (
