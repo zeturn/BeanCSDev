@@ -165,69 +165,9 @@ func (s *CredentialService) CreateBasaltPass(ctx context.Context, userID string,
 	req.Name = strings.TrimSpace(req.Name)
 	req.TenantID = strings.TrimSpace(req.TenantID)
 	req.TenantCode = strings.TrimSpace(req.TenantCode)
-	req.DeployMode = strings.ToLower(strings.TrimSpace(req.DeployMode))
-	if req.DeployMode == "" {
-		req.DeployMode = "external"
-	}
-	if req.DeployMode != "external" && req.DeployMode != "managed" {
-		return nil, fmt.Errorf("deploy_mode must be external or managed")
-	}
-	req.Namespace = strings.TrimSpace(req.Namespace)
-	if req.Namespace == "" && req.DeployMode == "managed" {
-		req.Namespace = "bp-" + harborName(req.Name)
-	}
-	req.BackendImage = strings.TrimSpace(req.BackendImage)
-	req.FrontendImage = strings.TrimSpace(req.FrontendImage)
-	req.PublicHost = strings.TrimSpace(req.PublicHost)
-	req.ExposureMode = strings.ToLower(strings.TrimSpace(req.ExposureMode))
-	if req.ExposureMode == "" {
-		req.ExposureMode = model.ExposurePublic
-	}
-	req.JWTSecret = strings.TrimSpace(req.JWTSecret)
-	req.CORSAllowOrigins = strings.TrimSpace(req.CORSAllowOrigins)
-	req.OwnerEmail = strings.TrimSpace(req.OwnerEmail)
-	req.Description = strings.TrimSpace(req.Description)
 	req.ClientID = strings.TrimSpace(req.ClientID)
 	if err := validateExternalHTTPSURL(req.BaseURL); err != nil {
 		return nil, err
-	}
-	if err := s.validateBasaltPassDatabaseCredential(ctx, userID, req.DatabaseDependencyID, req.DatabaseCredentialID, req.DeployMode == "managed"); err != nil {
-		return nil, err
-	}
-	if req.DeployMode == "managed" {
-		if req.OwnerEmail == "" {
-			return nil, fmt.Errorf("owner_email is required for managed BasaltPass tenant creation")
-		}
-		if strings.TrimSpace(req.ServiceToken) == "" {
-			return nil, fmt.Errorf("service_token is required to create a tenant in a managed BasaltPass instance")
-		}
-		if err := s.deployManagedBasaltPass(ctx, userID, req); err != nil {
-			return nil, err
-		}
-		if err := waitForBasaltPassHealth(ctx, req.BaseURL, req.ClientID, req.ClientSecret, req.ServiceToken); err != nil {
-			return nil, err
-		}
-		if req.TenantCode == "" {
-			req.TenantCode = harborName(req.Name)
-		}
-		if req.MaxApps <= 0 {
-			req.MaxApps = 50
-		}
-		if req.MaxUsers <= 0 {
-			req.MaxUsers = 500
-		}
-		if req.MaxTokensPerHour <= 0 {
-			req.MaxTokensPerHour = 10000
-		}
-		created, err := s.createBasaltPassTenant(ctx, req)
-		if err != nil {
-			return nil, err
-		}
-		req.TenantID = coalesce(req.TenantID, fmt.Sprint(created.ID))
-		req.TenantCode = coalesce(req.TenantCode, created.Code)
-		if strings.TrimSpace(req.AutomationToken) == "" {
-			req.AutomationToken = created.Token
-		}
 	}
 	if req.TenantID == "" && req.TenantCode == "" {
 		return nil, fmt.Errorf("tenant_id or tenant_code is required")
@@ -262,11 +202,7 @@ func (s *CredentialService) CreateBasaltPass(ctx context.Context, userID string,
 		BaseURL:            req.BaseURL,
 		TenantID:           req.TenantID,
 		TenantCode:         req.TenantCode,
-		DeployMode:         req.DeployMode,
-		Namespace:          req.Namespace,
-		BackendImage:       req.BackendImage,
-		FrontendImage:      req.FrontendImage,
-		PublicHost:         req.PublicHost,
+		DeployMode:         "external",
 		DeployStatus:       "ready",
 		ClientID:           req.ClientID,
 		ClientSecretEnc:    clientSecretEnc,
@@ -274,12 +210,6 @@ func (s *CredentialService) CreateBasaltPass(ctx context.Context, userID string,
 		AutomationTokenEnc: automationTokenEnc,
 		IsActive:           true,
 		CreatedBy:          userID,
-	}
-	if req.DatabaseDependencyID != 0 {
-		cred.DatabaseDependencyID = &req.DatabaseDependencyID
-	}
-	if req.DatabaseCredentialID != 0 {
-		cred.DatabaseCredentialID = &req.DatabaseCredentialID
 	}
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(cred).Error; err != nil {
@@ -290,7 +220,103 @@ func (s *CredentialService) CreateBasaltPass(ctx context.Context, userID string,
 	return cred, err
 }
 
-func (s *CredentialService) createBasaltPassTenant(ctx context.Context, req dto.CreateBasaltPassCredentialRequest) (*basaltpass.CreateTenantResponse, error) {
+func (s *CredentialService) DeployBasaltPass(ctx context.Context, userID string, req dto.DeployBasaltPassRequest) (*model.BasaltPassInstance, error) {
+	req.BaseURL = strings.TrimRight(strings.TrimSpace(req.BaseURL), "/")
+	req.Name = strings.TrimSpace(req.Name)
+	req.TenantCode = strings.TrimSpace(req.TenantCode)
+	req.Namespace = strings.TrimSpace(req.Namespace)
+	if req.Namespace == "" {
+		req.Namespace = "bp-" + harborName(req.Name)
+	}
+	req.BackendImage = strings.TrimSpace(req.BackendImage)
+	req.FrontendImage = strings.TrimSpace(req.FrontendImage)
+	req.PublicHost = strings.TrimSpace(req.PublicHost)
+	req.ExposureMode = strings.ToLower(strings.TrimSpace(req.ExposureMode))
+	if req.ExposureMode == "" {
+		req.ExposureMode = model.ExposurePublic
+	}
+	req.JWTSecret = strings.TrimSpace(req.JWTSecret)
+	req.CORSAllowOrigins = strings.TrimSpace(req.CORSAllowOrigins)
+	req.OwnerEmail = strings.TrimSpace(req.OwnerEmail)
+	req.Description = strings.TrimSpace(req.Description)
+	req.ClientID = strings.TrimSpace(req.ClientID)
+	if err := validateExternalHTTPSURL(req.BaseURL); err != nil {
+		return nil, err
+	}
+	if req.TenantCode == "" {
+		req.TenantCode = harborName(req.Name)
+	}
+	if req.MaxApps <= 0 {
+		req.MaxApps = 50
+	}
+	if req.MaxUsers <= 0 {
+		req.MaxUsers = 500
+	}
+	if req.MaxTokensPerHour <= 0 {
+		req.MaxTokensPerHour = 10000
+	}
+	if err := s.validateBasaltPassDatabaseCredential(ctx, userID, req.DatabaseDependencyID, req.DatabaseCredentialID, true); err != nil {
+		return nil, err
+	}
+	if err := s.deployManagedBasaltPass(ctx, userID, req); err != nil {
+		return nil, err
+	}
+	if err := waitForBasaltPassHealth(ctx, req.BaseURL, req.ClientID, req.ClientSecret, req.ServiceToken); err != nil {
+		return nil, err
+	}
+	created, err := s.createBasaltPassTenant(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	tenantID := fmt.Sprint(created.ID)
+	tenantCode := coalesce(req.TenantCode, created.Code)
+	automationToken := strings.TrimSpace(req.AutomationToken)
+	if automationToken == "" {
+		automationToken = strings.TrimSpace(created.Token)
+	}
+	if automationToken == "" {
+		return nil, fmt.Errorf("BasaltPass tenant was created but no tenant automation token was returned; provide automation_token to store")
+	}
+	automationTokenEnc, err := s.cipher.EncryptString(automationToken)
+	if err != nil {
+		return nil, err
+	}
+	var clientSecretEnc []byte
+	if strings.TrimSpace(req.ClientSecret) != "" {
+		clientSecretEnc, err = s.cipher.EncryptString(req.ClientSecret)
+		if err != nil {
+			return nil, err
+		}
+	}
+	cred := &model.BasaltPassInstance{
+		Name:                 req.Name,
+		BaseURL:              req.BaseURL,
+		TenantID:             tenantID,
+		TenantCode:           tenantCode,
+		DeployMode:           "managed",
+		Namespace:            req.Namespace,
+		BackendImage:         req.BackendImage,
+		FrontendImage:        req.FrontendImage,
+		PublicHost:           req.PublicHost,
+		DatabaseDependencyID: &req.DatabaseDependencyID,
+		DatabaseCredentialID: &req.DatabaseCredentialID,
+		DeployStatus:         "ready",
+		ClientID:             req.ClientID,
+		ClientSecretEnc:      clientSecretEnc,
+		AutomationTokenEnc:   automationTokenEnc,
+		IsActive:             true,
+		CreatedBy:            userID,
+	}
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(cred).Error; err != nil {
+			return err
+		}
+		return tx.Create(&model.UserCredential{UserID: userID, CredentialType: model.CredentialTypeBasaltPass, CredentialID: cred.ID, Role: model.CredentialRoleOwner}).Error
+	})
+	return cred, err
+}
+
+func (s *CredentialService) createBasaltPassTenant(ctx context.Context, req dto.DeployBasaltPassRequest) (*basaltpass.CreateTenantResponse, error) {
 	if strings.TrimSpace(req.ServiceToken) != "" {
 		client := basaltpass.NewHTTPClientWithServiceToken(req.BaseURL, req.ClientID, req.ClientSecret, strings.TrimSpace(req.ServiceToken))
 		return client.CreateTenant(ctx, &basaltpass.CreateTenantRequest{
@@ -318,7 +344,7 @@ func (s *CredentialService) createBasaltPassTenant(ctx context.Context, req dto.
 	})
 }
 
-func (s *CredentialService) deployManagedBasaltPass(ctx context.Context, userID string, req dto.CreateBasaltPassCredentialRequest) error {
+func (s *CredentialService) deployManagedBasaltPass(ctx context.Context, userID string, req dto.DeployBasaltPassRequest) error {
 	if s.k8s == nil {
 		return fmt.Errorf("kubernetes manager is not configured")
 	}
@@ -1197,41 +1223,6 @@ func (s *CredentialService) UpdateBasaltPass(ctx context.Context, id uint, req d
 	if req.TenantCode != nil {
 		cred.TenantCode = strings.TrimSpace(*req.TenantCode)
 	}
-	if req.DeployMode != nil {
-		cred.DeployMode = strings.ToLower(strings.TrimSpace(*req.DeployMode))
-		if cred.DeployMode == "" {
-			cred.DeployMode = "external"
-		}
-		if cred.DeployMode != "external" && cred.DeployMode != "managed" {
-			return nil, fmt.Errorf("deploy_mode must be external or managed")
-		}
-	}
-	if req.Namespace != nil {
-		cred.Namespace = strings.TrimSpace(*req.Namespace)
-	}
-	if req.BackendImage != nil {
-		cred.BackendImage = strings.TrimSpace(*req.BackendImage)
-	}
-	if req.FrontendImage != nil {
-		cred.FrontendImage = strings.TrimSpace(*req.FrontendImage)
-	}
-	if req.PublicHost != nil {
-		cred.PublicHost = strings.TrimSpace(*req.PublicHost)
-	}
-	if req.DatabaseDependencyID != nil {
-		if *req.DatabaseDependencyID == 0 {
-			cred.DatabaseDependencyID = nil
-		} else {
-			cred.DatabaseDependencyID = req.DatabaseDependencyID
-		}
-	}
-	if req.DatabaseCredentialID != nil {
-		if *req.DatabaseCredentialID == 0 {
-			cred.DatabaseCredentialID = nil
-		} else {
-			cred.DatabaseCredentialID = req.DatabaseCredentialID
-		}
-	}
 	if req.AutomationToken != nil {
 		if strings.TrimSpace(*req.AutomationToken) == "" {
 			cred.AutomationTokenEnc = nil
@@ -1273,16 +1264,6 @@ func (s *CredentialService) UpdateBasaltPass(ctx context.Context, id uint, req d
 	}
 	if strings.TrimSpace(cred.TenantID) == "" && strings.TrimSpace(cred.TenantCode) == "" {
 		return nil, fmt.Errorf("tenant_id or tenant_code is required")
-	}
-	var dependencyID, credentialID uint
-	if cred.DatabaseDependencyID != nil {
-		dependencyID = *cred.DatabaseDependencyID
-	}
-	if cred.DatabaseCredentialID != nil {
-		credentialID = *cred.DatabaseCredentialID
-	}
-	if err := s.validateBasaltPassDatabaseCredential(ctx, cred.CreatedBy, dependencyID, credentialID, cred.DeployMode == "managed"); err != nil {
-		return nil, err
 	}
 	if len(cred.AutomationTokenEnc) == 0 && (strings.TrimSpace(cred.ClientID) == "" || len(cred.ClientSecretEnc) == 0) && len(cred.ServiceTokenEnc) == 0 {
 		return nil, fmt.Errorf("automation_token is required unless client_id/client_secret or service_token are provided")

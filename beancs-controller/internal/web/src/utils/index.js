@@ -279,8 +279,11 @@ export function canContinueDeployStep(
   selectedCredential,
   analysis,
 ) {
-  if (stepID === "method") return Boolean(form.deploy_source);
+  if (stepID === "method") return Boolean(form.deploy_target || form.deploy_source);
   if (stepID === "source") {
+    if (form.deploy_target === "basaltpass") {
+      return Boolean(selectedCredential && form.github_repo);
+    }
     if (form.deploy_source === "gitops") {
       if (form.repo_type === "git-url") return false;
       return Boolean(selectedCredential && form.github_repo);
@@ -292,10 +295,19 @@ export function canContinueDeployStep(
   if (stepID === "update")
     return form.deploy_source === "registry" || Boolean(form.update_mode);
   if (stepID === "check")
+    if (form.deploy_target === "basaltpass") return true;
     return form.application_type === "monorepo"
       ? Boolean(analysis?.is_monorepo && analysis?.deployable !== false)
       : Boolean(analysis?.deployable);
   if (stepID === "params") {
+    if (form.deploy_target === "basaltpass") {
+      return Boolean(
+        form.name &&
+          form.base_url &&
+          form.backend_image &&
+          form.frontend_image,
+      );
+    }
     if (form.application_type === "monorepo") {
       return Boolean(
         form.name &&
@@ -311,8 +323,20 @@ export function canContinueDeployStep(
       form.name && Number(form.port || 0) > 0 && Number(form.replicas || 0) > 0,
     );
   }
-  if (stepID === "dependencies") return true;
+  if (stepID === "dependencies") {
+    if (form.deploy_target === "basaltpass") {
+      return Boolean(
+        form.database_binding &&
+          form.owner_email &&
+          form.service_token,
+      );
+    }
+    return true;
+  }
   if (stepID === "domain") {
+    if (form.deploy_target === "basaltpass") {
+      return form.exposure_mode === "private" || Boolean(form.public_host);
+    }
     if (form.application_type === "monorepo") {
       const publicComponents = (form.components || []).some(
         (component) =>
@@ -382,6 +406,7 @@ export function podContainers(pod) {
 
 export function defaultDeployForm() {
   return {
+    deploy_target: "project",
     deploy_source: "gitops",
     build_source: "github",
     application_type: "single",
@@ -413,6 +438,21 @@ export function defaultDeployForm() {
     env_entries: [],
     components: [],
     dependencies: [],
+    base_url: "",
+    public_host: "",
+    backend_image: "",
+    frontend_image: "",
+    database_binding: "",
+    owner_email: "",
+    tenant_code: "",
+    description: "",
+    max_apps: "",
+    max_users: "",
+    max_tokens_per_hour: "",
+    service_token: "",
+    automation_token: "",
+    jwt_secret: "",
+    cors_allow_origins: "",
   };
 }
 

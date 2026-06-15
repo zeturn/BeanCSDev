@@ -75,6 +75,7 @@ func (h *CredentialHandler) RegisterGitHubAppCallback(r fiber.Router) {
 
 func (h *CredentialHandler) registerBasaltPass(r fiber.Router) {
 	r.Post("/", middleware.RequireAPIScope(service.ScopeCredentialsWrite), h.createBasaltPass)
+	r.Post("/deployments", middleware.RequireAPIScope(service.ScopeCredentialsWrite), h.deployBasaltPass)
 	r.Get("/", middleware.RequireAPIScope(service.ScopeCredentialsRead), h.listBasaltPass)
 	r.Get("/:id", middleware.RequireAPIScope(service.ScopeCredentialsRead), h.getBasaltPass)
 	r.Patch("/:id", middleware.RequireAPIScope(service.ScopeCredentialsWrite), h.updateBasaltPass)
@@ -161,6 +162,18 @@ func (h *CredentialHandler) createBasaltPass(c *fiber.Ctx) error {
 		return err
 	}
 	out, err := h.service.CreateBasaltPass(c.UserContext(), middleware.UserID(c), req)
+	if err != nil {
+		return fail(c, 400, err)
+	}
+	return c.Status(201).JSON(out)
+}
+
+func (h *CredentialHandler) deployBasaltPass(c *fiber.Ctx) error {
+	var req dto.DeployBasaltPassRequest
+	if err := h.parseAndValidate(c, &req); err != nil {
+		return err
+	}
+	out, err := h.service.DeployBasaltPass(c.UserContext(), middleware.UserID(c), req)
 	if err != nil {
 		return fail(c, 400, err)
 	}

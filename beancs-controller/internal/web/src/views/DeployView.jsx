@@ -81,8 +81,8 @@ import {
 const deploySteps = [
   {
     id: "method",
-    label: "Source type",
-    title: "Choose deployment source",
+    label: "Target",
+    title: "Choose deployment target",
   },
   {
     id: "source",
@@ -133,6 +133,47 @@ const deploySteps = [
     id: "confirm",
     label: "Confirm",
     title: "Confirm and build",
+  },
+];
+const basaltPassDeploySteps = [
+  {
+    id: "method",
+    label: "Target",
+    title: "Choose deployment target",
+  },
+  {
+    id: "source",
+    label: "Repository",
+    title: "Choose BasaltPass repository",
+  },
+  {
+    id: "params",
+    label: "Runtime",
+    title: "Configure BasaltPass runtime",
+  },
+  {
+    id: "dependencies",
+    label: "Tenant",
+    title: "Create tenant and credentials",
+  },
+  {
+    id: "confirm",
+    label: "Confirm",
+    title: "Confirm BasaltPass deployment",
+  },
+];
+const deployTargetOptions = [
+  {
+    id: "project",
+    label: "Application",
+    icon: Rocket,
+    description: "Deploy an application service or monorepo workload.",
+  },
+  {
+    id: "basaltpass",
+    label: "BasaltPass",
+    icon: ShieldCheck,
+    description: "Deploy a BasaltPass platform and store the new tenant.",
   },
 ];
 const deploySourceOptions = [
@@ -186,6 +227,7 @@ export default function DeployView({
   dependencyDefinitions,
   reusableDependencies,
   createTrackedImageFromDeploy,
+  deployBasaltPass,
   onConnectGitHub,
   reposLoading,
 }) {
@@ -211,7 +253,9 @@ export default function DeployView({
     form.subdomain && selectedCloudflareDomain
       ? `${form.subdomain}.${selectedCloudflareDomain.domain}`
       : "";
-  const step = deploySteps[stepIndex];
+  const isBasaltPassDeploy = form.deploy_target === "basaltpass";
+  const activeSteps = isBasaltPassDeploy ? basaltPassDeploySteps : deploySteps;
+  const step = activeSteps[stepIndex] || activeSteps[0];
   const canContinue = canContinueDeployStep(
     step.id,
     form,
@@ -232,6 +276,27 @@ export default function DeployView({
       image_choice: deploySource === "registry" ? "existing" : "",
       github_branch: form.github_branch || "main",
       port: form.port || 8080,
+    });
+    setStepIndex(1);
+  };
+  const setDeployTarget = (deployTarget) => {
+    setAnalysis(null);
+    if (deployTarget === "basaltpass") {
+      setForm({
+        ...defaultDeployForm(),
+        deploy_target: "basaltpass",
+        deploy_source: "gitops",
+        build_source: "github",
+        repo_type: "github",
+        application_type: "single",
+        exposure_mode: "public",
+      });
+      setStepIndex(1);
+      return;
+    }
+    setForm({
+      ...defaultDeployForm(),
+      deploy_target: "project",
     });
     setStepIndex(1);
   };
@@ -314,13 +379,36 @@ export default function DeployView({
     runInstallCheck();
   }, [step.id]);
   const next = async () => {
-    if (step.id === "check") {
+    if (step.id === "check" && !isBasaltPassDeploy) {
       const result = await runInstallCheck();
-      if (result && stepIndex < deploySteps.length - 1)
+      if (result && stepIndex < activeSteps.length - 1)
         setStepIndex(stepIndex + 1);
       return;
     }
-    if (stepIndex < deploySteps.length - 1) setStepIndex(stepIndex + 1);
+    if (stepIndex < activeSteps.length - 1) setStepIndex(stepIndex + 1);
+  };
+  const selectRepository = (repo, repoName, branch) => {
+    const nextName = form.name || slugify(repoName);
+    const nextForm = {
+      ...form,
+      github_repo: repo.full_name,
+      github_branch: branch,
+      name: nextName,
+    };
+    if (isBasaltPassDeploy) {
+      const owner = (repo.full_name || "").split("/")[0]?.toLowerCase();
+      setForm({
+        ...nextForm,
+        backend_image:
+          form.backend_image || (owner ? `ghcr.io/${owner}/basaltpass-backend:latest` : ""),
+        frontend_image:
+          form.frontend_image || (owner ? `ghcr.io/${owner}/basaltpass-frontend:latest` : ""),
+        tenant_code: form.tenant_code || slugify(nextName),
+      });
+      return;
+    }
+    setForm(nextForm);
+    analyzeRepo(repo.full_name, branch);
   };
   const back = () => setStepIndex(Math.max(0, stepIndex - 1));
   const updateComponent = (index, patch) => {
@@ -387,18 +475,18 @@ export default function DeployView({
         <div className="wizard-progress-head">
           <span>{step.label}</span>
           <b>
-            {stepIndex + 1} / {deploySteps.length}
+            {stepIndex + 1} / {activeSteps.length}
           </b>
         </div>
         <div className="wizard-progress-track">
           <span
             style={{
-              width: `${((stepIndex + 1) / deploySteps.length) * 100}%`,
+              width: `${((stepIndex + 1) / activeSteps.length) * 100}%`,
             }}
           />
         </div>
         <div className="wizard-step-labels">
-          {deploySteps.map((item, index) => (
+          {activeSteps.map((item, index) => (
             <span
               key={item.id}
               className={
@@ -410,24 +498,27 @@ export default function DeployView({
           ))}
         </div>
       </section>
-      <form className="panel deploy-form wizard-panel" onSubmit={deployProject}>
+      <form
+        className="panel deploy-form wizard-panel"
+        onSubmit={isBasaltPassDeploy ? deployBasaltPass : deployProject}
+      >
         <h2>
           <Rocket size={18} /> {step.title}
         </h2>
         {step.id === "method" && (
           <div className="method-grid">
-            {deploySourceOptions.map((method) => {
+            {deployTargetOptions.map((method) => {
               const Icon = method.icon;
               return (
                 <Button
                   key={method.id}
                   type="button"
                   className={
-                    form.deploy_source === method.id
+                    (form.deploy_target || "project") === method.id
                       ? "method-card active"
                       : "method-card"
                   }
-                  onClick={() => setDeploySource(method.id)}
+                  onClick={() => setDeployTarget(method.id)}
                 >
                   <Icon size={22} />
                   <b>{method.label}</b>
@@ -439,46 +530,76 @@ export default function DeployView({
         )}
         {step.id === "source" && (
           <div className="form-grid">
+            {!isBasaltPassDeploy && (
+              <>
+                <label>Deployment source</label>
+                <div className="method-grid two-up">
+                  {deploySourceOptions.map((method) => {
+                    const Icon = method.icon;
+                    return (
+                      <Button
+                        key={method.id}
+                        type="button"
+                        className={
+                          form.deploy_source === method.id
+                            ? "method-card active"
+                            : "method-card"
+                        }
+                        onClick={() => setDeploySource(method.id)}
+                      >
+                        <Icon size={22} />
+                        <b>{method.label}</b>
+                        <span>{method.description}</span>
+                      </Button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
             {form.deploy_source === "gitops" && (
               <>
-                <label>Repository type</label>
-                <div className="segmented-control">
-                  <Button
-                    type="button"
-                    className={form.repo_type === "github" ? "active" : ""}
-                    onClick={() => setRepoType("github")}
-                  >
-                    <Github size={15} /> GitHub
-                  </Button>
-                  <Button
-                    type="button"
-                    className={form.repo_type === "git-url" ? "active" : ""}
-                    onClick={() => setRepoType("git-url")}
-                  >
-                    <GitBranch size={15} /> Git link
-                  </Button>
-                </div>
-                <label>Repository layout</label>
-                <div className="segmented-control">
-                  <Button
-                    type="button"
-                    className={
-                      form.application_type !== "monorepo" ? "active" : ""
-                    }
-                    onClick={() => setApplicationType("single")}
-                  >
-                    <Box size={15} /> Single service
-                  </Button>
-                  <Button
-                    type="button"
-                    className={
-                      form.application_type === "monorepo" ? "active" : ""
-                    }
-                    onClick={() => setApplicationType("monorepo")}
-                  >
-                    <Layers3 size={15} /> Monorepo
-                  </Button>
-                </div>
+                {!isBasaltPassDeploy && (
+                  <>
+                    <label>Repository type</label>
+                    <div className="segmented-control">
+                      <Button
+                        type="button"
+                        className={form.repo_type === "github" ? "active" : ""}
+                        onClick={() => setRepoType("github")}
+                      >
+                        <Github size={15} /> GitHub
+                      </Button>
+                      <Button
+                        type="button"
+                        className={form.repo_type === "git-url" ? "active" : ""}
+                        onClick={() => setRepoType("git-url")}
+                      >
+                        <GitBranch size={15} /> Git link
+                      </Button>
+                    </div>
+                    <label>Repository layout</label>
+                    <div className="segmented-control">
+                      <Button
+                        type="button"
+                        className={
+                          form.application_type !== "monorepo" ? "active" : ""
+                        }
+                        onClick={() => setApplicationType("single")}
+                      >
+                        <Box size={15} /> Single service
+                      </Button>
+                      <Button
+                        type="button"
+                        className={
+                          form.application_type === "monorepo" ? "active" : ""
+                        }
+                        onClick={() => setApplicationType("monorepo")}
+                      >
+                        <Layers3 size={15} /> Monorepo
+                      </Button>
+                    </div>
+                  </>
+                )}
                 {form.repo_type === "github" && (
                   <>
                     <div className="import-repo-panel">
@@ -595,13 +716,7 @@ export default function DeployView({
                                 <Button
                                   type="button"
                                   onClick={() => {
-                                    setForm({
-                                      ...form,
-                                      github_repo: repo.full_name,
-                                      github_branch: branch,
-                                      name: form.name || slugify(repoName),
-                                    });
-                                    analyzeRepo(repo.full_name, branch);
+                                    selectRepository(repo, repoName, branch);
                                   }}
                                 >
                                   {isSelected ? "Selected" : "Import"}
@@ -925,7 +1040,124 @@ export default function DeployView({
             )}
           </div>
         )}
-        {step.id === "params" && (
+        {step.id === "params" && isBasaltPassDeploy && (
+          <div className="form-grid">
+            <Field
+              label="Deployment name"
+              value={form.name}
+              onChange={(v) =>
+                setForm({
+                  ...form,
+                  name: slugify(v),
+                  tenant_code: form.tenant_code || slugify(v),
+                })
+              }
+              required
+            />
+            <Field
+              label="Base URL"
+              value={form.base_url}
+              onChange={(v) => {
+                const value = v.trim();
+                let host = "";
+                try {
+                  host = new URL(value).hostname;
+                } catch {
+                  host = "";
+                }
+                setForm({
+                  ...form,
+                  base_url: value,
+                  public_host: form.public_host || host,
+                });
+              }}
+              placeholder="https://auth.example.com"
+              required
+            />
+            <Field
+              label="Namespace"
+              value={form.namespace}
+              onChange={(v) =>
+                setForm({
+                  ...form,
+                  namespace: slugify(v),
+                })
+              }
+              placeholder={form.name ? `bp-${form.name}` : "bp-basaltpass"}
+            />
+            <Field
+              label="Backend image"
+              value={form.backend_image}
+              onChange={(v) =>
+                setForm({
+                  ...form,
+                  backend_image: v.trim(),
+                })
+              }
+              required
+            />
+            <Field
+              label="Frontend image"
+              value={form.frontend_image}
+              onChange={(v) =>
+                setForm({
+                  ...form,
+                  frontend_image: v.trim(),
+                })
+              }
+              required
+            />
+            <label>Traffic</label>
+            <Select
+              value={form.exposure_mode}
+              onChange={(event) =>
+                setForm({
+                  ...form,
+                  exposure_mode: event.target.value,
+                })
+              }
+            >
+              <option value="public">Traefik public ingress</option>
+              <option value="private">Tailscale private ingress</option>
+            </Select>
+            <Field
+              label="Public host"
+              value={form.public_host}
+              onChange={(v) =>
+                setForm({
+                  ...form,
+                  public_host: v.trim().toLowerCase(),
+                })
+              }
+              placeholder="auth.example.com"
+              required={form.exposure_mode === "public"}
+            />
+            <Field
+              label="CORS origins"
+              value={form.cors_allow_origins}
+              onChange={(v) =>
+                setForm({
+                  ...form,
+                  cors_allow_origins: v.trim(),
+                })
+              }
+              placeholder="Defaults to Base URL"
+            />
+            <Field
+              label="JWT secret"
+              type="password"
+              value={form.jwt_secret}
+              onChange={(v) =>
+                setForm({
+                  ...form,
+                  jwt_secret: v,
+                })
+              }
+              placeholder="Generated if empty"
+            />
+          </div>
+        )}
+        {step.id === "params" && !isBasaltPassDeploy && (
           <div className="form-grid">
             <Field
               label={
@@ -1162,7 +1394,118 @@ export default function DeployView({
             )}
           </div>
         )}
-        {step.id === "dependencies" && (
+        {step.id === "dependencies" && isBasaltPassDeploy && (
+          <div className="form-grid">
+            <label>Database credential</label>
+            <Select
+              value={form.database_binding}
+              onChange={(event) =>
+                setForm({
+                  ...form,
+                  database_binding: event.target.value,
+                })
+              }
+              required
+            >
+              <option value="">Choose MySQL or PostgreSQL credential</option>
+              {(reusableDependencies || [])
+                .filter((dependency) =>
+                  ["mysql", "postgresql"].includes(dependency.type),
+                )
+                .flatMap((dependency) =>
+                  (dependency.credentials || []).map((credential) => (
+                    <option
+                      key={`${dependency.id}:${credential.id}`}
+                      value={`${dependency.id}:${credential.id}`}
+                    >
+                      {dependency.name} / {credential.name}
+                    </option>
+                  )),
+                )}
+            </Select>
+            <Field
+              label="Tenant code"
+              value={form.tenant_code}
+              onChange={(v) =>
+                setForm({
+                  ...form,
+                  tenant_code: slugify(v),
+                })
+              }
+              required
+            />
+            <Field
+              label="Tenant owner email"
+              type="email"
+              value={form.owner_email}
+              onChange={(v) =>
+                setForm({
+                  ...form,
+                  owner_email: v.trim(),
+                })
+              }
+              required
+            />
+            <Field
+              label="Description"
+              value={form.description}
+              onChange={(v) =>
+                setForm({
+                  ...form,
+                  description: v,
+                })
+              }
+            />
+            <Field
+              label="Max apps"
+              type="number"
+              value={form.max_apps}
+              onChange={(v) =>
+                setForm({
+                  ...form,
+                  max_apps: v,
+                })
+              }
+              placeholder="50"
+            />
+            <Field
+              label="Max users"
+              type="number"
+              value={form.max_users}
+              onChange={(v) =>
+                setForm({
+                  ...form,
+                  max_users: v,
+                })
+              }
+              placeholder="500"
+            />
+            <Field
+              label="Management service token"
+              type="password"
+              value={form.service_token}
+              onChange={(v) =>
+                setForm({
+                  ...form,
+                  service_token: v,
+                })
+              }
+              required
+            />
+            <Field
+              label="Tenant automation token fallback"
+              type="password"
+              value={form.automation_token}
+              onChange={(v) =>
+                setForm({
+                  ...form,
+                  automation_token: v,
+                })
+              }
+            />
+          </div>
+        )}
+        {step.id === "dependencies" && !isBasaltPassDeploy && (
           <div className="form-grid">
             {form.application_type !== "monorepo" && (
               <p className="muted">
@@ -1690,7 +2033,45 @@ export default function DeployView({
             title="Runtime environment"
           />
         )}
-        {step.id === "confirm" && (
+        {step.id === "confirm" && isBasaltPassDeploy && (
+          <div className="detail-list">
+            <span>
+              Target <b>BasaltPass</b>
+            </span>
+            <span>
+              Source{" "}
+              <b>
+                {form.github_repo || "-"} @ {form.github_branch || "main"}
+              </b>
+            </span>
+            <span>
+              Name <b>{form.name || "-"}</b>
+            </span>
+            <span>
+              Namespace{" "}
+              <b>{form.namespace || (form.name ? `bp-${form.name}` : "-")}</b>
+            </span>
+            <span>
+              Base URL <b>{form.base_url || "-"}</b>
+            </span>
+            <span>
+              Host <b>{form.public_host || "private ingress"}</b>
+            </span>
+            <span>
+              Backend image <b>{form.backend_image || "-"}</b>
+            </span>
+            <span>
+              Frontend image <b>{form.frontend_image || "-"}</b>
+            </span>
+            <span>
+              Tenant <b>{form.tenant_code || "-"}</b>
+            </span>
+            <span>
+              Database <b>{form.database_binding || "-"}</b>
+            </span>
+          </div>
+        )}
+        {step.id === "confirm" && !isBasaltPassDeploy && (
           <div className="detail-list">
             <span>
               Install method <b>{sourceLabel(form.build_source)}</b>
@@ -1768,7 +2149,14 @@ export default function DeployView({
             {step.id === "confirm" ? (
               <Button
                 disabled={
-                  form.application_type === "monorepo"
+                  isBasaltPassDeploy
+                    ? !canContinueDeployStep(
+                        "dependencies",
+                        form,
+                        selectedCredential,
+                        analysis,
+                      )
+                    : form.application_type === "monorepo"
                     ? !(analysis?.is_monorepo && analysis?.deployable !== false)
                     : !analysis?.deployable
                 }
