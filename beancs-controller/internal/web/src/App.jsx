@@ -72,6 +72,7 @@ import {
   LineChart,
   ListRestart,
   LoaderCircle,
+  LogOut,
   Lock,
   Menu,
   MemoryStick,
@@ -2381,11 +2382,13 @@ function App() {
           >
             <MoreHorizontal size={16} />
           </Button>
-          <Button type="button" aria-label="Notifications" variant="icon">
-            <Bell size={16} />
-          </Button>
-          <Button className="signout-button" onClick={logout}>
-            Sign out
+          <Button
+            type="button"
+            aria-label="Sign out"
+            variant="icon"
+            onClick={logout}
+          >
+            <LogOut size={16} />
           </Button>
         </div>
       </aside>

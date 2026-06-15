@@ -1525,6 +1525,18 @@ button.domain-tile {
   gap: 6px;
 }
 
+.pagination-bar {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.pagination-bar .row-actions {
+  align-items: center;
+}
+
 .repo-toolbar {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) auto;

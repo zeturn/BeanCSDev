@@ -8,6 +8,7 @@ import {
   SimpleTable,
   ServiceForm,
   Button,
+  Modal,
 } from "../components/index";
 import {
   Activity,
@@ -70,6 +71,9 @@ export default function NetworkingView({
   onDetail,
 }) {
   const [activeTab, setActiveTab] = useState("services");
+  const [serviceCreateOpen, setServiceCreateOpen] = useState(false);
+  const [ingressCreateOpen, setIngressCreateOpen] = useState(false);
+  const [policyCreateOpen, setPolicyCreateOpen] = useState(false);
   const data = network || {
     services: [],
     ingresses: [],
@@ -210,10 +214,14 @@ export default function NetworkingView({
 
         {activeTab === "services" && (
           <div className="network-tab-panel">
-            <h2>
-              <Database size={18} /> Service, LoadBalancer and NodePort
-            </h2>
-            <ServiceForm onSubmit={(event) => onSaveService(event)} />
+            <div className="panel-heading-inline">
+              <h2>
+                <Database size={18} /> Service, LoadBalancer and NodePort
+              </h2>
+              <Button type="button" onClick={() => setServiceCreateOpen(true)}>
+                <Plus size={15} /> Create service
+              </Button>
+            </div>
             <SimpleTable
               rows={data.services}
               columns={[
@@ -247,10 +255,14 @@ export default function NetworkingView({
 
         {activeTab === "ingress" && (
           <div className="network-tab-panel">
-            <h2>
-              <Network size={18} /> Ingress, domain and TLS binding
-            </h2>
-            <IngressForm onSubmit={(event) => onSaveIngress(event)} />
+            <div className="panel-heading-inline">
+              <h2>
+                <Network size={18} /> Ingress, domain and TLS binding
+              </h2>
+              <Button type="button" onClick={() => setIngressCreateOpen(true)}>
+                <Plus size={15} /> Create ingress
+              </Button>
+            </div>
             <SimpleTable
               rows={data.ingresses}
               columns={[
@@ -285,12 +297,14 @@ export default function NetworkingView({
 
         {activeTab === "policies" && (
           <div className="network-tab-panel">
-            <h2>
-              <Lock size={18} /> NetworkPolicy
-            </h2>
-            <NetworkPolicyForm
-              onSubmit={(event) => onSaveNetworkPolicy(event)}
-            />
+            <div className="panel-heading-inline">
+              <h2>
+                <Lock size={18} /> NetworkPolicy
+              </h2>
+              <Button type="button" onClick={() => setPolicyCreateOpen(true)}>
+                <Plus size={15} /> Create policy
+              </Button>
+            </div>
             <SimpleTable
               rows={data.network_policies}
               columns={[
@@ -382,6 +396,66 @@ export default function NetworkingView({
           </div>
         )}
       </section>
+      {serviceCreateOpen && (
+        <Modal
+          title="Create service"
+          subtitle="创建入口独立到弹窗，避免与列表混在一起。"
+          className="wide-modal"
+          onClose={() => setServiceCreateOpen(false)}
+        >
+          <ServiceForm
+            onSubmit={async (event) => {
+              await onSaveService(event);
+              setServiceCreateOpen(false);
+            }}
+          />
+          <div className="modal-actions">
+            <Button type="button" onClick={() => setServiceCreateOpen(false)}>
+              Close
+            </Button>
+          </div>
+        </Modal>
+      )}
+      {ingressCreateOpen && (
+        <Modal
+          title="Create ingress"
+          subtitle="创建入口独立到弹窗，保持列表简洁。"
+          className="wide-modal"
+          onClose={() => setIngressCreateOpen(false)}
+        >
+          <IngressForm
+            onSubmit={async (event) => {
+              await onSaveIngress(event);
+              setIngressCreateOpen(false);
+            }}
+          />
+          <div className="modal-actions">
+            <Button type="button" onClick={() => setIngressCreateOpen(false)}>
+              Close
+            </Button>
+          </div>
+        </Modal>
+      )}
+      {policyCreateOpen && (
+        <Modal
+          title="Create network policy"
+          subtitle="创建入口独立到弹窗，降低单页复杂度。"
+          className="wide-modal"
+          onClose={() => setPolicyCreateOpen(false)}
+        >
+          <NetworkPolicyForm
+            onSubmit={async (event) => {
+              await onSaveNetworkPolicy(event);
+              setPolicyCreateOpen(false);
+            }}
+          />
+          <div className="modal-actions">
+            <Button type="button" onClick={() => setPolicyCreateOpen(false)}>
+              Close
+            </Button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

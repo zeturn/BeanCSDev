@@ -4,6 +4,8 @@ import { formatTime } from "../utils/index";
 import {
   ExpandableCell,
   Button,
+  Modal,
+  PaginationBar,
   Select,
   Input,
   Checkbox,
@@ -74,6 +76,22 @@ export default function ContainerRegistriesView({
     [presets],
   );
   const [previewKind, setPreviewKind] = useState("ghcr");
+  const [registryCreateOpen, setRegistryCreateOpen] = useState(false);
+  const [imageCreateOpen, setImageCreateOpen] = useState(false);
+  const [registryPage, setRegistryPage] = useState(1);
+  const [imagePage, setImagePage] = useState(1);
+  const registrySize = 10;
+  const imageSize = 8;
+  const pagedRegistries = (registries || []).slice(
+    (registryPage - 1) * registrySize,
+    registryPage * registrySize,
+  );
+  const pagedImages = (images || []).slice(
+    (imagePage - 1) * imageSize,
+    imagePage * imageSize,
+  );
+  useEffect(() => setRegistryPage(1), [(registries || []).length]);
+  useEffect(() => setImagePage(1), [(images || []).length]);
   return (
     <div className="stack registry-page">
       <section className="panel action-panel">
@@ -91,71 +109,21 @@ export default function ContainerRegistriesView({
         </Button>
       </section>
 
-      <section className="panel">
-        <h2>
-          <Plus size={18} /> 添加镜像源
-        </h2>
-        <form className="form-grid registry-form" onSubmit={onAddRegistry}>
-          <label>
-            类型
-            <Select
-              name="kind"
-              value={previewKind}
-              onChange={(e) => setPreviewKind(e.target.value)}
-            >
-              {(presets || []).map((p) => (
-                <option key={p.kind} value={p.kind}>
-                  {p.label}
-                </option>
-              ))}
-            </Select>
-          </label>
-          <label>
-            显示名称（可选）
-            <Input
-              name="name"
-              placeholder={`例如 ${presetByKind[previewKind]?.label || ""}`}
-            />
-          </label>
-          <label className="span-2">
-            镜像源地址
-            <Input
-              name="host"
-              required
-              placeholder={
-                presetByKind[previewKind]?.example_host ||
-                "registry.example.com"
-              }
-            />
-          </label>
-          <label>
-            用户名（可选）
-            <Input
-              name="username"
-              autoComplete="off"
-              placeholder="私有仓库 / PAT 用户名"
-            />
-          </label>
-          <label>
-            密码或 Token（可选）
-            <Input
-              name="password"
-              type="password"
-              autoComplete="new-password"
-              placeholder="不会明文存储"
-            />
-          </label>
-          <label className="checkbox-row span-2">
-            <Checkbox name="insecure_tls" type="checkbox" />
-            跳过 TLS 校验（仅可信内网）
-          </label>
-          {presetByKind[previewKind]?.hint && (
-            <p className="muted span-2">{presetByKind[previewKind].hint}</p>
-          )}
-          <Button type="submit" variant="primary">
-            <Plus size={15} /> 保存镜像源
+      <section className="panel action-panel">
+        <div>
+          <h2>
+            <Database size={18} /> 管理镜像源与镜像跟踪
+          </h2>
+          <p className="muted">创建入口已分离到弹窗，列表更轻量。</p>
+        </div>
+        <div className="row-actions">
+          <Button type="button" variant="primary" onClick={() => setRegistryCreateOpen(true)}>
+            <Plus size={15} /> 添加镜像源
           </Button>
-        </form>
+          <Button type="button" onClick={() => setImageCreateOpen(true)}>
+            <Plus size={15} /> 添加镜像跟踪
+          </Button>
+        </div>
       </section>
 
       <section className="panel">
@@ -170,7 +138,7 @@ export default function ContainerRegistriesView({
             <span>鉴权</span>
             <span />
           </div>
-          {(registries || []).map((r) => (
+          {pagedRegistries.map((r) => (
             <div className="tr" key={r.id}>
               <ExpandableCell className="strong" value={r.name} max={30} />
               <ExpandableCell value={r.kind} max={24} />
@@ -191,6 +159,13 @@ export default function ContainerRegistriesView({
             <div className="empty">尚未添加镜像源。</div>
           )}
         </div>
+        <PaginationBar
+          page={registryPage}
+          pageSize={registrySize}
+          total={(registries || []).length}
+          onPageChange={setRegistryPage}
+          label="registries"
+        />
       </section>
 
       <section className="panel">
@@ -213,28 +188,7 @@ export default function ContainerRegistriesView({
           <span className="mono">owner/repo</span>
           ）。保存后会立即拉取标签；页面每 2 分钟刷新本地缓存列表。
         </p>
-        <form className="form-grid registry-form" onSubmit={onAddImage}>
-          <label>
-            镜像源
-            <Select name="registry_id" required>
-              <option value="">选择...</option>
-              {(registries || []).map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.name} ({r.kind})
-                </option>
-              ))}
-            </Select>
-          </label>
-          <label className="span-2">
-            仓库路径（repository）
-            <Input name="repository" required placeholder="namespace/name" />
-          </label>
-          <Button type="submit" variant="primary">
-            <Plus size={15} /> 添加并同步标签
-          </Button>
-        </form>
-
-        {(images || []).map((im) => (
+        {pagedImages.map((im) => (
           <div className="registry-image-card" key={im.id}>
             <div className="registry-image-head">
               <div>
@@ -277,7 +231,133 @@ export default function ContainerRegistriesView({
         {(images || []).length === 0 && (
           <div className="empty">尚未添加镜像仓库跟踪。</div>
         )}
+        <PaginationBar
+          page={imagePage}
+          pageSize={imageSize}
+          total={(images || []).length}
+          onPageChange={setImagePage}
+          label="tracked images"
+        />
       </section>
+      {registryCreateOpen && (
+        <Modal
+          title="添加镜像源"
+          subtitle="创建表单迁移到弹窗，减少主页面长度。"
+          onClose={() => setRegistryCreateOpen(false)}
+        >
+          <form
+            className="form-grid registry-form"
+            onSubmit={async (event) => {
+              await onAddRegistry(event);
+              setRegistryCreateOpen(false);
+            }}
+          >
+            <label>
+              类型
+              <Select
+                name="kind"
+                value={previewKind}
+                onChange={(e) => setPreviewKind(e.target.value)}
+              >
+                {(presets || []).map((p) => (
+                  <option key={p.kind} value={p.kind}>
+                    {p.label}
+                  </option>
+                ))}
+              </Select>
+            </label>
+            <label>
+              显示名称（可选）
+              <Input
+                name="name"
+                placeholder={`例如 ${presetByKind[previewKind]?.label || ""}`}
+              />
+            </label>
+            <label className="span-2">
+              镜像源地址
+              <Input
+                name="host"
+                required
+                placeholder={
+                  presetByKind[previewKind]?.example_host ||
+                  "registry.example.com"
+                }
+              />
+            </label>
+            <label>
+              用户名（可选）
+              <Input
+                name="username"
+                autoComplete="off"
+                placeholder="私有仓库 / PAT 用户名"
+              />
+            </label>
+            <label>
+              密码或 Token（可选）
+              <Input
+                name="password"
+                type="password"
+                autoComplete="new-password"
+                placeholder="不会明文存储"
+              />
+            </label>
+            <label className="checkbox-row span-2">
+              <Checkbox name="insecure_tls" type="checkbox" />
+              跳过 TLS 校验（仅可信内网）
+            </label>
+            {presetByKind[previewKind]?.hint && (
+              <p className="muted span-2">{presetByKind[previewKind].hint}</p>
+            )}
+            <div className="modal-actions span-2">
+              <Button type="button" onClick={() => setRegistryCreateOpen(false)}>
+                取消
+              </Button>
+              <Button type="submit" variant="primary">
+                <Plus size={15} /> 保存镜像源
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      )}
+      {imageCreateOpen && (
+        <Modal
+          title="添加镜像跟踪"
+          subtitle="将创建与查看分离，降低单页信息密度。"
+          onClose={() => setImageCreateOpen(false)}
+        >
+          <form
+            className="form-grid registry-form"
+            onSubmit={async (event) => {
+              await onAddImage(event);
+              setImageCreateOpen(false);
+            }}
+          >
+            <label>
+              镜像源
+              <Select name="registry_id" required>
+                <option value="">选择...</option>
+                {(registries || []).map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name} ({r.kind})
+                  </option>
+                ))}
+              </Select>
+            </label>
+            <label className="span-2">
+              仓库路径（repository）
+              <Input name="repository" required placeholder="namespace/name" />
+            </label>
+            <div className="modal-actions span-2">
+              <Button type="button" onClick={() => setImageCreateOpen(false)}>
+                取消
+              </Button>
+              <Button type="submit" variant="primary">
+                <Plus size={15} /> 添加并同步标签
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      )}
     </div>
   );
 }
