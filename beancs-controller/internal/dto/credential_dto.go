@@ -94,6 +94,9 @@ type DeployBasaltPassRequest struct {
 	Namespace              string `json:"namespace" validate:"omitempty,max=128"`
 	BackendImage           string `json:"backend_image" validate:"required,max=512"`
 	FrontendImage          string `json:"frontend_image" validate:"required,max=512"`
+	GitHubCredentialID     uint   `json:"github_credential_id" validate:"omitempty"`
+	GitHubRepo             string `json:"github_repo" validate:"omitempty,max=256"`
+	GitHubBranch           string `json:"github_branch" validate:"omitempty,max=128"`
 	PublicHost             string `json:"public_host" validate:"omitempty,max=256"`
 	ExposureMode           string `json:"exposure_mode" validate:"omitempty,oneof=public private"`
 	JWTSecret              string `json:"jwt_secret" validate:"omitempty"`

@@ -236,6 +236,8 @@ func (s *CredentialService) DeployBasaltPass(ctx context.Context, userID string,
 	}
 	req.BackendImage = strings.TrimSpace(req.BackendImage)
 	req.FrontendImage = strings.TrimSpace(req.FrontendImage)
+	req.GitHubRepo = strings.TrimSpace(req.GitHubRepo)
+	req.GitHubBranch = strings.TrimSpace(req.GitHubBranch)
 	req.PublicHost = strings.TrimSpace(req.PublicHost)
 	req.ExposureMode = strings.ToLower(strings.TrimSpace(req.ExposureMode))
 	if req.ExposureMode == "" {
@@ -276,9 +278,12 @@ func (s *CredentialService) DeployBasaltPass(ctx context.Context, userID string,
 	if err := s.validateBasaltPassDatabaseCredential(ctx, userID, req.DatabaseDependencyID, req.DatabaseCredentialID, true); err != nil {
 		return nil, err
 	}
-	if err := s.deployManagedBasaltPass(ctx, userID, req); err != nil {
+	backendImage, frontendImage, err := s.deployManagedBasaltPass(ctx, userID, req)
+	if err != nil {
 		return nil, err
 	}
+	req.BackendImage = backendImage
+	req.FrontendImage = frontendImage
 	if err := s.ensureBasaltPassDNS(ctx, userID, req); err != nil {
 		return nil, err
 	}
@@ -409,20 +414,24 @@ func (s *CredentialService) createBasaltPassTenant(ctx context.Context, req dto.
 	})
 }
 
-func (s *CredentialService) deployManagedBasaltPass(ctx context.Context, userID string, req dto.DeployBasaltPassRequest) error {
+func (s *CredentialService) deployManagedBasaltPass(ctx context.Context, userID string, req dto.DeployBasaltPassRequest) (string, string, error) {
 	if s.k8s == nil {
-		return fmt.Errorf("kubernetes manager is not configured")
+		return "", "", fmt.Errorf("kubernetes manager is not configured")
 	}
 	if req.BackendImage == "" || req.FrontendImage == "" {
-		return fmt.Errorf("backend_image and frontend_image are required for managed BasaltPass deployment")
+		return "", "", fmt.Errorf("backend_image and frontend_image are required for managed BasaltPass deployment")
+	}
+	backendImage, frontendImage, pullSecret, err := s.prepareBasaltPassImages(ctx, userID, req)
+	if err != nil {
+		return "", "", err
 	}
 	dep, cred, outputs, err := s.basaltPassDatabaseCredential(ctx, userID, req.DatabaseDependencyID, req.DatabaseCredentialID)
 	if err != nil {
-		return err
+		return "", "", err
 	}
 	dsn := strings.TrimSpace(outputs["url"])
 	if dsn == "" {
-		return fmt.Errorf("selected database credential does not expose url output")
+		return "", "", fmt.Errorf("selected database credential does not expose url output")
 	}
 	driver := "mysql"
 	if dep.Type == "postgresql" {
@@ -440,11 +449,12 @@ func (s *CredentialService) deployManagedBasaltPass(ctx context.Context, userID 
 	if host == "" {
 		host = hostFromURL(req.BaseURL)
 	}
-	return s.k8s.ApplyBasaltPass(ctx, k8s.BasaltPassRuntime{
+	if err := s.k8s.ApplyBasaltPass(ctx, k8s.BasaltPassRuntime{
 		Name:          harborName(req.Name),
 		Namespace:     req.Namespace,
-		BackendImage:  req.BackendImage,
-		FrontendImage: req.FrontendImage,
+		BackendImage:  backendImage,
+		FrontendImage: frontendImage,
+		PullSecret:    pullSecret,
 		Host:          host,
 		Exposure:      req.ExposureMode,
 		Env: map[string]string{
@@ -469,7 +479,108 @@ func (s *CredentialService) deployManagedBasaltPass(ctx context.Context, userID 
 			"BEANCS_DATABASE_DEPENDENCY_RUNTIME_DB":   outputs["database"],
 			"BEANCS_DATABASE_DEPENDENCY_RUNTIME_USER": outputs["username"],
 		},
-	})
+	}); err != nil {
+		return "", "", err
+	}
+	return backendImage, frontendImage, nil
+}
+
+func (s *CredentialService) prepareBasaltPassImages(ctx context.Context, userID string, req dto.DeployBasaltPassRequest) (string, string, string, error) {
+	backendImage := strings.TrimSpace(req.BackendImage)
+	frontendImage := strings.TrimSpace(req.FrontendImage)
+	if req.GitHubCredentialID == 0 || !isGHCRImage(backendImage) || !isGHCRImage(frontendImage) {
+		return backendImage, frontendImage, "", nil
+	}
+	if s.cfg == nil || strings.TrimSpace(s.cfg.RegistryHost) == "" || strings.TrimSpace(s.cfg.RegistryUsername) == "" || strings.TrimSpace(s.cfg.RegistryToken) == "" {
+		return "", "", "", fmt.Errorf("BeanCS registry credentials are required to mirror BasaltPass images")
+	}
+	if err := s.RequireAccess(userID, model.CredentialTypeGitHub, req.GitHubCredentialID, false); err != nil {
+		return "", "", "", err
+	}
+	var ghCred model.GitHubCredential
+	if err := s.db.WithContext(ctx).First(&ghCred, req.GitHubCredentialID).Error; err != nil {
+		return "", "", "", err
+	}
+	ghToken, err := s.GitHubToken(ctx, ghCred)
+	if err != nil {
+		return "", "", "", err
+	}
+	name := harborName(req.Name)
+	projectName := harborProjectName(coalesce(req.TenantCode, name))
+	if projectName == "" {
+		return "", "", "", fmt.Errorf("tenant_code is required to mirror BasaltPass images")
+	}
+	if err := ensureHarborProject(ctx, s.cfg, projectName); err != nil {
+		return "", "", "", err
+	}
+	host := normalizeRegistryHost(s.cfg.RegistryHost)
+	tag := coalesce(imageTag(backendImage), imageTag(frontendImage))
+	if tag == "" {
+		tag = "latest"
+	}
+	backendTarget := fmt.Sprintf("%s/%s/%s-backend:%s", host, projectName, name, tag)
+	frontendTarget := fmt.Sprintf("%s/%s/%s-frontend:%s", host, projectName, name, coalesce(imageTag(frontendImage), tag))
+	sourceUsername := strings.TrimSpace(ghCred.AccountLogin)
+	if ghCred.AuthType == "app" || ghCred.InstallationID != 0 || sourceUsername == "" {
+		sourceUsername = "x-access-token"
+	}
+	sourceAuth := registryAuth{Username: sourceUsername, Password: ghToken}
+	targetAuth := registryAuth{Username: strings.TrimSpace(s.cfg.RegistryUsername), Password: s.cfg.RegistryToken}
+	if err := copyContainerImage(ctx, backendImage, backendTarget, sourceAuth, targetAuth); err != nil {
+		return "", "", "", err
+	}
+	if err := copyContainerImage(ctx, frontendImage, frontendTarget, sourceAuth, targetAuth); err != nil {
+		return "", "", "", err
+	}
+	project := &model.Project{
+		Name:                   name,
+		Namespace:              req.Namespace,
+		RegistryHost:           host,
+		RegistryProject:        projectName,
+		RegistryRepository:     name,
+		RegistryPullSecretName: strings.TrimSpace(s.cfg.RegistryPullSecret),
+	}
+	if project.RegistryPullSecretName == "" {
+		project.RegistryPullSecretName = "beancs-registry-pull"
+	}
+	creds, err := ensureHarborPullRobot(ctx, s.cfg, project)
+	if err != nil {
+		return "", "", "", err
+	}
+	if s.k8s == nil {
+		return "", "", "", fmt.Errorf("kubernetes manager is not configured")
+	}
+	if err := s.k8s.CreateNamespace(ctx, req.Namespace, name); err != nil {
+		return "", "", "", err
+	}
+	if err := s.k8s.UpsertRegistryPullSecretWithCredentials(ctx, req.Namespace, name, project.RegistryPullSecretName, creds.Host, creds.Username, creds.Token); err != nil {
+		return "", "", "", err
+	}
+	return backendTarget, frontendTarget, project.RegistryPullSecretName, nil
+}
+
+func isGHCRImage(image string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(image)), "ghcr.io/")
+}
+
+func imageTag(image string) string {
+	image = strings.TrimSpace(image)
+	if image == "" {
+		return ""
+	}
+	if idx := strings.LastIndex(image, "@sha256:"); idx >= 0 {
+		digest := image[idx+len("@sha256:"):]
+		if len(digest) > 12 {
+			digest = digest[:12]
+		}
+		return "sha256-" + harborName(digest)
+	}
+	lastSlash := strings.LastIndex(image, "/")
+	lastColon := strings.LastIndex(image, ":")
+	if lastColon <= lastSlash {
+		return ""
+	}
+	return harborName(image[lastColon+1:])
 }
 
 func (s *CredentialService) basaltPassDatabaseCredential(ctx context.Context, userID string, dependencyID, credentialID uint) (model.ManagedDependency, model.DependencyCredential, map[string]string, error) {

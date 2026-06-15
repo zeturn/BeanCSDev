@@ -1870,6 +1870,11 @@ function App() {
       namespace: deployForm.namespace || undefined,
       backend_image: deployForm.backend_image,
       frontend_image: deployForm.frontend_image,
+      github_credential_id: selectedCredential
+        ? Number(selectedCredential)
+        : undefined,
+      github_repo: deployForm.github_repo || selectedRepo || undefined,
+      github_branch: deployForm.github_branch || "main",
       public_host: publicHost || undefined,
       exposure_mode: deployForm.exposure_mode || "public",
       platform_admin_email: deployForm.platform_admin_email,
