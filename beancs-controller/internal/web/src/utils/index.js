@@ -1071,6 +1071,7 @@ export function titleFor(view) {
   const map = {
     dashboard: "Overview",
     deploy: "Deploy",
+    applications: "Applications",
     dependencies: "Dependencies",
     progress: "Progress",
     projects: "Projects",
@@ -1105,6 +1106,7 @@ export function subtitleFor(view, runtime, projects) {
   if (view === "networking")
     return "Service, Ingress, Endpoint, NetworkPolicy, Traefik and Tailscale operations";
   if (view === "projects") return `${projects.length} managed projects`;
+  if (view === "applications") return "Monorepo and multi-project application records";
   if (view === "dependencies")
     return "Reusable managed and external service dependencies";
   if (view === "progress") return "Watch installs and runtime readiness";

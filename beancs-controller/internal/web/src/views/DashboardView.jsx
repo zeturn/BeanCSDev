@@ -4,7 +4,6 @@ import {
   formatTime,
   formatBytes,
   formatPercent,
-  formatDuration,
 } from "../utils/index";
 import {
   MetricCard,
@@ -53,7 +52,6 @@ import {
   Rocket,
   ScrollText,
   Search,
-  Server,
   Settings,
   Shield,
   ShieldCheck,
@@ -167,34 +165,6 @@ export default function DashboardView({ dashboard, refresh }) {
                 "metrics-server or node stats endpoint did not return data."}
             </p>
           )}
-        </div>
-        <div className="panel dashboard-panel">
-          <h2>
-            <Server size={18} /> Cluster Runtime
-          </h2>
-          <div className="detail-list">
-            <span>
-              Status <b>{dashboard.status}</b>
-            </span>
-            <span>
-              Ready nodes{" "}
-              <b>
-                {nodes.ready || 0}/{nodes.total || 0}
-              </b>
-            </span>
-            <span>
-              Running pods{" "}
-              <b>
-                {pods.running || 0}/{pods.total || 0}
-              </b>
-            </span>
-            <span>
-              Uptime <b>{formatDuration(dashboard.uptime_seconds)}</b>
-            </span>
-            <span>
-              Last check <b>{formatTime(dashboard.checked_at)}</b>
-            </span>
-          </div>
         </div>
       </section>
 

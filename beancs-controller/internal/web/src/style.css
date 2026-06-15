@@ -1014,6 +1014,7 @@ button.ghost:hover,
 .dependency-entity-list {
   display: grid;
   gap: 12px;
+  grid-column: 1 / -1;
 }
 
 .dependency-entity {
@@ -1419,10 +1420,10 @@ button.domain-tile {
 
 .tr {
   display: grid;
-  grid-template-columns: 1.1fr 1.4fr 1fr 0.75fr 0.75fr 1fr;
+  grid-template-columns: 1fr 1.15fr 0.9fr 0.7fr 0.65fr 0.9fr;
   gap: 12px;
   align-items: center;
-  min-width: 820px;
+  min-width: 700px;
   padding: 10px;
   background: #ffffff;
   border-bottom: 1px solid #edf2f7;
@@ -1610,7 +1611,7 @@ button.domain-tile {
 
 .dns-table .tr,
 .runtime-table .tr {
-  grid-template-columns: repeat(6, minmax(130px, 1fr)) minmax(160px, auto);
+  grid-template-columns: repeat(6, minmax(96px, 1fr)) minmax(136px, auto);
 }
 
 .network-page {
@@ -1686,13 +1687,13 @@ button.domain-tile {
 }
 
 .network-table .tr {
-  grid-template-columns: repeat(7, minmax(130px, 1fr)) minmax(120px, auto);
-  min-width: 1040px;
+  grid-template-columns: repeat(7, minmax(96px, 1fr)) minmax(110px, auto);
+  min-width: 860px;
 }
 
 .compact-table .tr {
-  grid-template-columns: repeat(4, minmax(160px, 1fr));
-  min-width: 760px;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  min-width: 560px;
 }
 
 .registry-page .panel-heading-inline {
@@ -2340,8 +2341,27 @@ button.domain-tile {
 
 .industrial-meter progress {
   width: 100%;
-  height: 12px;
-  accent-color: var(--bc-primary-700);
+  height: 10px;
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  overflow: hidden;
+  background: #ede9fe;
+}
+
+.industrial-meter progress::-webkit-progress-bar {
+  background: #ede9fe;
+  border-radius: 999px;
+}
+
+.industrial-meter progress::-webkit-progress-value {
+  background: #7c3aed;
+  border-radius: 999px;
+}
+
+.industrial-meter progress::-moz-progress-bar {
+  background: #7c3aed;
+  border-radius: 999px;
 }
 
 .industrial-meter small {
@@ -3571,10 +3591,10 @@ textarea {
 }
 
 .project-table-row {
-  grid-template-columns: minmax(150px, 1fr) minmax(220px, 1.35fr) minmax(
-      160px,
-      1fr
-    ) minmax(110px, 0.75fr) minmax(90px, 0.65fr) minmax(360px, auto);
+  grid-template-columns: minmax(120px, 0.9fr) minmax(170px, 1.05fr) minmax(
+      120px,
+      0.8fr
+    ) minmax(80px, 0.55fr) minmax(72px, 0.5fr) minmax(280px, auto);
 }
 
 .deployments-page {

@@ -116,6 +116,11 @@ const navSections = [
     label: "Workloads",
     items: [
       {
+        id: "applications",
+        label: "Applications",
+        icon: Layers3,
+      },
+      {
         id: "projects",
         label: "Projects",
         icon: Boxes,
@@ -283,6 +288,7 @@ import LogsView from "./views/LogsView";
 import DeploymentsView from "./views/DeploymentsView";
 import DependenciesView from "./views/DependenciesView";
 import ProjectsView from "./views/ProjectsView";
+import ApplicationsView from "./views/ApplicationsView";
 import ProjectTrackingModal from "./views/ProjectTrackingModal";
 import DeleteProjectModal from "./views/DeleteProjectModal";
 import DeleteApplicationModal from "./views/DeleteApplicationModal";
@@ -2490,9 +2496,7 @@ function App() {
             )}
             {view === "projects" && (
               <ProjectsView
-                applications={applications}
                 projects={projects}
-                onDeleteApplication={deleteApplication}
                 onEdit={setEditingProject}
                 onDelete={deleteProject}
                 onScale={scaleProject}
@@ -2503,6 +2507,12 @@ function App() {
                   setActiveProgressProjectID(String(project.id));
                   setView("progress");
                 }}
+              />
+            )}
+            {view === "applications" && (
+              <ApplicationsView
+                applications={applications}
+                onDeleteApplication={deleteApplication}
               />
             )}
             {view === "deployments" && (

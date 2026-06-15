@@ -995,7 +995,19 @@ export function RuntimeTable({
             >
               {keys.map((key) => {
                 const value = formatCell(row[key]);
-                return <ExpandableCell key={key} value={value} max={36} />;
+                const compactFields = new Set([
+                  "status",
+                  "ready_containers",
+                  "total_containers",
+                  "restarts",
+                ]);
+                return (
+                  <ExpandableCell
+                    key={key}
+                    value={value}
+                    max={compactFields.has(key) ? 16 : 30}
+                  />
+                );
               })}
               <span className="row-actions">
                 <Button

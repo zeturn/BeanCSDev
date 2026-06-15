@@ -102,9 +102,6 @@ export default function DependenciesView({
             <h2>
               <Server size={18} /> Dependencies
             </h2>
-            <p className="muted">
-              创建入口已单独放入弹窗，查看列表更清晰。
-            </p>
           </div>
           <div className="row-actions">
             <Button onClick={onRefresh}>
