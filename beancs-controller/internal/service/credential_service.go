@@ -171,7 +171,7 @@ func (s *CredentialService) CreateBasaltPass(ctx context.Context, userID string,
 	req.TenantID = strings.TrimSpace(req.TenantID)
 	req.TenantCode = strings.TrimSpace(req.TenantCode)
 	req.ClientID = strings.TrimSpace(req.ClientID)
-	if err := validateExternalHTTPSURL(req.BaseURL); err != nil {
+	if _, _, err := validatePublicHTTPSURLSyntax(req.BaseURL); err != nil {
 		return nil, err
 	}
 	if req.TenantID == "" && req.TenantCode == "" {
@@ -1480,15 +1480,11 @@ func (s *CredentialService) validateBasaltPassDatabaseCredential(ctx context.Con
 }
 
 func validateExternalHTTPSURL(raw string) error {
-	u, err := url.Parse(raw)
-	if err != nil || u.Scheme != "https" || u.Hostname() == "" {
-		return fmt.Errorf("base_url must be a valid https URL")
+	host, ip, err := validatePublicHTTPSURLSyntax(raw)
+	if err != nil {
+		return err
 	}
-	host := strings.ToLower(u.Hostname())
-	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
-		return fmt.Errorf("base_url must not target localhost")
-	}
-	if ip := net.ParseIP(host); ip != nil {
+	if ip != nil {
 		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
 			return fmt.Errorf("base_url must not target private or local addresses")
 		}
@@ -1504,4 +1500,16 @@ func validateExternalHTTPSURL(raw string) error {
 		}
 	}
 	return nil
+}
+
+func validatePublicHTTPSURLSyntax(raw string) (string, net.IP, error) {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" {
+		return "", nil, fmt.Errorf("base_url must be a valid https URL")
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return "", nil, fmt.Errorf("base_url must not target localhost")
+	}
+	return host, net.ParseIP(host), nil
 }
