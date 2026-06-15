@@ -171,7 +171,7 @@ func (s *CredentialService) CreateBasaltPass(ctx context.Context, userID string,
 	req.TenantID = strings.TrimSpace(req.TenantID)
 	req.TenantCode = strings.TrimSpace(req.TenantCode)
 	req.ClientID = strings.TrimSpace(req.ClientID)
-	if _, _, err := validatePublicHTTPSURLSyntax(req.BaseURL); err != nil {
+	if err := validateExternalHTTPSURL(req.BaseURL); err != nil {
 		return nil, err
 	}
 	if req.TenantID == "" && req.TenantCode == "" {
@@ -251,7 +251,7 @@ func (s *CredentialService) DeployBasaltPass(ctx context.Context, userID string,
 	req.OwnerUsername = strings.TrimSpace(req.OwnerUsername)
 	req.Description = strings.TrimSpace(req.Description)
 	req.ClientID = strings.TrimSpace(req.ClientID)
-	if err := validateExternalHTTPSURL(req.BaseURL); err != nil {
+	if _, _, err := validatePublicHTTPSURLSyntax(req.BaseURL); err != nil {
 		return nil, err
 	}
 	if req.TenantCode == "" {
