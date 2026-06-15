@@ -237,8 +237,33 @@ func (s *DeploymentService) HandleGitHubWebhook(ctx context.Context, req dto.Git
 			_ = s.db.WithContext(ctx).Model(&dep).Updates(map[string]any{"status": "failed", "failure_reason": truncateFailure(err.Error())}).Error
 			return err
 		}
+		if s.processes != nil {
+			start, err := s.shouldStartWebhookRollout(ctx, dep.ID)
+			if err != nil {
+				return err
+			}
+			if start {
+				process, err := s.processes.CreateWebhookRolloutProcess(ctx, &dep, "webhook")
+				if err != nil {
+					_ = s.db.WithContext(ctx).Model(&dep).Updates(map[string]any{"status": "failed", "failure_reason": truncateFailure(err.Error())}).Error
+					return err
+				}
+				s.processes.Start(process.ID)
+			}
+		}
 	}
 	return nil
+}
+
+func (s *DeploymentService) shouldStartWebhookRollout(ctx context.Context, deploymentID uint) (bool, error) {
+	if deploymentID == 0 {
+		return false, nil
+	}
+	var count int64
+	err := s.db.WithContext(ctx).Model(&model.Process{}).
+		Where("deployment_id = ? AND status IN ?", deploymentID, []string{model.ProcessStatusQueued, model.ProcessStatusRunning}).
+		Count(&count).Error
+	return count == 0, err
 }
 
 func webhookImageReference(project model.Project, tag string) string {

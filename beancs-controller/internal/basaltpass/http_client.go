@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -69,6 +70,50 @@ func (c *HTTPClient) IntrospectToken(ctx context.Context, token string) (*Intros
 	return &result, nil
 }
 
+func (c *HTTPClient) CreateTenant(ctx context.Context, reqBody *CreateTenantRequest) (*CreateTenantResponse, error) {
+	token, err := c.serviceToken(ctx)
+	if err != nil {
+		return nil, err
+	}
+	payload, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiBaseURL+"/admin/tenants", bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode != http.StatusCreated {
+		return nil, fmt.Errorf("create tenant failed: %s", parseAPIError(body))
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, err
+	}
+	data, _ := raw["data"].(map[string]any)
+	if data == nil {
+		data = raw
+	}
+	out := &CreateTenantResponse{
+		ID:    uint(numberValue(data["id"])),
+		Name:  stringValue(data["name"]),
+		Code:  firstString(data["code"], data["tenant_code"], data["tenantCode"]),
+		Token: firstString(data["automation_token"], data["service_token"], data["token"]),
+	}
+	if out.ID == 0 || out.Code == "" {
+		return nil, fmt.Errorf("create tenant returned incomplete response")
+	}
+	return out, nil
+}
+
 func (c *HTTPClient) RegisterApp(ctx context.Context, reqBody *RegisterAppRequest) (*RegisterAppResponse, error) {
 	token, err := c.serviceToken(ctx)
 	if err != nil {
@@ -101,6 +146,42 @@ func (c *HTTPClient) RegisterApp(ctx context.Context, reqBody *RegisterAppReques
 		return nil, fmt.Errorf("register app returned incomplete response")
 	}
 	return &out, nil
+}
+
+func firstString(values ...any) string {
+	for _, value := range values {
+		if s := stringValue(value); s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+func stringValue(value any) string {
+	switch v := value.(type) {
+	case string:
+		return strings.TrimSpace(v)
+	case float64:
+		return fmt.Sprintf("%.0f", v)
+	default:
+		return strings.TrimSpace(fmt.Sprint(v))
+	}
+}
+
+func numberValue(value any) uint64 {
+	switch v := value.(type) {
+	case float64:
+		return uint64(v)
+	case int:
+		return uint64(v)
+	case uint:
+		return uint64(v)
+	case string:
+		n, _ := strconv.ParseUint(strings.TrimSpace(v), 10, 64)
+		return n
+	default:
+		return 0
+	}
 }
 
 func (c *HTTPClient) DeleteApp(ctx context.Context, appID uint) error {

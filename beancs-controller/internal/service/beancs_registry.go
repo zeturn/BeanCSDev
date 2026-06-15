@@ -48,7 +48,7 @@ func configureBeanCSRegistry(project *model.Project, cfg *config.Config, tenantC
 		return fmt.Errorf("github_repo must be in owner/repo format")
 	}
 	host := normalizeRegistryHost(cfg.RegistryHost)
-	registryProject := harborName(coalesce(tenantCode, project.TenantCode))
+	registryProject := harborProjectName(coalesce(tenantCode, project.TenantCode))
 	registryRepo := harborName(coalesce(project.Name, repo))
 	if registryProject == "" {
 		return fmt.Errorf("BasaltPass tenant_code is required to create BeanCS registry projects")
@@ -83,6 +83,26 @@ func harborName(value string) string {
 		lastDash = r == '-'
 	}
 	return strings.Trim(b.String(), "-.")
+}
+
+func harborProjectName(value string) string {
+	name := harborName(value)
+	if name == "" || !isAllDigits(name) {
+		return name
+	}
+	return "tenant-" + name
+}
+
+func isAllDigits(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func ghcrImageBase(project *model.Project) string {

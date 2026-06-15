@@ -33,6 +33,30 @@ func NewProcessService(db *gorm.DB, build *GitHubBuildService, credentials *Cred
 }
 
 func (s *ProcessService) CreateDeploymentProcess(ctx context.Context, deployment *model.Deployment, triggeredBy string) (*model.Process, error) {
+	jobs := []processJobSpec{
+		{Name: "validate", DisplayName: "Validate package"},
+		{Name: "network", DisplayName: "Prepare Cloudflare and network"},
+		{Name: "github_workflow", DisplayName: "Add GitHub workflow"},
+		{Name: "github_dispatch", DisplayName: "Trigger GitHub workflow"},
+		{Name: "argocd", DisplayName: "Start Argo CD sync"},
+		{Name: "rollout", DisplayName: "Pull image and deploy"},
+		{Name: "connectivity", DisplayName: "Verify connectivity"},
+	}
+	return s.createDeploymentProcess(ctx, deployment, triggeredBy, jobs)
+}
+
+func (s *ProcessService) CreateWebhookRolloutProcess(ctx context.Context, deployment *model.Deployment, triggeredBy string) (*model.Process, error) {
+	jobs := []processJobSpec{
+		{Name: "validate", DisplayName: "Validate package"},
+		{Name: "network", DisplayName: "Prepare Cloudflare and network"},
+		{Name: "argocd", DisplayName: "Start Argo CD sync"},
+		{Name: "rollout", DisplayName: "Pull image and deploy"},
+		{Name: "connectivity", DisplayName: "Verify connectivity"},
+	}
+	return s.createDeploymentProcess(ctx, deployment, triggeredBy, jobs)
+}
+
+func (s *ProcessService) createDeploymentProcess(ctx context.Context, deployment *model.Deployment, triggeredBy string, jobs []processJobSpec) (*model.Process, error) {
 	if deployment == nil || deployment.ProjectID == 0 {
 		return nil, fmt.Errorf("deployment is required")
 	}
@@ -43,15 +67,6 @@ func (s *ProcessService) CreateDeploymentProcess(ctx context.Context, deployment
 		DeploymentID: deployment.ID,
 		Title:        fmt.Sprintf("Deployment #%d", deployment.ID),
 		TriggeredBy:  triggeredBy,
-	}
-	jobs := []processJobSpec{
-		{Name: "validate", DisplayName: "Validate package"},
-		{Name: "network", DisplayName: "Prepare Cloudflare and network"},
-		{Name: "github_workflow", DisplayName: "Add GitHub workflow"},
-		{Name: "github_dispatch", DisplayName: "Trigger GitHub workflow"},
-		{Name: "argocd", DisplayName: "Start Argo CD sync"},
-		{Name: "rollout", DisplayName: "Pull image and deploy"},
-		{Name: "connectivity", DisplayName: "Verify connectivity"},
 	}
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(process).Error; err != nil {
@@ -200,7 +215,7 @@ func (r *processRun) run() error {
 	if err := r.network(); err != nil {
 		return err
 	}
-	if r.project.BuildSource == model.BuildSourceGitHub {
+	if r.project.BuildSource == model.BuildSourceGitHub && r.hasJob("github_dispatch") {
 		if err := r.githubWorkflow(); err != nil {
 			return err
 		}
@@ -215,6 +230,12 @@ func (r *processRun) run() error {
 		return err
 	}
 	return r.connectivity()
+}
+
+func (r *processRun) hasJob(name string) bool {
+	var count int64
+	err := r.svc.db.WithContext(r.ctx).Model(&model.ProcessJob{}).Where("process_id = ? AND name = ?", r.processID, name).Count(&count).Error
+	return err == nil && count > 0
 }
 
 func (r *processRun) validate() error {
@@ -273,7 +294,7 @@ func (r *processRun) validate() error {
 	if r.image == "" {
 		r.image = strings.TrimSpace(r.deployment.Tag)
 	}
-	if r.project.BuildSource == model.BuildSourceGitHub {
+	if r.project.BuildSource == model.BuildSourceGitHub && r.hasJob("github_dispatch") {
 		r.image = buildImageReference(r.project)
 	}
 	if r.project.BuildSource != model.BuildSourceGitHub && r.image == "" {

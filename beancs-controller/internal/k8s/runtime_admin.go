@@ -371,7 +371,7 @@ func (m *Manager) UpsertIngress(ctx context.Context, req dto.CreateIngressReques
 		Spec: networkingv1.IngressSpec{
 			IngressClassName: &className,
 			Rules: []networkingv1.IngressRule{{
-				Host: req.Host,
+				Host: ingressRuleHost(className, req.Host),
 				IngressRuleValue: networkingv1.IngressRuleValue{
 					HTTP: &networkingv1.HTTPIngressRuleValue{
 						Paths: []networkingv1.HTTPIngressPath{{
@@ -387,7 +387,9 @@ func (m *Manager) UpsertIngress(ctx context.Context, req dto.CreateIngressReques
 			}},
 		},
 	}
-	if req.TLSSecretName != "" {
+	if isTailscaleIngress(className) && strings.TrimSpace(req.Host) != "" {
+		ing.Spec.TLS = []networkingv1.IngressTLS{{Hosts: []string{req.Host}}}
+	} else if req.TLSSecretName != "" {
 		ing.Spec.TLS = []networkingv1.IngressTLS{{Hosts: []string{req.Host}, SecretName: req.TLSSecretName}}
 	}
 	current, err := m.Clientset.NetworkingV1().Ingresses(req.Namespace).Get(ctx, req.Name, metav1.GetOptions{})

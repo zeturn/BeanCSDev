@@ -706,8 +706,18 @@ export function buildMonorepoApplicationPayload(
       name: dependency.name,
       type: dependency.type,
       version: dependency.version || undefined,
-      deploy_method: dependency.deploy_method || "helm",
-      config: dependency.config || {},
+      deploy_method:
+        dependency.source === "existing"
+          ? undefined
+          : dependency.deploy_method || "helm",
+      existing_dependency_id:
+        dependency.source === "existing" && dependency.existing_dependency_id
+          ? Number(dependency.existing_dependency_id)
+          : undefined,
+      config: dependency.source === "existing" ? undefined : dependency.config || {},
+      external: dependency.source === "existing" ? undefined : dependency.external,
+      controlled:
+        dependency.source === "existing" ? undefined : dependency.controlled,
     })),
     components: (form.components || [])
       .filter((component) => component.enabled !== false)
@@ -747,6 +757,10 @@ export function buildMonorepoApplicationPayload(
           env_from_dependencies: (component.dependency_links || []).map(
             (link) => ({
               dependency: link.dependency,
+              credential: link.credential || undefined,
+              credential_id: link.credential_id
+                ? Number(link.credential_id)
+                : undefined,
               preset: link.preset,
             }),
           ),
@@ -1057,6 +1071,7 @@ export function titleFor(view) {
   const map = {
     dashboard: "Overview",
     deploy: "Deploy",
+    dependencies: "Dependencies",
     progress: "Progress",
     projects: "Projects",
     deployments: "Deployments",
@@ -1090,6 +1105,8 @@ export function subtitleFor(view, runtime, projects) {
   if (view === "networking")
     return "Service, Ingress, Endpoint, NetworkPolicy, Traefik and Tailscale operations";
   if (view === "projects") return `${projects.length} managed projects`;
+  if (view === "dependencies")
+    return "Reusable managed and external service dependencies";
   if (view === "progress") return "Watch installs and runtime readiness";
   if (view === "registries")
     return "Register OCI mirrors and sync image tags for this account";

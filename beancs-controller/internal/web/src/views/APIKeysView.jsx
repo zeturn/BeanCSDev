@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as LucideIcons from "lucide-react";
 import { formatTime } from "../utils/index";
 import { ExpandableCell, Button } from "../components/index";
+import APIKeyDrawer from "./APIKeyDrawer";
 import {
   Activity,
   AlertTriangle,

@@ -17,6 +17,7 @@ type Manager struct {
 	PublicIngressNamespaces  []string
 	PrivateIngressNamespaces []string
 	CertManager              CertManagerOptions
+	ControllerNamespace      string
 	ClusterName              string
 	K3sServerURL             string
 	K3sJoinToken             string
@@ -58,6 +59,7 @@ func NewManager(cfg *config.Config) *Manager {
 	return &Manager{
 		Clientset:                clientset,
 		Dynamic:                  dyn,
+		ControllerNamespace:      strings.TrimSpace(cfg.ControllerNamespace),
 		ClusterName:              cfg.ClusterName,
 		K3sServerURL:             strings.TrimSpace(cfg.K3sServerURL),
 		K3sJoinToken:             strings.TrimSpace(cfg.K3sJoinToken),

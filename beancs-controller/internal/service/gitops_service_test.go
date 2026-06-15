@@ -27,7 +27,7 @@ func TestRenderManifestsIncludesHealthCheckAndPVC(t *testing.T) {
 		},
 		Volumes: model.JSONMap{
 			"items": []map[string]any{
-				{"name": "data", "type": "pvc", "mountPath": "/data", "size": "10Gi"},
+				{"name": "data", "type": "pvc", "mountPath": "/data", "size": "10Gi", "storageClassName": "longhorn"},
 			},
 		},
 	}
@@ -46,6 +46,7 @@ func TestRenderManifestsIncludesHealthCheckAndPVC(t *testing.T) {
 	pvc := files[path.Join("apps", project.Name, "base", "pvc-data.yaml")]
 	assertContains(t, pvc, "kind: PersistentVolumeClaim")
 	assertContains(t, pvc, "storage: 10Gi")
+	assertContains(t, pvc, `storageClassName: "longhorn"`)
 }
 
 func TestRenderManifestsIncludesTCPHealthCheck(t *testing.T) {
@@ -90,7 +91,7 @@ func TestRenderDependencyManifestsUsesExistingSecret(t *testing.T) {
 		SecretName:   "araneae-rabbitmq-credentials",
 		DeployMethod: model.DependencyDeployMethodHelm,
 		Config: model.JSONMap{
-			"persistence": map[string]any{"enabled": true, "size": "8Gi"},
+			"persistence": map[string]any{"enabled": true, "size": "8Gi", "storageClass": "longhorn"},
 		},
 		Outputs: model.JSONMap{
 			"username": map[string]any{"value": "araneae", "secret": true},
@@ -104,6 +105,7 @@ func TestRenderDependencyManifestsUsesExistingSecret(t *testing.T) {
 	assertContains(t, values, "allowInsecureImages: true")
 	assertContains(t, values, "repository: bitnamilegacy/rabbitmq")
 	assertContains(t, values, "existingPasswordSecret: araneae-rabbitmq-credentials")
+	assertContains(t, values, `storageClass: "longhorn"`)
 	assertContains(t, values, "size: \"8Gi\"")
 	if strings.Contains(values, "secret-password") {
 		t.Fatalf("dependency values must not include secret plaintext:\n%s", values)
@@ -158,6 +160,54 @@ func TestRenderMySQLDependencyManifestsUseLegacyImage(t *testing.T) {
 
 	app := files[path.Join("apps", "araneae", "dependencies", "mysql", "application.yaml")]
 	assertContains(t, app, "targetRevision: 14.0.3")
+}
+
+func TestRenderPostgreSQLDependencyManifestsUsePostgreSQLSecretKeys(t *testing.T) {
+	service := NewGitOpsService(nil, nil)
+	registry, err := NewDependencyDefinitionRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	def, ok := registry.Get("postgresql")
+	if !ok {
+		t.Fatal("postgresql definition not found")
+	}
+	dep := model.ManagedDependency{
+		Name:         "pgsql",
+		Type:         "postgresql",
+		Namespace:    "app-araneae",
+		ServiceName:  "pgsql",
+		SecretName:   "araneae-pgsql-credentials",
+		DeployMethod: model.DependencyDeployMethodHelm,
+		Config: model.JSONMap{
+			"database":    "app",
+			"username":    "app",
+			"persistence": map[string]any{"enabled": false, "size": "1Gi"},
+		},
+		Outputs: model.JSONMap{
+			"username": map[string]any{"value": "app", "secret": true},
+			"database": map[string]any{"value": "app"},
+			"password": map[string]any{"value": "secret-password", "secret": true},
+		},
+	}
+
+	files := service.RenderDependencyManifests(model.Application{Name: "araneae"}, dep, def)
+	values := files[path.Join("apps", "araneae", "dependencies", "pgsql", "values.yaml")]
+	assertContains(t, values, "allowInsecureImages: true")
+	assertContains(t, values, "repository: bitnamilegacy/postgresql")
+	assertContains(t, values, "existingSecret: araneae-pgsql-credentials")
+	assertContains(t, values, "user: password")
+	assertContains(t, values, "enabled: false")
+	if strings.Contains(values, "bitnamilegacy/mysql") {
+		t.Fatalf("postgresql dependency values must not include mysql settings:\n%s", values)
+	}
+	if strings.Contains(values, "secret-password") {
+		t.Fatalf("dependency values must not include secret plaintext:\n%s", values)
+	}
+
+	app := files[path.Join("apps", "araneae", "dependencies", "pgsql", "application.yaml")]
+	assertContains(t, app, "chart: postgresql")
+	assertContains(t, app, "targetRevision: 18.6.7")
 }
 
 func assertContains(t *testing.T, text, want string) {

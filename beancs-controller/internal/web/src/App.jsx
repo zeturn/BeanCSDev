@@ -72,6 +72,7 @@ import {
   LineChart,
   ListRestart,
   LoaderCircle,
+  LogOut,
   Lock,
   Menu,
   MemoryStick,
@@ -123,6 +124,11 @@ const navSections = [
         id: "deploy",
         label: "Deploy",
         icon: Rocket,
+      },
+      {
+        id: "dependencies",
+        label: "Dependencies",
+        icon: Database,
       },
       {
         id: "progress",
@@ -269,13 +275,13 @@ const navSections = [
 ];
 import DeployView from "./views/DeployView";
 import ProgressView from "./views/ProgressView";
-import ProgressListView from "./views/ProgressListView";
 import DashboardView from "./views/DashboardView";
 import AlertsView from "./views/AlertsView";
 import EventsView from "./views/EventsView";
 import MetricsView from "./views/MetricsView";
 import LogsView from "./views/LogsView";
 import DeploymentsView from "./views/DeploymentsView";
+import DependenciesView from "./views/DependenciesView";
 import ProjectsView from "./views/ProjectsView";
 import ProjectTrackingModal from "./views/ProjectTrackingModal";
 import DeleteProjectModal from "./views/DeleteProjectModal";
@@ -285,10 +291,8 @@ import WorkloadImageView from "./views/WorkloadImageView";
 import ComingSoonView from "./views/ComingSoonView";
 import SettingsView from "./views/SettingsView";
 import APIKeysView from "./views/APIKeysView";
-import APIKeyDrawer from "./views/APIKeyDrawer";
 import GitHubView from "./views/GitHubView";
 import CloudflareView from "./views/CloudflareView";
-import CloudflareAccountDrawer from "./views/CloudflareAccountDrawer";
 import DomainsView from "./views/DomainsView";
 import NetworkingView from "./views/NetworkingView";
 import RuntimeDetailDrawer from "./views/RuntimeDetailDrawer";
@@ -310,6 +314,7 @@ function App() {
   const [projects, setProjects] = useState([]);
   const [applications, setApplications] = useState([]);
   const [dependencyDefinitions, setDependencyDefinitions] = useState([]);
+  const [reusableDependencies, setReusableDependencies] = useState([]);
   const [credentials, setCredentials] = useState({
     github: [],
     cloudflare: [],
@@ -511,6 +516,7 @@ function App() {
         projectData,
         applicationData,
         dependencyDefinitionData,
+        dependencyData,
         apiKeyData,
         githubData,
         cloudflareData,
@@ -540,7 +546,26 @@ function App() {
         ),
       );
       setDependencyDefinitions(definitions.map(normalizeDependencyDefinition));
-      setReusableDependencies(reusableDependencyData.data || []);
+      const dependencyRows = dependencyData.data || [];
+      const dependenciesWithCredentials = await Promise.all(
+        dependencyRows.map(async (dependency) => {
+          try {
+            const credentialData = await api.get(
+              `/dependencies/${dependency.id}/credentials`,
+            );
+            return {
+              ...dependency,
+              credentials: credentialData.data || [],
+            };
+          } catch {
+            return {
+              ...dependency,
+              credentials: [],
+            };
+          }
+        }),
+      );
+      setReusableDependencies(dependenciesWithCredentials);
       setAPIKeys(apiKeyData.data || []);
       setCredentials({
         github: githubData.data || [],
@@ -633,6 +658,108 @@ function App() {
     setProjects([]);
     setApplications([]);
     setDependencyDefinitions([]);
+    setReusableDependencies([]);
+  }
+  async function createDependency(event) {
+    event.preventDefault();
+    setError("");
+    setNotice("");
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const type = String(data.get("type") || "").trim();
+    const deployMethod = String(data.get("deploy_method") || "helm").trim();
+    const external =
+      data.get("external") === "true" || deployMethod === "external";
+    const controlled = data.get("controlled") === "on";
+    let config = {};
+    if (external) {
+      config = {
+        host: String(data.get("host") || "").trim(),
+        port: String(data.get("port") || "").trim(),
+      };
+      if (type === "rabbitmq") {
+        config.management_port = String(
+          data.get("management_port") || "",
+        ).trim();
+      }
+      if (controlled) {
+        config.admin_username = String(
+          data.get("admin_username") || "",
+        ).trim();
+        config.admin_password = String(data.get("admin_password") || "");
+      }
+    } else {
+      try {
+        config = JSON.parse(String(data.get("config_json") || "{}"));
+      } catch {
+        config = {};
+      }
+    }
+    const body = {
+      name: String(data.get("name") || "").trim(),
+      display_name: String(data.get("display_name") || "").trim(),
+      application_name: String(data.get("application_name") || "").trim(),
+      namespace: String(data.get("namespace") || "").trim(),
+      type,
+      version: String(data.get("version") || "").trim(),
+      deploy_method: deployMethod,
+      external,
+      controlled: external ? controlled : true,
+      shared: data.get("shared") === "on" || external,
+      config,
+    };
+    const githubCredentialID = Number(data.get("github_credential_id") || 0);
+    if (!external && githubCredentialID) {
+      body.github_credential_id = githubCredentialID;
+    }
+    Object.keys(body).forEach((key) => {
+      if (body[key] === "") delete body[key];
+    });
+    Object.keys(body.config).forEach((key) => {
+      if (body.config[key] === "") delete body.config[key];
+    });
+    try {
+      await api.post("/dependencies", body);
+      form.reset();
+      setNotice("Dependency added.");
+      await loadWorkspace();
+      return true;
+    } catch (err) {
+      setError(err.message);
+      return false;
+    }
+  }
+  async function createDependencyCredential(dependencyID, event) {
+    event.preventDefault();
+    setError("");
+    setNotice("");
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const body = {
+      name: String(data.get("name") || "").trim(),
+      description: String(data.get("description") || "").trim(),
+      config: {
+        database: String(data.get("database") || "").trim(),
+        username: String(data.get("username") || "").trim(),
+        password: String(data.get("password") || ""),
+      },
+    };
+    Object.keys(body).forEach((key) => {
+      if (body[key] === "") delete body[key];
+    });
+    Object.keys(body.config).forEach((key) => {
+      if (body.config[key] === "") delete body.config[key];
+    });
+    try {
+      await api.post(`/dependencies/${dependencyID}/credentials`, body);
+      form.reset();
+      setNotice("Credential added.");
+      await loadWorkspace();
+      return true;
+    } catch (err) {
+      setError(err.message);
+      return false;
+    }
   }
   async function connectGitHubApp(event, gitopsRepo) {
     event?.preventDefault();
@@ -660,6 +787,15 @@ function App() {
       if (typeof body[key] === "string") body[key] = body[key].trim();
       if (body[key] === "") delete body[key];
     });
+    if (kind === "basaltpass" && body.database_binding) {
+      const [dependencyID, credentialID] = String(body.database_binding).split(":");
+      body.database_dependency_id = Number(dependencyID || 0);
+      body.database_credential_id = Number(credentialID || 0);
+      delete body.database_binding;
+      ["max_apps", "max_users", "max_tokens_per_hour"].forEach((key) => {
+        if (body[key]) body[key] = Number(body[key]);
+      });
+    }
     try {
       await api.post(`/credentials/${kind}/`, body);
       event.currentTarget.reset();
@@ -2246,11 +2382,13 @@ function App() {
           >
             <MoreHorizontal size={16} />
           </Button>
-          <Button type="button" aria-label="Notifications" variant="icon">
-            <Bell size={16} />
-          </Button>
-          <Button className="signout-button" onClick={logout}>
-            Sign out
+          <Button
+            type="button"
+            aria-label="Sign out"
+            variant="icon"
+            onClick={logout}
+          >
+            <LogOut size={16} />
           </Button>
         </div>
       </aside>
@@ -2316,10 +2454,19 @@ function App() {
                 containerImages={containerImages}
                 dependencyDefinitions={dependencyDefinitions}
                 reusableDependencies={reusableDependencies}
-                onLoadDependencyCredentials={loadDependencyCredentials}
                 createTrackedImageFromDeploy={createTrackedImageFromDeploy}
                 onConnectGitHub={connectGitHubApp}
                 reposLoading={reposLoading}
+              />
+            )}
+            {view === "dependencies" && (
+              <DependenciesView
+                definitions={dependencyDefinitions}
+                dependencies={reusableDependencies}
+                githubCredentials={credentials.github}
+                onCreateDependency={createDependency}
+                onCreateCredential={createDependencyCredential}
+                onRefresh={loadWorkspace}
               />
             )}
             {view === "progress" && (
@@ -2382,9 +2529,6 @@ function App() {
                 onRefresh={loadAPIKeys}
               />
             )}
-            {view === "deployments" && <DeploymentsView projects={projects} processes={processRecords} runtimeDeployments={runtime.deployments || []} refresh={loadWorkspace} onOpenProcess={(process) => { setActiveProcessID(String(process.id)); setActiveProgressProjectID(String(process.project_id || "")); setView("progress"); }} />}
-            {view === "dependencies" && <DependenciesView dependencies={reusableDependencies} definitions={dependencyDefinitions} githubCredentials={credentials.github} onCreate={createStandaloneDependency} onLoadCredentials={loadDependencyCredentials} onCreateCredential={createDependencyCredential} refresh={loadWorkspace} />}
-            {view === "apiKeys" && <APIKeysView keys={apiKeys} scopeCatalog={apiKeyScopeCatalog} createdKey={createdAPIKey} onDismissCreated={() => setCreatedAPIKey(null)} onCreate={createAPIKey} onRevoke={revokeAPIKey} onRefresh={loadAPIKeys} />}
             {view === "registries" && (
               <ContainerRegistriesView
                 presets={registryPresets}
@@ -2497,6 +2641,7 @@ function App() {
               <CredentialManager
                 kind="basaltpass"
                 rows={credentials.basaltpass}
+                dependencies={reusableDependencies}
                 onCreate={createCredential}
                 onDelete={deleteCredential}
               />

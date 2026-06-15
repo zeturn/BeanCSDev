@@ -124,10 +124,22 @@ func (s *DependencyService) Create(ctx context.Context, userID string, applicati
 	secretData := dependencySecretData(def, config)
 	serviceName := req.Name
 	external := req.External || req.DeployMethod == model.DependencyDeployMethodExternal
+	controlled := !external
+	if req.Controlled != nil {
+		controlled = *req.Controlled
+	}
+	if !external {
+		controlled = true
+	}
 	if external {
 		serviceName = strings.TrimSpace(fmt.Sprint(config["host"]))
 		if serviceName == "" {
 			return nil, fmt.Errorf("external dependency %q requires config.host", req.Name)
+		}
+		if controlled {
+			if err := validateExternalAdminConfig(req.Type, config); err != nil {
+				return nil, err
+			}
 		}
 	}
 	outputs := resolveDependencyOutputs(def, dependencyRuntimeHost(serviceName, coalesce(app.Namespace, coalesce(app.Name, req.Name)), external), config, secretData)
@@ -149,13 +161,17 @@ func (s *DependencyService) Create(ctx context.Context, userID string, applicati
 		Status:            model.DependencyStatusReady,
 		Shared:            req.Shared,
 		External:          external,
+		Controlled:        controlled,
 	}
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(dep).Error; err != nil {
 			return err
 		}
-		if err := tx.Create(s.defaultDependencyCredential(dep, req.Credential)).Error; err != nil {
-			return err
+		defaultCredential := s.defaultDependencyCredential(dep, req.Credential)
+		if defaultCredential != nil {
+			if err := tx.Create(defaultCredential).Error; err != nil {
+				return err
+			}
 		}
 		component := model.ApplicationComponent{
 			ApplicationID: app.ID,
@@ -168,6 +184,14 @@ func (s *DependencyService) Create(ctx context.Context, userID string, applicati
 	})
 	if err != nil {
 		return nil, err
+	}
+	if external && controlled && req.Credential != nil {
+		if cred, err := s.findCredential(ctx, dep.ID, 0, req.Credential.Name); err == nil {
+			if err := s.reconcileRuntimeCredential(ctx, *dep, cred); err != nil {
+				_ = s.db.WithContext(ctx).Model(&cred).Updates(map[string]any{"status": model.DependencyStatusFailed, "description": strings.TrimSpace(coalesce(cred.Description, "") + " runtime reconcile failed: " + err.Error())}).Error
+				return nil, err
+			}
+		}
 	}
 	return dep, nil
 }
@@ -477,6 +501,9 @@ func (s *DependencyService) defaultDependencyCredential(dep *model.ManagedDepend
 	if req != nil {
 		return s.buildDependencyCredential(*dep, *req)
 	}
+	if dep.External {
+		return nil
+	}
 	return &model.DependencyCredential{
 		DependencyID: dep.ID,
 		Name:         "default",
@@ -510,12 +537,18 @@ func (s *DependencyService) buildDependencyCredential(dep model.ManagedDependenc
 }
 
 func (s *DependencyService) reconcileRuntimeCredential(ctx context.Context, dep model.ManagedDependency, cred model.DependencyCredential) error {
-	if s.k8s == nil || dep.External {
+	if s.k8s == nil {
 		return nil
 	}
 	switch dep.Type {
 	case "mysql":
 		outputs := flattenDependencyOutputs(cred.Outputs)
+		if dep.External {
+			if !dep.Controlled {
+				return nil
+			}
+			return s.k8s.ReconcileExternalMySQLCredential(ctx, externalDatabaseRuntime(dep, cred, outputs))
+		}
 		return s.k8s.ReconcileMySQLCredential(ctx, k8s.MySQLCredentialRuntime{
 			Namespace:      dep.Namespace,
 			ServiceName:    dep.ServiceName,
@@ -527,8 +560,55 @@ func (s *DependencyService) reconcileRuntimeCredential(ctx context.Context, dep 
 			DependencyName: dep.Name,
 			CredentialName: cred.Name,
 		})
+	case "postgresql":
+		if dep.External && dep.Controlled {
+			return s.k8s.ReconcileExternalPostgreSQLCredential(ctx, externalDatabaseRuntime(dep, cred, flattenDependencyOutputs(cred.Outputs)))
+		}
+		return nil
+	case "rabbitmq":
+		if dep.External && dep.Controlled {
+			return s.k8s.ReconcileExternalRabbitMQCredential(ctx, externalDatabaseRuntime(dep, cred, flattenDependencyOutputs(cred.Outputs)))
+		}
+		return nil
 	default:
 		return nil
+	}
+}
+
+func validateExternalAdminConfig(depType string, config model.JSONMap) error {
+	switch depType {
+	case "mysql", "postgresql", "rabbitmq":
+	default:
+		return fmt.Errorf("controlled external %s dependencies are not supported yet", depType)
+	}
+	if strings.TrimSpace(fmt.Sprint(config["admin_username"])) == "" || strings.TrimSpace(fmt.Sprint(config["admin_password"])) == "" {
+		return fmt.Errorf("controlled external %s dependency requires admin_username and admin_password", depType)
+	}
+	if depType == "rabbitmq" && strings.TrimSpace(fmt.Sprint(config["management_port"])) == "" {
+		config["management_port"] = "15672"
+	}
+	return nil
+}
+
+func externalDatabaseRuntime(dep model.ManagedDependency, cred model.DependencyCredential, outputs map[string]string) k8s.ExternalCredentialRuntime {
+	port := coalesce(outputs["port"], fmt.Sprint(cred.Config["port"]))
+	if strings.TrimSpace(port) == "" || port == "<nil>" {
+		port = fmt.Sprint(dep.Config["port"])
+	}
+	return k8s.ExternalCredentialRuntime{
+		Namespace:       "",
+		Host:            coalesce(outputs["host"], fmt.Sprint(dep.Config["host"])),
+		Port:            port,
+		Database:        coalesce(outputs["database"], fmt.Sprint(cred.Config["database"])),
+		Username:        coalesce(outputs["username"], fmt.Sprint(cred.Config["username"])),
+		Password:        coalesce(outputs["password"], fmt.Sprint(cred.Config["password"])),
+		AdminUsername:   fmt.Sprint(dep.Config["admin_username"]),
+		AdminPassword:   fmt.Sprint(dep.Config["admin_password"]),
+		ManagementPort:  fmt.Sprint(dep.Config["management_port"]),
+		DependencyName:  dep.Name,
+		CredentialName:  cred.Name,
+		DependencyType:  dep.Type,
+		ControlledLabel: "external",
 	}
 }
 

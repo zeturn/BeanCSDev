@@ -20,11 +20,24 @@ spec:
       username:
         type: string
         default: user
+      host:
+        type: string
+      port:
+        type: string
+        default: "5672"
       password:
         type: string
         secret: true
         generate:
           length: 32
+      admin_username:
+        type: string
+      admin_password:
+        type: string
+        secret: true
+      management_port:
+        type: string
+        default: "15672"
       persistence:
         type: object
         properties:
@@ -34,6 +47,8 @@ spec:
           size:
             type: string
             default: 8Gi
+          storageClass:
+            type: string
       managementUI:
         type: object
         properties:
@@ -54,7 +69,8 @@ spec:
       valueFrom:
         serviceHost: amqp
     port:
-      value: "5672"
+      valueFrom:
+        config: port
     username:
       valueFrom:
         secretKey: username

@@ -49,6 +49,7 @@ type ManagedDependency struct {
 	Status            string    `gorm:"size:32;not null;default:'creating'" json:"status"`
 	Shared            bool      `gorm:"not null;default:false" json:"shared"`
 	External          bool      `gorm:"not null;default:false" json:"external"`
+	Controlled        bool      `gorm:"not null;default:true" json:"controlled"`
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
 }

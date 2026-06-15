@@ -11,6 +11,7 @@ import (
 
 type Client interface {
 	IntrospectToken(ctx context.Context, token string) (*IntrospectionResult, error)
+	CreateTenant(ctx context.Context, req *CreateTenantRequest) (*CreateTenantResponse, error)
 	RegisterApp(ctx context.Context, req *RegisterAppRequest) (*RegisterAppResponse, error)
 	DeleteApp(ctx context.Context, appID uint) error
 	HealthCheck(ctx context.Context) (*HealthStatus, error)
@@ -153,6 +154,23 @@ type RegisterAppRequest struct {
 	RedirectURIs      []string `json:"redirect_uris"`
 	Scopes            []string `json:"scopes,omitempty"`
 	AllowedOrigins    []string `json:"allowed_origins,omitempty"`
+}
+
+type CreateTenantRequest struct {
+	Name             string `json:"name"`
+	Code             string `json:"code"`
+	Description      string `json:"description,omitempty"`
+	OwnerEmail       string `json:"owner_email"`
+	MaxApps          int    `json:"max_apps"`
+	MaxUsers         int    `json:"max_users"`
+	MaxTokensPerHour int    `json:"max_tokens_per_hour"`
+}
+
+type CreateTenantResponse struct {
+	ID    uint   `json:"id"`
+	Name  string `json:"name"`
+	Code  string `json:"code"`
+	Token string `json:"token,omitempty"`
 }
 
 type RegisterAppResponse struct {

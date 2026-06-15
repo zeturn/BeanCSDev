@@ -1,8 +1,8 @@
 const API = "/v1/api";
 import { claimFromJwt, browserRedirectURI } from "../utils/index";
 export function makeAPI(token, onUnauthorized) {
-  async function request(path, options = {}) {
-    const res = await fetch(API + path, {
+  async function performFetch(path, options = {}) {
+    return fetch(API + path, {
       ...options,
       headers: {
         ...(options.body ? { "Content-Type": "application/json" } : {}),
@@ -10,8 +10,22 @@ export function makeAPI(token, onUnauthorized) {
         ...(options.headers || {}),
       },
     });
-    const data = await res.json().catch(() => ({}));
-    if (res.status === 401 && isSessionAuthError(data)) onUnauthorized();
+  }
+  async function parseJSON(res) {
+    return res.json().catch(() => ({}));
+  }
+  async function wait(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+  async function request(path, options = {}) {
+    let res = await performFetch(path, options);
+    let data = await parseJSON(res);
+    if (res.status === 401 && isSessionAuthError(data)) {
+      await wait(1200);
+      res = await performFetch(path, options);
+      data = await parseJSON(res);
+      if (res.status === 401 && isSessionAuthError(data)) onUnauthorized();
+    }
     if (!res.ok)
       throw new Error(
         data.error ||
@@ -21,16 +35,16 @@ export function makeAPI(token, onUnauthorized) {
     return data;
   }
   async function stream(path, options = {}) {
-    const res = await fetch(API + path, {
-      ...options,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        ...(options.headers || {}),
-      },
-    });
+    let res = await performFetch(path, options);
     if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      if (res.status === 401 && isSessionAuthError(data)) onUnauthorized();
+      let data = await parseJSON(res);
+      if (res.status === 401 && isSessionAuthError(data)) {
+        await wait(1200);
+        res = await performFetch(path, options);
+        if (res.ok) return res;
+        data = await parseJSON(res);
+        if (res.status === 401 && isSessionAuthError(data)) onUnauthorized();
+      }
       throw new Error(
         data.error ||
           data.error_description ||

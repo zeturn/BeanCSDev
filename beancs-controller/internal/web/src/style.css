@@ -988,6 +988,119 @@ button.ghost:hover,
   flex-shrink: 0;
 }
 
+.panel-heading-inline {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.panel-heading-inline h2 {
+  margin-bottom: 4px;
+}
+
+.dependencies-page {
+  display: grid;
+  gap: 14px;
+}
+
+.dependency-create-form,
+.dependency-credential-form {
+  grid-template-columns: 180px minmax(0, 1fr);
+  align-items: center;
+}
+
+.dependency-entity-list {
+  display: grid;
+  gap: 12px;
+}
+
+.dependency-entity {
+  background: #ffffff;
+  border: 1px solid #dbe4ed;
+  border-radius: 8px;
+  padding: 14px;
+  display: grid;
+  gap: 14px;
+}
+
+.dependency-entity-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dependency-entity-head h2 {
+  margin: 0 0 4px;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.dependency-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.dependency-badges span {
+  border: 1px solid #dbe4ed;
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.dependency-credential-list {
+  display: grid;
+  gap: 6px;
+}
+
+.dependency-credential-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) minmax(90px, 160px) 80px;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 7px;
+  background: #f8fafc;
+}
+
+.dependency-credential-row small {
+  color: #64748b;
+}
+
+.empty.compact {
+  min-height: auto;
+  padding: 12px;
+}
+
+@media (max-width: 760px) {
+  .dependency-create-form,
+  .dependency-credential-form {
+    grid-template-columns: 1fr;
+  }
+
+  .dependency-entity-head {
+    display: grid;
+  }
+
+  .dependency-badges {
+    justify-content: flex-start;
+  }
+
+  .dependency-credential-row {
+    grid-template-columns: 18px minmax(0, 1fr);
+  }
+}
+
 .muted {
   color: #64748b;
   line-height: 1.45;
@@ -1353,6 +1466,13 @@ button.domain-tile {
   grid-template-columns: repeat(5, minmax(130px, 1fr));
 }
 
+.basaltpass-table .tr {
+  grid-template-columns:
+    minmax(130px, 1fr) minmax(120px, 1fr) minmax(90px, 0.7fr)
+    minmax(105px, 0.8fr) minmax(210px, 1.6fr) minmax(100px, 0.8fr)
+    minmax(80px, 0.6fr) minmax(70px, auto);
+}
+
 .tr.head {
   color: #475569;
   font-weight: 700;
@@ -1403,6 +1523,18 @@ button.domain-tile {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.pagination-bar {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.pagination-bar .row-actions {
+  align-items: center;
 }
 
 .repo-toolbar {

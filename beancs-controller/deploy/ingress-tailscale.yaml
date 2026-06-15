@@ -5,9 +5,11 @@ metadata:
   namespace: beancs-system
 spec:
   ingressClassName: tailscale
+  tls:
+    - hosts:
+        - beancs-controller
   rules:
-    - host: beancs-controller
-      http:
+    - http:
         paths:
           - path: /
             pathType: Prefix

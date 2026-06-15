@@ -505,8 +505,9 @@ auth:
   existingSecretPasswordKey: rabbitmq-password
 persistence:
   enabled: %s
+%s
   size: %s
-`, dep.ServiceName, yamlScalar(username), dep.SecretName, yamlBool(configBool(dep.Config, "persistence.enabled", true)), yamlScalar(configString(dep.Config, "persistence.size", "8Gi")))
+`, dep.ServiceName, yamlScalar(username), dep.SecretName, yamlBool(configBool(dep.Config, "persistence.enabled", true)), renderDependencyStorageClass(dep, 2), yamlScalar(configString(dep.Config, "persistence.size", "8Gi")))
 }
 
 func renderPostgreSQLValues(dep model.ManagedDependency) string {
@@ -519,17 +520,25 @@ func renderPostgreSQLValues(dep model.ManagedDependency) string {
 		database = fmt.Sprint(dep.Config["database"])
 	}
 	return fmt.Sprintf(`fullnameOverride: %s
+global:
+  security:
+    allowInsecureImages: true
+image:
+  registry: docker.io
+  repository: bitnamilegacy/postgresql
+  tag: latest
 auth:
   username: %s
   database: %s
   existingSecret: %s
   customPasswordFiles:
-    user: mysql-password
+    user: password
 primary:
   persistence:
     enabled: %s
+%s
     size: %s
-`, dep.ServiceName, yamlScalar(coalesce(username, "app")), yamlScalar(coalesce(database, "app")), dep.SecretName, yamlBool(configBool(dep.Config, "persistence.enabled", true)), yamlScalar(configString(dep.Config, "persistence.size", "20Gi")))
+`, dep.ServiceName, yamlScalar(coalesce(username, "app")), yamlScalar(coalesce(database, "app")), dep.SecretName, yamlBool(configBool(dep.Config, "persistence.enabled", true)), renderDependencyStorageClass(dep, 4), yamlScalar(configString(dep.Config, "persistence.size", "20Gi")))
 }
 
 func renderMySQLValues(dep model.ManagedDependency) string {
@@ -556,8 +565,9 @@ auth:
 primary:
   persistence:
     enabled: %s
+%s
     size: %s
-`, dep.ServiceName, yamlScalar(coalesce(username, "app")), yamlScalar(coalesce(database, "app")), dep.SecretName, yamlBool(configBool(dep.Config, "persistence.enabled", true)), yamlScalar(configString(dep.Config, "persistence.size", "20Gi")))
+`, dep.ServiceName, yamlScalar(coalesce(username, "app")), yamlScalar(coalesce(database, "app")), dep.SecretName, yamlBool(configBool(dep.Config, "persistence.enabled", true)), renderDependencyStorageClass(dep, 4), yamlScalar(configString(dep.Config, "persistence.size", "20Gi")))
 }
 
 func renderRedisValues(dep model.ManagedDependency) string {
@@ -574,8 +584,20 @@ auth:
 master:
   persistence:
     enabled: %s
+%s
     size: %s
-`, dep.ServiceName, yamlScalar(architecture), dep.SecretName, yamlBool(configBool(dep.Config, "persistence.enabled", true)), yamlScalar(configString(dep.Config, "persistence.size", "8Gi")))
+`, dep.ServiceName, yamlScalar(architecture), dep.SecretName, yamlBool(configBool(dep.Config, "persistence.enabled", true)), renderDependencyStorageClass(dep, 4), yamlScalar(configString(dep.Config, "persistence.size", "8Gi")))
+}
+
+func renderDependencyStorageClass(dep model.ManagedDependency, spaces int) string {
+	storageClass := strings.TrimSpace(configString(dep.Config, "persistence.storageClass", ""))
+	if storageClass == "" {
+		storageClass = strings.TrimSpace(configString(dep.Config, "persistence.storageClassName", ""))
+	}
+	if storageClass == "" {
+		return ""
+	}
+	return fmt.Sprintf("%sstorageClass: %s\n", strings.Repeat(" ", spaces), yamlScalar(storageClass))
 }
 
 func dependencySecretRuntimeData(dep model.ManagedDependency) map[string]string {
@@ -858,7 +880,15 @@ spec:
   resources:
     requests:
       storage: %s
-`, projectVolumeClaimName(project.Name, volume.Name), project.Namespace, project.Name, strings.TrimRight(modes.String(), "\n"), volume.Size)
+%s`, projectVolumeClaimName(project.Name, volume.Name), project.Namespace, project.Name, strings.TrimRight(modes.String(), "\n"), volume.Size, renderPVCStorageClassName(volume))
+}
+
+func renderPVCStorageClassName(volume model.ProjectVolume) string {
+	storageClass := strings.TrimSpace(volume.StorageClassName)
+	if storageClass == "" {
+		return ""
+	}
+	return fmt.Sprintf("  storageClassName: %s\n", yamlScalar(storageClass))
 }
 
 func projectVolumeClaimName(projectName, volumeName string) string {

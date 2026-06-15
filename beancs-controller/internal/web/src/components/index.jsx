@@ -306,9 +306,15 @@ export function DependencyLinksEditor({
       return;
     }
     const definition = definitionForDependency(definitions, dependency.type);
+    const credential = (dependency.credentials || [])[0];
     onChange([
       ...links,
-      { dependency: dependency.name, preset: firstEnvPreset(definition) },
+      {
+        dependency: dependency.name,
+        preset: firstEnvPreset(definition),
+        credential: credential?.name || "",
+        credential_id: credential?.id || "",
+      },
     ]);
   };
   const updatePreset = (dependencyName, preset) => {
@@ -316,6 +322,24 @@ export function DependencyLinksEditor({
       links.map((link) =>
         link.dependency === dependencyName ? { ...link, preset } : link,
       ),
+    );
+  };
+  const updateCredential = (dependencyName, credentialID) => {
+    onChange(
+      links.map((link) => {
+        if (link.dependency !== dependencyName) return link;
+        const dependency = dependencies.find(
+          (item) => item.name === dependencyName,
+        );
+        const credential = (dependency?.credentials || []).find(
+          (item) => String(item.id) === String(credentialID),
+        );
+        return {
+          ...link,
+          credential_id: credential?.id || "",
+          credential: credential?.name || "",
+        };
+      }),
     );
   };
   return (
@@ -357,6 +381,20 @@ export function DependencyLinksEditor({
                 {presets.map((preset) => (
                   <option key={preset} value={preset}>
                     {preset}
+                  </option>
+                ))}
+              </Select>
+              <Select
+                value={link?.credential_id || ""}
+                onChange={(event) =>
+                  updateCredential(dependency.name, event.target.value)
+                }
+                disabled={!link || !(dependency.credentials || []).length}
+              >
+                <option value="">default</option>
+                {(dependency.credentials || []).map((credential) => (
+                  <option key={credential.id} value={credential.id}>
+                    {credential.name}
                   </option>
                 ))}
               </Select>
@@ -797,31 +835,93 @@ export function ExpandableCell({ value, className = "", max = 36 }) {
   );
 }
 
-export function SimpleTable({ rows, columns, actions, compact = false }) {
+export function PaginationBar({
+  page,
+  pageSize,
+  total,
+  onPageChange,
+  label = "items",
+}) {
+  const totalItems = Number(total || 0);
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const safePage = Math.max(1, Math.min(page, totalPages));
+  const start = totalItems === 0 ? 0 : (safePage - 1) * pageSize + 1;
+  const end = Math.min(totalItems, safePage * pageSize);
   return (
-    <div className={compact ? "table compact-table" : "table network-table"}>
-      <div className="tr head">
-        {columns.map((column) => (
-          <span key={column}>{column.replaceAll("_", " ")}</span>
-        ))}
-        {actions && <span>Actions</span>}
-      </div>
-      {(rows || []).map((row, index) => (
-        <div
-          className="tr"
-          key={`${row.namespace || ""}-${row.name || row.service || index}`}
+    <div className="pagination-bar">
+      <small className="muted">
+        {totalItems === 0
+          ? `No ${label}`
+          : `${start}-${end} / ${totalItems} ${label}`}
+      </small>
+      <div className="row-actions">
+        <Button
+          type="button"
+          onClick={() => onPageChange(safePage - 1)}
+          disabled={safePage <= 1}
         >
-          {columns.map((column) => {
-            const value = formatCell(row[column]);
-            return <ExpandableCell key={column} value={value} max={36} />;
-          })}
-          {actions && <span className="row-actions">{actions(row)}</span>}
-        </div>
-      ))}
-      {(!rows || rows.length === 0) && (
-        <div className="empty">No records found.</div>
-      )}
+          Prev
+        </Button>
+        <small className="muted">
+          Page {safePage}/{totalPages}
+        </small>
+        <Button
+          type="button"
+          onClick={() => onPageChange(safePage + 1)}
+          disabled={safePage >= totalPages}
+        >
+          Next
+        </Button>
+      </div>
     </div>
+  );
+}
+
+export function SimpleTable({
+  rows,
+  columns,
+  actions,
+  compact = false,
+  pageSize = 12,
+}) {
+  const safeRows = rows || [];
+  const [page, setPage] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(safeRows.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const pagedRows = safeRows.slice((safePage - 1) * pageSize, safePage * pageSize);
+  useEffect(() => {
+    setPage(1);
+  }, [safeRows.length, pageSize]);
+  return (
+    <>
+      <div className={compact ? "table compact-table" : "table network-table"}>
+        <div className="tr head">
+          {columns.map((column) => (
+            <span key={column}>{column.replaceAll("_", " ")}</span>
+          ))}
+          {actions && <span>Actions</span>}
+        </div>
+        {pagedRows.map((row, index) => (
+          <div
+            className="tr"
+            key={`${row.namespace || ""}-${row.name || row.service || index}`}
+          >
+            {columns.map((column) => {
+              const value = formatCell(row[column]);
+              return <ExpandableCell key={column} value={value} max={36} />;
+            })}
+            {actions && <span className="row-actions">{actions(row)}</span>}
+          </div>
+        ))}
+        {safeRows.length === 0 && <div className="empty">No records found.</div>}
+      </div>
+      <PaginationBar
+        page={safePage}
+        pageSize={pageSize}
+        total={safeRows.length}
+        onPageChange={setPage}
+      />
+    </>
   );
 }
 
@@ -842,31 +942,36 @@ export function RuntimeTable({
   onDetail,
 }) {
   const keys = rows[0] ? Object.keys(rows[0]).slice(0, 7) : [];
+  const [page, setPage] = useState(1);
+  const [createOpen, setCreateOpen] = useState(false);
+  const pageSize = 12;
+  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const pagedRows = rows.slice((safePage - 1) * pageSize, safePage * pageSize);
+  useEffect(() => {
+    setPage(1);
+  }, [kind, rows.length]);
   return (
     <div className="stack">
-      {kind === "namespaces" && (
-        <section className="panel">
-          <h2>
-            <Layers3 size={18} /> Create namespace
-          </h2>
-          <form className="form-grid inline-form" onSubmit={onCreateNamespace}>
-            <Input name="name" placeholder="namespace-name" required />
-            <Input name="labels" placeholder="labels: env=dev,team=platform" />
-            <Button variant="primary" type="submit">
-              <Plus size={15} /> Create
-            </Button>
-          </form>
-        </section>
-      )}
-      {kind === "services" && (
-        <section className="panel">
-          <h2>
-            <Database size={18} /> Create service
-          </h2>
-          <ServiceForm
-            onSubmit={(event) => onSaveService(event)}
-            namespaces={[]}
-          />
+      {(kind === "namespaces" || kind === "services") && (
+        <section className="panel action-panel">
+          <div>
+            <h2>
+              {kind === "namespaces" ? (
+                <>
+                  <Layers3 size={18} /> Namespaces
+                </>
+              ) : (
+                <>
+                  <Database size={18} /> Services
+                </>
+              )}
+            </h2>
+            <p className="muted">创建入口已从列表中分离，避免页面过长。</p>
+          </div>
+          <Button variant="primary" type="button" onClick={() => setCreateOpen(true)}>
+            <Plus size={15} /> {kind === "namespaces" ? "Create namespace" : "Create service"}
+          </Button>
         </section>
       )}
       {kind === "nodes" && (
@@ -883,7 +988,7 @@ export function RuntimeTable({
             ))}
             <span>Actions</span>
           </div>
-          {rows.map((row, index) => (
+          {pagedRows.map((row, index) => (
             <div
               className="tr"
               key={`${kind}-${row.namespace || ""}-${row.name || index}`}
@@ -943,7 +1048,61 @@ export function RuntimeTable({
           ))}
           {rows.length === 0 && <div className="empty">No {kind} found.</div>}
         </div>
+        <PaginationBar
+          page={safePage}
+          pageSize={pageSize}
+          total={rows.length}
+          onPageChange={setPage}
+          label={kind}
+        />
       </section>
+      {createOpen && kind === "namespaces" && (
+        <Modal
+          title="Create namespace"
+          subtitle="将创建表单放在弹窗中，便于聚焦输入。"
+          onClose={() => setCreateOpen(false)}
+        >
+          <form
+            className="form-grid inline-form"
+            onSubmit={async (event) => {
+              await onCreateNamespace(event);
+              setCreateOpen(false);
+            }}
+          >
+            <Input name="name" placeholder="namespace-name" required />
+            <Input name="labels" placeholder="labels: env=dev,team=platform" />
+            <div className="modal-actions">
+              <Button type="button" onClick={() => setCreateOpen(false)}>
+                Cancel
+              </Button>
+              <Button variant="primary" type="submit">
+                <Plus size={15} /> Create
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      )}
+      {createOpen && kind === "services" && (
+        <Modal
+          title="Create service"
+          subtitle="填写服务参数后保存。"
+          onClose={() => setCreateOpen(false)}
+          className="wide-modal"
+        >
+          <ServiceForm
+            onSubmit={async (event) => {
+              await onSaveService(event);
+              setCreateOpen(false);
+            }}
+            namespaces={[]}
+          />
+          <div className="modal-actions">
+            <Button type="button" onClick={() => setCreateOpen(false)}>
+              Close
+            </Button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -1107,65 +1266,180 @@ export function ServiceForm({ existing, onSubmit }) {
   );
 }
 
-export function CredentialManager({ kind, rows, onCreate, onDelete }) {
+export function CredentialManager({
+  kind,
+  rows,
+  onCreate,
+  onDelete,
+  dependencies = [],
+}) {
+  const safeRows = rows || [];
   const isCloudflare = kind === "cloudflare";
+  const [basaltDeployMode, setBasaltDeployMode] = useState("external");
+  const [createOpen, setCreateOpen] = useState(false);
+  const [page, setPage] = useState(1);
+  const pageSize = 10;
+  const totalPages = Math.max(1, Math.ceil(safeRows.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const pagedRows = safeRows.slice(
+    (safePage - 1) * pageSize,
+    safePage * pageSize,
+  );
+  useEffect(() => {
+    setPage(1);
+  }, [safeRows.length]);
+  const databaseDependencies = (dependencies || []).filter((dependency) =>
+    ["mysql", "postgresql"].includes(dependency.type),
+  );
   const title = isCloudflare ? "Cloudflare accounts" : "BasaltPass tenants";
   const columns = isCloudflare
     ? ["name", "account_id", "is_active"]
-    : ["name", "tenant_code", "tenant_id", "base_url", "is_active"];
-  return (
-    <div className="stack">
-      <section className="panel">
-        <h2>
-          <KeyRound size={18} /> Add{" "}
-          {isCloudflare ? "Cloudflare account" : "BasaltPass tenant"}
-        </h2>
-        <form className="form-grid" onSubmit={(event) => onCreate(kind, event)}>
-          <Input name="name" placeholder="Name" required />
-          {isCloudflare ? (
-            <>
-              <Input name="account_id" placeholder="Account ID, optional" />
-              <Input
-                name="api_token"
-                type="password"
-                placeholder="Cloudflare API token"
-                required
-              />
-            </>
-          ) : (
-            <>
-              <Input
-                name="base_url"
-                placeholder="https://auth.example.com"
-                required
-              />
-              <Input name="tenant_code" placeholder="Tenant code" required />
-              <Input name="tenant_id" placeholder="Tenant ID, optional" />
-              <Input
-                name="automation_token"
-                type="password"
-                placeholder="Automation token bpk_..."
-                required
-              />
-            </>
-          )}
+    : [
+        "name",
+        "tenant_code",
+        "tenant_id",
+        "deploy_mode",
+        "base_url",
+        "deploy_status",
+        "is_active",
+      ];
+  function renderCreateForm() {
+    return (
+      <form
+        className="form-grid"
+        onSubmit={async (event) => {
+          const ok = await onCreate(kind, event);
+          if (ok) setCreateOpen(false);
+        }}
+      >
+        <Input name="name" placeholder="Name" required />
+        {isCloudflare ? (
+          <>
+            <Input name="account_id" placeholder="Account ID, optional" />
+            <Input
+              name="api_token"
+              type="password"
+              placeholder="Cloudflare API token"
+              required
+            />
+          </>
+        ) : (
+          <>
+            <Input
+              name="base_url"
+              placeholder="https://auth.example.com"
+              required
+            />
+            <Select
+              name="deploy_mode"
+              value={basaltDeployMode}
+              onChange={(event) => setBasaltDeployMode(event.target.value)}
+            >
+              <option value="external">Existing tenant</option>
+              <option value="managed">BeanCS managed tenant</option>
+            </Select>
+            <Input name="tenant_code" placeholder="Tenant code" required />
+            <Input name="tenant_id" placeholder="Tenant ID, optional" />
+            {basaltDeployMode === "managed" && (
+              <>
+                <Input
+                  name="owner_email"
+                  type="email"
+                  placeholder="Tenant owner email"
+                  required
+                />
+                <Input name="namespace" placeholder="Namespace, optional" />
+                <Input
+                  name="backend_image"
+                  placeholder="ghcr.io/owner/basaltpass-backend:tag"
+                  required
+                />
+                <Input
+                  name="frontend_image"
+                  placeholder="ghcr.io/owner/basaltpass-frontend:tag"
+                  required
+                />
+                <Input
+                  name="public_host"
+                  placeholder="auth.example.com, optional"
+                />
+                <Select name="exposure_mode" defaultValue="public">
+                  <option value="public">Public ingress</option>
+                  <option value="private">Private ingress</option>
+                </Select>
+                <Select name="database_binding" required>
+                  <option value="">Database credential</option>
+                  {databaseDependencies.flatMap((dependency) =>
+                    (dependency.credentials || []).map((credential) => (
+                      <option
+                        key={`${dependency.id}:${credential.id}`}
+                        value={`${dependency.id}:${credential.id}`}
+                      >
+                        {dependency.name} / {credential.name}
+                      </option>
+                    )),
+                  )}
+                </Select>
+                <Input name="max_apps" type="number" placeholder="Max apps" />
+                <Input name="max_users" type="number" placeholder="Max users" />
+                <Input
+                  name="jwt_secret"
+                  type="password"
+                  placeholder="JWT secret, generated if empty"
+                />
+                <Input
+                  name="service_token"
+                  type="password"
+                  placeholder="Management service token"
+                  required
+                />
+              </>
+            )}
+            <Input
+              name="automation_token"
+              type="password"
+              placeholder="Tenant automation token bpk_..."
+              required
+            />
+          </>
+        )}
+        <div className="modal-actions">
+          <Button type="button" onClick={() => setCreateOpen(false)}>
+            Cancel
+          </Button>
           <Button variant="primary" type="submit">
             <Plus size={16} /> Add
           </Button>
-        </form>
+        </div>
+      </form>
+    );
+  }
+  return (
+    <div className="stack">
+      <section className="panel action-panel">
+        <div>
+          <h2>
+            <KeyRound size={18} /> {title}
+          </h2>
+          <p className="muted">创建表单已单独放入弹窗，列表区域更聚焦。</p>
+        </div>
+        <Button type="button" variant="primary" onClick={() => setCreateOpen(true)}>
+          <Plus size={16} /> Add{" "}
+          {isCloudflare ? "Cloudflare account" : "BasaltPass tenant"}
+        </Button>
       </section>
       <section className="panel">
         <h2>
           <KeyRound size={18} /> {title}
         </h2>
-        <div className="table compact">
+        <div className={`table compact ${isCloudflare ? "" : "basaltpass-table"}`}>
           <div className="tr head">
             {columns.map((column) => (
               <span key={column}>{column.replaceAll("_", " ")}</span>
             ))}
             <span>Actions</span>
           </div>
-          {rows.map((row) => (
+          {pagedRows.map((row) => (
             <div className="tr" key={row.id}>
               {columns.map((column) => (
                 <ExpandableCell
@@ -1181,11 +1455,30 @@ export function CredentialManager({ kind, rows, onCreate, onDelete }) {
               </span>
             </div>
           ))}
-          {rows.length === 0 && (
+          {safeRows.length === 0 && (
             <div className="empty">No credentials found.</div>
           )}
         </div>
+        <PaginationBar
+          page={safePage}
+          pageSize={pageSize}
+          total={safeRows.length}
+          onPageChange={setPage}
+          label="credentials"
+        />
       </section>
+      {createOpen && (
+        <Modal
+          title={
+            isCloudflare ? "Add Cloudflare account" : "Add BasaltPass tenant"
+          }
+          subtitle="创建表单已与列表分离。"
+          className="wide-modal"
+          onClose={() => setCreateOpen(false)}
+        >
+          {renderCreateForm()}
+        </Modal>
+      )}
     </div>
   );
 }

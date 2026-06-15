@@ -147,7 +147,7 @@ func (m *Manager) applyControllerIngress(ctx context.Context, opts controllerIng
 		Spec: networkingv1.IngressSpec{
 			IngressClassName: &opts.ClassName,
 			Rules: []networkingv1.IngressRule{{
-				Host: opts.Host,
+				Host: ingressRuleHost(opts.ClassName, opts.Host),
 				IngressRuleValue: networkingv1.IngressRuleValue{HTTP: &networkingv1.HTTPIngressRuleValue{Paths: []networkingv1.HTTPIngressPath{{
 					Path:     opts.Path,
 					PathType: &pathType,
@@ -159,7 +159,9 @@ func (m *Manager) applyControllerIngress(ctx context.Context, opts controllerIng
 			}},
 		},
 	}
-	if opts.TLSSecretName != "" {
+	if isTailscaleIngress(opts.ClassName) {
+		ing.Spec.TLS = []networkingv1.IngressTLS{{Hosts: []string{opts.Host}}}
+	} else if opts.TLSSecretName != "" {
 		ing.Spec.TLS = []networkingv1.IngressTLS{{Hosts: []string{opts.Host}, SecretName: opts.TLSSecretName}}
 	}
 	_, err := m.Clientset.NetworkingV1().Ingresses(opts.Namespace).Create(ctx, ing, metav1.CreateOptions{})

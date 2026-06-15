@@ -55,14 +55,25 @@ func (m *Manager) ReconcileMySQLCredential(ctx context.Context, in MySQLCredenti
 func mysqlCredentialJob(in MySQLCredentialRuntime, port string) *batchv1.Job {
 	backoffLimit := int32(1)
 	ttl := int32(300)
-	command := fmt.Sprintf(`/opt/bitnami/mysql/bin/mysql -h %s -P %s -uroot -p"$MYSQL_ROOT_PASSWORD" <<'SQL'
+	command := fmt.Sprintf(`for i in {1..90}; do
+  if /opt/bitnami/mysql/bin/mysql -h %s -P %s -uroot -p"$MYSQL_ROOT_PASSWORD" -e 'SELECT 1' >/dev/null 2>&1; then
+    mysql_ready=1
+    break
+  fi
+  sleep 2
+done
+if [ "${mysql_ready:-}" != "1" ]; then
+  echo "mysql service did not become ready"
+  exit 1
+fi
+/opt/bitnami/mysql/bin/mysql -h %s -P %s -uroot -p"$MYSQL_ROOT_PASSWORD" <<'SQL'
 CREATE DATABASE IF NOT EXISTS %s;
 CREATE USER IF NOT EXISTS %s@'%%' IDENTIFIED BY %s;
 ALTER USER %s@'%%' IDENTIFIED BY %s;
 GRANT ALL PRIVILEGES ON %s.* TO %s@'%%';
 FLUSH PRIVILEGES;
 SQL
-`, shellQuote(in.ServiceName), shellQuote(port), mysqlIdent(in.Database), mysqlString(in.Username), mysqlString(in.Password), mysqlString(in.Username), mysqlString(in.Password), mysqlIdent(in.Database), mysqlString(in.Username))
+`, shellQuote(in.ServiceName), shellQuote(port), shellQuote(in.ServiceName), shellQuote(port), mysqlIdent(in.Database), mysqlString(in.Username), mysqlString(in.Password), mysqlString(in.Username), mysqlString(in.Password), mysqlIdent(in.Database), mysqlString(in.Username))
 	labels := map[string]string{
 		"managed-by":  "beancs",
 		"beancs-task": "mysql-credential",
@@ -110,7 +121,7 @@ func (m *Manager) waitForJob(ctx context.Context, namespace, name string, timeou
 		if job.Status.Succeeded > 0 {
 			return nil
 		}
-		if job.Status.Failed > 0 {
+		if jobHasFailed(job) {
 			return fmt.Errorf("job %s/%s failed", namespace, name)
 		}
 		if time.Now().After(deadline) {
@@ -122,6 +133,18 @@ func (m *Manager) waitForJob(ctx context.Context, namespace, name string, timeou
 		case <-time.After(2 * time.Second):
 		}
 	}
+}
+
+func jobHasFailed(job *batchv1.Job) bool {
+	if job == nil {
+		return false
+	}
+	for _, condition := range job.Status.Conditions {
+		if condition.Type == batchv1.JobFailed && condition.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+	return false
 }
 
 var mysqlIdentPattern = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
