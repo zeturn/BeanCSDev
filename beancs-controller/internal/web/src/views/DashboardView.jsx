@@ -52,6 +52,7 @@ import {
   Rocket,
   ScrollText,
   Search,
+  Server,
   Settings,
   Shield,
   ShieldCheck,
