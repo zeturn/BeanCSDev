@@ -287,10 +287,12 @@ func (s *CredentialService) DeployBasaltPass(ctx context.Context, userID string,
 	if err := s.ensureBasaltPassDNS(ctx, userID, req); err != nil {
 		return nil, err
 	}
-	if err := waitForBasaltPassHealth(ctx, req.BaseURL, req.ClientID, req.ClientSecret, req.ServiceToken); err != nil {
+	runtimeReq := req
+	runtimeReq.BaseURL = basaltPassInternalBaseURL(req.Namespace)
+	if err := waitForBasaltPassHealth(ctx, runtimeReq.BaseURL, runtimeReq.ClientID, runtimeReq.ClientSecret, runtimeReq.ServiceToken); err != nil {
 		return nil, err
 	}
-	created, err := s.createBasaltPassTenant(ctx, req)
+	created, err := s.createBasaltPassTenant(ctx, runtimeReq)
 	if err != nil {
 		return nil, err
 	}
@@ -340,6 +342,14 @@ func (s *CredentialService) DeployBasaltPass(ctx context.Context, userID string,
 		return tx.Create(&model.UserCredential{UserID: userID, CredentialType: model.CredentialTypeBasaltPass, CredentialID: cred.ID, Role: model.CredentialRoleOwner}).Error
 	})
 	return cred, err
+}
+
+func basaltPassInternalBaseURL(namespace string) string {
+	namespace = strings.TrimSpace(namespace)
+	if namespace == "" {
+		return ""
+	}
+	return "http://backend." + namespace + ".svc.cluster.local:8101"
 }
 
 func (s *CredentialService) ensureBasaltPassDNS(ctx context.Context, userID string, req dto.DeployBasaltPassRequest) error {
