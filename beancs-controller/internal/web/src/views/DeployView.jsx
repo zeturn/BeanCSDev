@@ -416,6 +416,7 @@ export default function DeployView({
     };
     if (isBasaltPassDeploy) {
       const owner = (repo.full_name || "").split("/")[0]?.toLowerCase();
+      const defaultSlug = slugify(nextName);
       const backendImage = basaltpassImageBase
         ? `${basaltpassImageBase}/basaltpass-backend:latest`
         : owner
@@ -430,7 +431,8 @@ export default function DeployView({
         ...nextForm,
         backend_image: form.backend_image || backendImage,
         frontend_image: form.frontend_image || frontendImage,
-        tenant_code: form.tenant_code || slugify(nextName),
+        tenant_code: form.tenant_code || defaultSlug,
+        subdomain: form.subdomain || defaultSlug,
       });
       return;
     }
@@ -1078,6 +1080,7 @@ export default function DeployView({
                   name: slugify(v),
                   tenant_name: form.tenant_name || v.trim(),
                   tenant_code: form.tenant_code || slugify(v),
+                  subdomain: form.subdomain || slugify(v),
                 })
               }
               required

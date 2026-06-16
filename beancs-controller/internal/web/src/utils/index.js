@@ -345,7 +345,12 @@ export function canContinueDeployStep(
   }
   if (stepID === "domain") {
     if (form.deploy_target === "basaltpass") {
-      return form.exposure_mode === "private" || Boolean(form.public_host);
+      if (form.exposure_mode === "private") return Boolean(form.public_host);
+      return Boolean(
+        form.cloudflare_credential_id &&
+          form.cloudflare_zone_id &&
+          form.subdomain,
+      );
     }
     if (form.application_type === "monorepo") {
       const publicComponents = (form.components || []).some(
