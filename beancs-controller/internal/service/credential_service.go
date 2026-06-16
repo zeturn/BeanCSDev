@@ -489,6 +489,13 @@ func (s *CredentialService) prepareBasaltPassImages(ctx context.Context, userID 
 	backendImage := strings.TrimSpace(req.BackendImage)
 	frontendImage := strings.TrimSpace(req.FrontendImage)
 	if req.GitHubCredentialID == 0 || !isGHCRImage(backendImage) || !isGHCRImage(frontendImage) {
+		pullSecret, err := s.ensureBasaltPassRegistryPullSecret(ctx, req, backendImage, frontendImage)
+		if err != nil {
+			return "", "", "", err
+		}
+		if pullSecret != "" {
+			return backendImage, frontendImage, pullSecret, nil
+		}
 		return backendImage, frontendImage, "", nil
 	}
 	if s.cfg == nil || strings.TrimSpace(s.cfg.RegistryHost) == "" || strings.TrimSpace(s.cfg.RegistryUsername) == "" || strings.TrimSpace(s.cfg.RegistryToken) == "" {
@@ -559,8 +566,66 @@ func (s *CredentialService) prepareBasaltPassImages(ctx context.Context, userID 
 	return backendTarget, frontendTarget, project.RegistryPullSecretName, nil
 }
 
+func (s *CredentialService) ensureBasaltPassRegistryPullSecret(ctx context.Context, req dto.DeployBasaltPassRequest, backendImage, frontendImage string) (string, error) {
+	if s.cfg == nil || strings.TrimSpace(s.cfg.RegistryHost) == "" {
+		return "", nil
+	}
+	host := normalizeRegistryHost(s.cfg.RegistryHost)
+	backendProject, ok := registryProjectFromImage(backendImage, host)
+	if !ok {
+		return "", nil
+	}
+	frontendProject, ok := registryProjectFromImage(frontendImage, host)
+	if !ok || frontendProject != backendProject {
+		return "", nil
+	}
+	if s.k8s == nil {
+		return "", fmt.Errorf("kubernetes manager is not configured")
+	}
+	name := harborName(req.Name)
+	pullSecret := strings.TrimSpace(s.cfg.RegistryPullSecret)
+	if pullSecret == "" {
+		pullSecret = "beancs-registry-pull"
+	}
+	project := &model.Project{
+		Name:                   name,
+		Namespace:              req.Namespace,
+		RegistryHost:           host,
+		RegistryProject:        backendProject,
+		RegistryRepository:     name,
+		RegistryPullSecretName: pullSecret,
+	}
+	creds, err := ensureHarborPullRobot(ctx, s.cfg, project)
+	if err != nil {
+		return "", err
+	}
+	if err := s.k8s.CreateNamespace(ctx, req.Namespace, name); err != nil {
+		return "", err
+	}
+	if err := s.k8s.UpsertRegistryPullSecretWithCredentials(ctx, req.Namespace, name, pullSecret, creds.Host, creds.Username, creds.Token); err != nil {
+		return "", err
+	}
+	return pullSecret, nil
+}
+
 func isGHCRImage(image string) bool {
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(image)), "ghcr.io/")
+}
+
+func registryProjectFromImage(image, registryHost string) (string, bool) {
+	image = strings.TrimSpace(image)
+	registryHost = strings.Trim(strings.TrimSpace(registryHost), "/")
+	if image == "" || registryHost == "" {
+		return "", false
+	}
+	prefix := registryHost + "/"
+	if !strings.HasPrefix(strings.ToLower(image), strings.ToLower(prefix)) {
+		return "", false
+	}
+	rest := image[len(prefix):]
+	project, _, ok := strings.Cut(rest, "/")
+	project = strings.TrimSpace(project)
+	return project, ok && project != ""
 }
 
 func imageTag(image string) string {

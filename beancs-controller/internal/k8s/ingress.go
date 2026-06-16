@@ -41,10 +41,8 @@ func (m *Manager) ApplyIngressPorts(ctx context.Context, namespace, projectName 
 func (m *Manager) applyIngressPort(ctx context.Context, namespace, projectName string, port model.ProjectPort) error {
 	className := "traefik"
 	annotations := map[string]string{}
-	if m.CertManager.IssuerName != "" {
-		annotations["cert-manager.io/issuer"] = m.CertManager.IssuerName
-	}
 	if port.Exposure == model.ExposurePublic {
+		annotations["cert-manager.io/cluster-issuer"] = "letsencrypt-prod"
 		annotations["kubernetes.io/ingress.class"] = "traefik"
 		annotations["traefik.ingress.kubernetes.io/router.entrypoints"] = "websecure"
 		annotations["traefik.ingress.kubernetes.io/router.tls"] = "true"

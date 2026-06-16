@@ -148,9 +148,7 @@ func (m *Manager) applyBasaltPassIngress(ctx context.Context, namespace, name, s
 		annotations["kubernetes.io/ingress.class"] = "traefik"
 		annotations["traefik.ingress.kubernetes.io/router.entrypoints"] = "websecure"
 		annotations["traefik.ingress.kubernetes.io/router.tls"] = "true"
-		if m.CertManager.IssuerName != "" {
-			annotations["cert-manager.io/issuer"] = m.CertManager.IssuerName
-		}
+		annotations["cert-manager.io/cluster-issuer"] = "letsencrypt-prod"
 	}
 	pathType := networkingv1.PathTypePrefix
 	ing := &networkingv1.Ingress{
