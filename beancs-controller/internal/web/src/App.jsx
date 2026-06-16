@@ -2526,6 +2526,7 @@ function App() {
             )}
             {view === "deploy" && (
               <DeployView
+                config={config}
                 credentials={credentials}
                 domains={domains}
                 namespaces={runtime.namespaces || []}

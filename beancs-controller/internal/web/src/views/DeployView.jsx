@@ -207,6 +207,7 @@ const updateModeOptions = [
   },
 ];
 export default function DeployView({
+  config,
   credentials,
   domains,
   namespaces,
@@ -249,6 +250,16 @@ export default function DeployView({
       .toLowerCase()
       .includes(repoSearch.toLowerCase()),
   );
+  const registryHost = String(config?.registry_host || "")
+    .replace(/^https?:\/\//, "")
+    .replace(/\/+$/, "");
+  const basaltpassImageProject = slugify(
+    String(config?.basaltpass_image_project || "basaltpass"),
+  );
+  const basaltpassImageBase =
+    registryHost && basaltpassImageProject
+      ? `${registryHost}/${basaltpassImageProject}`
+      : "";
   const isBasaltPassDeploy = form.deploy_target === "basaltpass";
   const publicHost =
     form.subdomain && selectedCloudflareDomain
@@ -405,12 +416,20 @@ export default function DeployView({
     };
     if (isBasaltPassDeploy) {
       const owner = (repo.full_name || "").split("/")[0]?.toLowerCase();
+      const backendImage = basaltpassImageBase
+        ? `${basaltpassImageBase}/basaltpass-backend:latest`
+        : owner
+          ? `ghcr.io/${owner}/basaltpass-backend:latest`
+          : "";
+      const frontendImage = basaltpassImageBase
+        ? `${basaltpassImageBase}/basaltpass-frontend:latest`
+        : owner
+          ? `ghcr.io/${owner}/basaltpass-frontend:latest`
+          : "";
       setForm({
         ...nextForm,
-        backend_image:
-          form.backend_image || (owner ? `ghcr.io/${owner}/basaltpass-backend:latest` : ""),
-        frontend_image:
-          form.frontend_image || (owner ? `ghcr.io/${owner}/basaltpass-frontend:latest` : ""),
+        backend_image: form.backend_image || backendImage,
+        frontend_image: form.frontend_image || frontendImage,
         tenant_code: form.tenant_code || slugify(nextName),
       });
       return;

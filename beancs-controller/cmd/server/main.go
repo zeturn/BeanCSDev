@@ -176,8 +176,10 @@ func registerAPI(api fiber.Router, cfg *config.Config, db *gorm.DB, registry *ba
 	})
 	api.Get("/ui/config", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{
-			"auth_url":  cfg.BPBrowserAuthURL,
-			"client_id": cfg.BPBrowserClientID,
+			"auth_url":                 cfg.BPBrowserAuthURL,
+			"client_id":                cfg.BPBrowserClientID,
+			"registry_host":            cfg.RegistryHost,
+			"basaltpass_image_project": "basaltpass",
 		})
 	})
 	api.Get("/ui/oauth/callback", serveIndex)
