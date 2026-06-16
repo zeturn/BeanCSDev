@@ -84,6 +84,9 @@ func (m *Manager) applyBasaltPassDeployment(ctx context.Context, namespace, name
 	}
 	podSpec := corev1.PodSpec{
 		Containers: []corev1.Container{container},
+		NodeSelector: map[string]string{
+			"kubernetes.io/arch": "amd64",
+		},
 	}
 	if strings.TrimSpace(pullSecret) != "" {
 		podSpec.ImagePullSecrets = []corev1.LocalObjectReference{{Name: strings.TrimSpace(pullSecret)}}
