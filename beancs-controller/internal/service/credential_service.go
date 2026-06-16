@@ -452,7 +452,7 @@ func (s *CredentialService) deployManagedBasaltPass(ctx context.Context, userID 
 		jwtSecret = randomToken(48)
 	}
 	corsOrigins := strings.TrimSpace(req.CORSAllowOrigins)
-	if corsOrigins == "" {
+	if corsOrigins == "" || corsOrigins == "*" {
 		corsOrigins = req.BaseURL
 	}
 	host := strings.TrimSpace(req.PublicHost)
