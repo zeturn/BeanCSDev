@@ -371,6 +371,41 @@ export function canContinueDeployStep(
   return true;
 }
 
+export function basaltPassStepBlockers(stepID, form, selectedCredential) {
+  const missing = [];
+  const requireValue = (value, label) => {
+    if (!String(value || "").trim()) missing.push(label);
+  };
+  if (stepID === "source") {
+    requireValue(selectedCredential, "GitHub credential");
+    requireValue(form.github_repo, "GitHub repository");
+  }
+  if (stepID === "params") {
+    requireValue(form.name, "Deployment name");
+    requireValue(form.tenant_name, "Tenant name");
+    requireValue(form.backend_image, "Backend image");
+    requireValue(form.frontend_image, "Frontend image");
+    if (form.exposure_mode === "private") {
+      requireValue(form.public_host, "Private host");
+    } else {
+      requireValue(form.cloudflare_credential_id, "Cloudflare credential");
+      requireValue(form.cloudflare_zone_id, "Cloudflare zone");
+      requireValue(form.subdomain, "Subdomain");
+    }
+    requireValue(form.platform_admin_email, "Platform admin email");
+    requireValue(form.platform_admin_username, "Platform admin username");
+    requireValue(form.platform_admin_password, "Platform admin password");
+  }
+  if (stepID === "dependencies") {
+    requireValue(form.database_binding, "Database credential");
+    requireValue(form.tenant_code, "Tenant code");
+    requireValue(form.owner_email, "Tenant admin email");
+    requireValue(form.owner_username, "Tenant admin username");
+    requireValue(form.owner_password, "Tenant admin password");
+  }
+  return missing;
+}
+
 export function sourceLabel(source) {
   return (
     {

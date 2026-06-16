@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as LucideIcons from "lucide-react";
 import {
   canContinueDeployStep,
+  basaltPassStepBlockers,
   sourceLabel,
   sourceSummary,
   defaultDeployForm,
@@ -274,12 +275,15 @@ export default function DeployView({
     : form.base_url || "";
   const activeSteps = isBasaltPassDeploy ? basaltPassDeploySteps : deploySteps;
   const step = activeSteps[stepIndex] || activeSteps[0];
-  const canContinue = canContinueDeployStep(
-    step.id,
-    form,
-    selectedCredential,
-    analysis,
-  );
+  const stepBlockers = isBasaltPassDeploy
+    ? basaltPassStepBlockers(step.id, form, selectedCredential)
+    : [];
+  const basaltPassBuildBlockers = isBasaltPassDeploy
+    ? basaltPassStepBlockers("dependencies", form, selectedCredential)
+    : [];
+  const canContinue = isBasaltPassDeploy
+    ? stepBlockers.length === 0
+    : canContinueDeployStep(step.id, form, selectedCredential, analysis);
   const ghcrPreview = form.github_repo
     ? `ghcr.io/${form.github_repo.toLowerCase()}:beancs-<build>`
     : "ghcr.io/<owner>/<repo>:beancs-<build>";
@@ -2295,12 +2299,7 @@ export default function DeployView({
               <Button
                 disabled={
                   isBasaltPassDeploy
-                    ? !canContinueDeployStep(
-                        "dependencies",
-                        form,
-                        selectedCredential,
-                        analysis,
-                      )
+                    ? basaltPassBuildBlockers.length > 0
                     : form.application_type === "monorepo"
                     ? !(analysis?.is_monorepo && analysis?.deployable !== false)
                     : !analysis?.deployable
@@ -2322,6 +2321,11 @@ export default function DeployView({
                 ) : null}{" "}
                 Next
               </Button>
+            )}
+            {!canContinue && stepBlockers.length > 0 && (
+              <p className="warning-note span-2">
+                Missing: {stepBlockers.join(", ")}
+              </p>
             )}
           </div>
         )}
