@@ -304,7 +304,6 @@ export function canContinueDeployStep(
       return Boolean(
         form.name &&
           form.tenant_name &&
-          form.tenant_code &&
           ((form.exposure_mode === "private" && form.public_host) ||
             (form.exposure_mode !== "private" &&
               form.cloudflare_credential_id &&

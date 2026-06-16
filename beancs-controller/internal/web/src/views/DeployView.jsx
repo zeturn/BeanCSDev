@@ -1092,6 +1092,7 @@ export default function DeployView({
                 setForm({
                   ...form,
                   tenant_name: v.trim(),
+                  tenant_code: form.tenant_code || slugify(v),
                 })
               }
               required
