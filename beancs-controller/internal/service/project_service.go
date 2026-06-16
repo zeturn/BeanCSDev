@@ -749,19 +749,37 @@ func basaltPassRuntimeEnv(inst *model.BasaltPassInstance, project *model.Project
 	if inst == nil || project == nil || project.BasaltClientID == "" {
 		return out
 	}
-	out["BASALTPASS_BASE_URL"] = strings.TrimRight(inst.BaseURL, "/")
+	baseURL := strings.TrimRight(inst.BaseURL, "/")
+	redirectURI := projectHome(project) + "/callback"
+	out["BASALTPASS_BASE_URL"] = baseURL
 	out["BASALTPASS_CLIENT_ID"] = project.BasaltClientID
 	out["BASALTPASS_CLIENT_SECRET"] = clientSecret
+	out["BASALTPASS_REDIRECT_URI"] = redirectURI
+	setDefaultEnv(out, "BASALTPASS_OAUTH_CLIENT_ID", project.BasaltClientID)
+	setDefaultEnv(out, "BASALTPASS_OAUTH_CLIENT_SECRET", clientSecret)
+	setDefaultEnv(out, "BASALTPASS_OAUTH_REDIRECT_URI", redirectURI)
+	setDefaultEnv(out, "BASALT_BASE_URL", baseURL)
+	setDefaultEnv(out, "BASALT_CLIENT_ID", project.BasaltClientID)
+	setDefaultEnv(out, "BASALT_CLIENT_SECRET", clientSecret)
+	setDefaultEnv(out, "BASALT_REDIRECT_URI", redirectURI)
 	if inst.TenantID != "" {
 		out["BASALTPASS_TENANT_ID"] = inst.TenantID
+		setDefaultEnv(out, "BASALT_TENANT_ID", inst.TenantID)
 	}
 	if inst.TenantCode != "" {
 		out["BASALTPASS_TENANT_CODE"] = inst.TenantCode
+		setDefaultEnv(out, "BASALT_TENANT_CODE", inst.TenantCode)
 	}
 	if project.BasaltAppID != 0 {
 		out["BASALTPASS_APP_ID"] = strconv.FormatUint(uint64(project.BasaltAppID), 10)
 	}
 	return out
+}
+
+func setDefaultEnv(env map[string]string, key, value string) {
+	if _, ok := env[key]; !ok {
+		env[key] = value
+	}
 }
 
 func normalizeProjectRequest(req *dto.CreateProjectRequest) {
