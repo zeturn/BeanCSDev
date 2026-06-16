@@ -4,13 +4,11 @@ import {
   formatTime,
   formatBytes,
   formatPercent,
-  formatDuration,
 } from "../utils/index";
 import {
   MetricCard,
   IndustrialMeter,
   AlertList,
-  Button,
 } from "../components/index";
 import {
   Activity,
@@ -48,7 +46,6 @@ import {
   Package,
   Play,
   Plus,
-  RefreshCw,
   RotateCcw,
   Rocket,
   ScrollText,
@@ -61,7 +58,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
-export default function DashboardView({ dashboard, refresh }) {
+export default function DashboardView({ dashboard }) {
   if (!dashboard) {
     return (
       <section className="panel">
@@ -76,28 +73,6 @@ export default function DashboardView({ dashboard, refresh }) {
   const events = dashboard.events || [];
   return (
     <div className="dashboard-shell">
-      <section className="dashboard-hero">
-        <div>
-          <span className="eyebrow">Cluster Operations</span>
-          <h2>{dashboard.cluster_name}</h2>
-          <p>
-            Kubernetes {dashboard.kubernetes_version || "-"}
-            {dashboard.k3s_version ? ` · K3s ${dashboard.k3s_version}` : ""}
-          </p>
-        </div>
-        <div
-          className={
-            dashboard.healthy ? "health-badge good" : "health-badge bad"
-          }
-        >
-          <span>{dashboard.status || "Unknown"}</span>
-          <b>{dashboard.healthy ? "Ready" : "NotReady"}</b>
-        </div>
-        <Button onClick={refresh}>
-          <RefreshCw size={15} /> Refresh
-        </Button>
-      </section>
-
       <section className="dashboard-kpis">
         <MetricCard
           icon={Server}
@@ -167,34 +142,6 @@ export default function DashboardView({ dashboard, refresh }) {
                 "metrics-server or node stats endpoint did not return data."}
             </p>
           )}
-        </div>
-        <div className="panel dashboard-panel">
-          <h2>
-            <Server size={18} /> Cluster Runtime
-          </h2>
-          <div className="detail-list">
-            <span>
-              Status <b>{dashboard.status}</b>
-            </span>
-            <span>
-              Ready nodes{" "}
-              <b>
-                {nodes.ready || 0}/{nodes.total || 0}
-              </b>
-            </span>
-            <span>
-              Running pods{" "}
-              <b>
-                {pods.running || 0}/{pods.total || 0}
-              </b>
-            </span>
-            <span>
-              Uptime <b>{formatDuration(dashboard.uptime_seconds)}</b>
-            </span>
-            <span>
-              Last check <b>{formatTime(dashboard.checked_at)}</b>
-            </span>
-          </div>
         </div>
       </section>
 

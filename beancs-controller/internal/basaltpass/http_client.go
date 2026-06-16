@@ -21,6 +21,8 @@ type HTTPClient struct {
 	clientID           string
 	clientSecret       string
 	staticServiceToken string
+	adminIdentifier    string
+	adminPassword      string
 	httpClient         *http.Client
 
 	mu          sync.Mutex
@@ -40,8 +42,15 @@ func NewHTTPClientWithServiceToken(baseURL, clientID, clientSecret, serviceToken
 		clientID:           clientID,
 		clientSecret:       clientSecret,
 		staticServiceToken: strings.TrimSpace(serviceToken),
-		httpClient:         &http.Client{Timeout: 15 * time.Second},
+		httpClient:         &http.Client{Timeout: 5 * time.Minute},
 	}
+}
+
+func NewHTTPClientWithAdminCredentials(baseURL, identifier, password string) *HTTPClient {
+	client := NewHTTPClientWithServiceToken(baseURL, "", "", "")
+	client.adminIdentifier = strings.TrimSpace(identifier)
+	client.adminPassword = password
+	return client
 }
 
 func (c *HTTPClient) IntrospectToken(ctx context.Context, token string) (*IntrospectionResult, error) {
@@ -115,6 +124,9 @@ func (c *HTTPClient) CreateTenant(ctx context.Context, reqBody *CreateTenantRequ
 }
 
 func (c *HTTPClient) RegisterApp(ctx context.Context, reqBody *RegisterAppRequest) (*RegisterAppResponse, error) {
+	if strings.HasPrefix(strings.TrimSpace(c.staticServiceToken), "bpk_") {
+		return c.registerAppWithManualAPIKey(ctx, reqBody)
+	}
 	token, err := c.serviceToken(ctx)
 	if err != nil {
 		return nil, err
@@ -146,6 +158,57 @@ func (c *HTTPClient) RegisterApp(ctx context.Context, reqBody *RegisterAppReques
 		return nil, fmt.Errorf("register app returned incomplete response")
 	}
 	return &out, nil
+}
+
+func (c *HTTPClient) registerAppWithManualAPIKey(ctx context.Context, reqBody *RegisterAppRequest) (*RegisterAppResponse, error) {
+	payload, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiBaseURL+"/manual/apps", bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("X-API-Key", strings.TrimSpace(c.staticServiceToken))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode != http.StatusCreated {
+		return nil, fmt.Errorf("register app failed: %s", parseAPIError(body))
+	}
+	var raw struct {
+		Data struct {
+			ID           uint   `json:"id"`
+			TenantID     uint   `json:"tenant_id"`
+			Name         string `json:"name"`
+			Status       string `json:"status"`
+			OAuthClients []struct {
+				ID           uint     `json:"id"`
+				ClientID     string   `json:"client_id"`
+				ClientSecret string   `json:"client_secret"`
+				RedirectURIs []string `json:"redirect_uris"`
+				Scopes       []string `json:"scopes"`
+				IsActive     bool     `json:"is_active"`
+			} `json:"oauth_clients"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, err
+	}
+	out := &RegisterAppResponse{}
+	out.Data.ID = raw.Data.ID
+	out.Data.TenantID = raw.Data.TenantID
+	out.Data.Name = raw.Data.Name
+	out.Data.Status = raw.Data.Status
+	out.Data.OAuthClients = raw.Data.OAuthClients
+	if out.Data.ID == 0 || out.Data.Status != "active" || len(out.Data.OAuthClients) == 0 {
+		return nil, fmt.Errorf("register app returned incomplete response")
+	}
+	return out, nil
 }
 
 func firstString(values ...any) string {
@@ -185,6 +248,26 @@ func numberValue(value any) uint64 {
 }
 
 func (c *HTTPClient) DeleteApp(ctx context.Context, appID uint) error {
+	if strings.HasPrefix(strings.TrimSpace(c.staticServiceToken), "bpk_") {
+		req, err := http.NewRequestWithContext(ctx, http.MethodDelete, fmt.Sprintf("%s/manual/apps/%d", c.apiBaseURL, appID), nil)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("X-API-Key", strings.TrimSpace(c.staticServiceToken))
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusNotFound {
+			return nil
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+			return fmt.Errorf("delete app failed: %s", parseAPIError(body))
+		}
+		return nil
+	}
 	token, err := c.serviceToken(ctx)
 	if err != nil {
 		return err
@@ -237,6 +320,10 @@ func (c *HTTPClient) serviceToken(ctx context.Context) (string, error) {
 	}
 	c.mu.Unlock()
 
+	if c.adminIdentifier != "" && c.adminPassword != "" {
+		return c.loginAdminToken(ctx)
+	}
+
 	form := url.Values{}
 	form.Set("grant_type", "client_credentials")
 	form.Set("scope", "openid profile tenant.admin")
@@ -273,6 +360,49 @@ func (c *HTTPClient) serviceToken(ctx context.Context) (string, error) {
 	c.tokenExpiry = time.Now().Add(time.Duration(tr.ExpiresIn) * time.Second)
 	c.mu.Unlock()
 	return tr.AccessToken, nil
+}
+
+func (c *HTTPClient) loginAdminToken(ctx context.Context) (string, error) {
+	payload, err := json.Marshal(map[string]string{
+		"identifier": c.adminIdentifier,
+		"password":   c.adminPassword,
+	})
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiBaseURL+"/auth/login", bytes.NewReader(payload))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Auth-Scope", "admin")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("admin login failed: %s", parseAPIError(body))
+	}
+	var out struct {
+		AccessToken string `json:"access_token"`
+		Data        struct {
+			Token string `json:"token"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return "", err
+	}
+	token := firstString(out.AccessToken, out.Data.Token)
+	if token == "" {
+		return "", fmt.Errorf("admin login returned no access token")
+	}
+	c.mu.Lock()
+	c.accessToken = token
+	c.tokenExpiry = time.Now().Add(10 * time.Minute)
+	c.mu.Unlock()
+	return token, nil
 }
 
 func basaltAPIBaseURL(baseURL string) string {

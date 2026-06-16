@@ -38,7 +38,6 @@ import {
   Package,
   Play,
   Plus,
-  RefreshCw,
   RotateCcw,
   Rocket,
   ScrollText,
@@ -55,18 +54,9 @@ export default function ProgressListView({
   processes,
   projects,
   onSelectProcess,
-  refresh,
 }) {
   return (
     <div className="stack progress-list-page">
-      <div className="progress-list-toolbar">
-        <h2>
-          <LoaderCircle size={18} /> Process list
-        </h2>
-        <Button type="button" onClick={() => refresh()}>
-          <RefreshCw size={15} /> Refresh
-        </Button>
-      </div>
       <section className="progress-list-panel">
         <div className="progress-list-head">
           <span>Process</span>

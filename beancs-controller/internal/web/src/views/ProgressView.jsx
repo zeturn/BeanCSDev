@@ -172,7 +172,6 @@ export default function ProgressView({
           if (process.project_id)
             setActiveProjectID(String(process.project_id));
         }}
-        refresh={refreshList}
       />
     );
   }
@@ -221,14 +220,6 @@ export default function ProgressView({
               </option>
             ))}
           </Select>
-          <Button
-            onClick={() => {
-              refreshList();
-              if (activeProjectID) refresh();
-            }}
-          >
-            <RefreshCw size={15} /> Refresh
-          </Button>
         </div>
       </section>
 

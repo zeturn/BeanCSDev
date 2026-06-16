@@ -116,6 +116,11 @@ const navSections = [
     label: "Workloads",
     items: [
       {
+        id: "applications",
+        label: "Applications",
+        icon: Layers3,
+      },
+      {
         id: "projects",
         label: "Projects",
         icon: Boxes,
@@ -283,6 +288,7 @@ import LogsView from "./views/LogsView";
 import DeploymentsView from "./views/DeploymentsView";
 import DependenciesView from "./views/DependenciesView";
 import ProjectsView from "./views/ProjectsView";
+import ApplicationsView from "./views/ApplicationsView";
 import ProjectTrackingModal from "./views/ProjectTrackingModal";
 import DeleteProjectModal from "./views/DeleteProjectModal";
 import DeleteApplicationModal from "./views/DeleteApplicationModal";
@@ -787,15 +793,6 @@ function App() {
       if (typeof body[key] === "string") body[key] = body[key].trim();
       if (body[key] === "") delete body[key];
     });
-    if (kind === "basaltpass" && body.database_binding) {
-      const [dependencyID, credentialID] = String(body.database_binding).split(":");
-      body.database_dependency_id = Number(dependencyID || 0);
-      body.database_credential_id = Number(credentialID || 0);
-      delete body.database_binding;
-      ["max_apps", "max_users", "max_tokens_per_hour"].forEach((key) => {
-        if (body[key]) body[key] = Number(body[key]);
-      });
-    }
     try {
       await api.post(`/credentials/${kind}/`, body);
       event.currentTarget.reset();
@@ -1842,6 +1839,100 @@ function App() {
       setLoading(false);
     }
   }
+  async function deployBasaltPass(event) {
+    event.preventDefault();
+    const [dependencyID, credentialID] = String(
+      deployForm.database_binding || "",
+    ).split(":");
+    const selectedCF =
+      (domains || []).find(
+        (domain) =>
+          String(domain.credential_id) ===
+            String(deployForm.cloudflare_credential_id) &&
+          String(domain.zone_id) === String(deployForm.cloudflare_zone_id),
+      ) ||
+      credentials.cloudflare.find(
+        (cred) =>
+          String(cred.id) === String(deployForm.cloudflare_credential_id),
+      );
+    const publicHost =
+      deployForm.exposure_mode === "public" && selectedCF?.domain
+        ? `${deployForm.subdomain}.${selectedCF.domain}`
+        : deployForm.public_host || "";
+    const baseURL = publicHost
+      ? `https://${publicHost.replace(/^https?:\/\//, "")}`
+      : deployForm.base_url;
+    const body = {
+      name: deployForm.name,
+      base_url: baseURL,
+      tenant_name: deployForm.tenant_name,
+      tenant_code: deployForm.tenant_code,
+      namespace: deployForm.namespace || undefined,
+      backend_image: deployForm.backend_image,
+      frontend_image: deployForm.frontend_image,
+      github_credential_id: selectedCredential
+        ? Number(selectedCredential)
+        : undefined,
+      github_repo: deployForm.github_repo || selectedRepo || undefined,
+      github_branch: deployForm.github_branch || "main",
+      public_host: publicHost || undefined,
+      exposure_mode: deployForm.exposure_mode || "public",
+      platform_admin_email: deployForm.platform_admin_email,
+      platform_admin_username: deployForm.platform_admin_username,
+      platform_admin_password: deployForm.platform_admin_password,
+      cloudflare_credential_id: deployForm.cloudflare_credential_id
+        ? Number(deployForm.cloudflare_credential_id)
+        : undefined,
+      cloudflare_zone_id: deployForm.cloudflare_zone_id || undefined,
+      database_dependency_id: Number(dependencyID || 0),
+      database_credential_id: Number(credentialID || 0),
+      owner_email: deployForm.owner_email,
+      owner_username: deployForm.owner_username,
+      owner_password: deployForm.owner_password,
+      description: deployForm.description || undefined,
+      max_apps: deployForm.max_apps ? Number(deployForm.max_apps) : undefined,
+      max_users: deployForm.max_users ? Number(deployForm.max_users) : undefined,
+      max_tokens_per_hour: deployForm.max_tokens_per_hour
+        ? Number(deployForm.max_tokens_per_hour)
+        : undefined,
+      service_token: deployForm.service_token,
+      automation_token: deployForm.automation_token,
+      jwt_secret: deployForm.jwt_secret || undefined,
+      cors_allow_origins: deployForm.cors_allow_origins || undefined,
+    };
+    Object.keys(body).forEach((key) => {
+      if (body[key] === "" || body[key] === undefined || body[key] === 0)
+        delete body[key];
+    });
+    setLoading(true);
+    setError("");
+    setInstallProgress({
+      project: body.name,
+      started_at: new Date().toISOString(),
+      logs: [
+        `Starting BasaltPass deploy for ${body.name}`,
+        `Source: ${deployForm.github_repo || "-"}`,
+        `Namespace: ${body.namespace || `bp-${body.name}`}`,
+      ],
+      steps: [
+        { label: "Apply BasaltPass runtime", state: "running" },
+        { label: "Wait for health", state: "pending" },
+        { label: "Create tenant", state: "pending" },
+        { label: "Store tenant credentials", state: "pending" },
+      ],
+    });
+    try {
+      await api.post("/credentials/basaltpass/deployments", body);
+      setNotice("BasaltPass deployed and tenant credential stored.");
+      setDeployForm(defaultDeployForm());
+      await loadWorkspace();
+      setView("accessControl");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
   async function deployMonorepoApplication() {
     if (analysis?.source === "beancs_spec") {
       return deployApplicationFromRepoConfig();
@@ -2431,10 +2522,11 @@ function App() {
         ) : (
           <>
             {view === "dashboard" && (
-              <DashboardView dashboard={dashboard} refresh={loadDashboard} />
+              <DashboardView dashboard={dashboard} />
             )}
             {view === "deploy" && (
               <DeployView
+                config={config}
                 credentials={credentials}
                 domains={domains}
                 namespaces={runtime.namespaces || []}
@@ -2455,6 +2547,7 @@ function App() {
                 dependencyDefinitions={dependencyDefinitions}
                 reusableDependencies={reusableDependencies}
                 createTrackedImageFromDeploy={createTrackedImageFromDeploy}
+                deployBasaltPass={deployBasaltPass}
                 onConnectGitHub={connectGitHubApp}
                 reposLoading={reposLoading}
               />
@@ -2466,7 +2559,6 @@ function App() {
                 githubCredentials={credentials.github}
                 onCreateDependency={createDependency}
                 onCreateCredential={createDependencyCredential}
-                onRefresh={loadWorkspace}
               />
             )}
             {view === "progress" && (
@@ -2490,9 +2582,7 @@ function App() {
             )}
             {view === "projects" && (
               <ProjectsView
-                applications={applications}
                 projects={projects}
-                onDeleteApplication={deleteApplication}
                 onEdit={setEditingProject}
                 onDelete={deleteProject}
                 onScale={scaleProject}
@@ -2503,6 +2593,12 @@ function App() {
                   setActiveProgressProjectID(String(project.id));
                   setView("progress");
                 }}
+              />
+            )}
+            {view === "applications" && (
+              <ApplicationsView
+                applications={applications}
+                onDeleteApplication={deleteApplication}
               />
             )}
             {view === "deployments" && (
@@ -2641,7 +2737,6 @@ function App() {
               <CredentialManager
                 kind="basaltpass"
                 rows={credentials.basaltpass}
-                dependencies={reusableDependencies}
                 onCreate={createCredential}
                 onDelete={deleteCredential}
               />

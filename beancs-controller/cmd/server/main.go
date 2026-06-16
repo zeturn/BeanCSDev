@@ -67,6 +67,7 @@ func main() {
 	registryImageSvc := service.NewContainerRegistryService(db, cipher)
 	quotaSvc := service.NewQuotaService(db)
 	dnsSvc := service.NewDNSService(cfg.IngressIP)
+	credentialSvc.SetDNSService(dnsSvc)
 	gitopsSvc := service.NewGitOpsService(db, credentialSvc)
 	buildSvc := service.NewGitHubBuildService(db, cfg, credentialSvc, gitopsSvc)
 	projectSvc := service.NewProjectService(db, credentialSvc, quotaSvc, dnsSvc, gitopsSvc, buildSvc, k8sManager, registry, cipher, cfg)
@@ -175,8 +176,10 @@ func registerAPI(api fiber.Router, cfg *config.Config, db *gorm.DB, registry *ba
 	})
 	api.Get("/ui/config", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{
-			"auth_url":  cfg.BPBrowserAuthURL,
-			"client_id": cfg.BPBrowserClientID,
+			"auth_url":                 cfg.BPBrowserAuthURL,
+			"client_id":                cfg.BPBrowserClientID,
+			"registry_host":            cfg.RegistryHost,
+			"basaltpass_image_project": "basaltpass",
 		})
 	})
 	api.Get("/ui/oauth/callback", serveIndex)

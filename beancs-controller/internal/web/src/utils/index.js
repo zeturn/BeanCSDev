@@ -279,8 +279,11 @@ export function canContinueDeployStep(
   selectedCredential,
   analysis,
 ) {
-  if (stepID === "method") return Boolean(form.deploy_source);
+  if (stepID === "method") return Boolean(form.deploy_target || form.deploy_source);
   if (stepID === "source") {
+    if (form.deploy_target === "basaltpass") {
+      return Boolean(selectedCredential && form.github_repo);
+    }
     if (form.deploy_source === "gitops") {
       if (form.repo_type === "git-url") return false;
       return Boolean(selectedCredential && form.github_repo);
@@ -292,10 +295,27 @@ export function canContinueDeployStep(
   if (stepID === "update")
     return form.deploy_source === "registry" || Boolean(form.update_mode);
   if (stepID === "check")
+    if (form.deploy_target === "basaltpass") return true;
     return form.application_type === "monorepo"
       ? Boolean(analysis?.is_monorepo && analysis?.deployable !== false)
       : Boolean(analysis?.deployable);
   if (stepID === "params") {
+    if (form.deploy_target === "basaltpass") {
+      return Boolean(
+        form.name &&
+          form.tenant_name &&
+          ((form.exposure_mode === "private" && form.public_host) ||
+            (form.exposure_mode !== "private" &&
+              form.cloudflare_credential_id &&
+              form.cloudflare_zone_id &&
+              form.subdomain)) &&
+          form.platform_admin_email &&
+          form.platform_admin_username &&
+          form.platform_admin_password &&
+          form.backend_image &&
+          form.frontend_image,
+      );
+    }
     if (form.application_type === "monorepo") {
       return Boolean(
         form.name &&
@@ -311,8 +331,26 @@ export function canContinueDeployStep(
       form.name && Number(form.port || 0) > 0 && Number(form.replicas || 0) > 0,
     );
   }
-  if (stepID === "dependencies") return true;
+  if (stepID === "dependencies") {
+    if (form.deploy_target === "basaltpass") {
+      return Boolean(
+        form.database_binding &&
+          form.owner_email &&
+          form.owner_username &&
+          form.owner_password,
+      );
+    }
+    return true;
+  }
   if (stepID === "domain") {
+    if (form.deploy_target === "basaltpass") {
+      if (form.exposure_mode === "private") return Boolean(form.public_host);
+      return Boolean(
+        form.cloudflare_credential_id &&
+          form.cloudflare_zone_id &&
+          form.subdomain,
+      );
+    }
     if (form.application_type === "monorepo") {
       const publicComponents = (form.components || []).some(
         (component) =>
@@ -331,6 +369,41 @@ export function canContinueDeployStep(
     if (form.exposure_mode === "private") return Boolean(form.private_host);
   }
   return true;
+}
+
+export function basaltPassStepBlockers(stepID, form, selectedCredential) {
+  const missing = [];
+  const requireValue = (value, label) => {
+    if (!String(value || "").trim()) missing.push(label);
+  };
+  if (stepID === "source") {
+    requireValue(selectedCredential, "GitHub credential");
+    requireValue(form.github_repo, "GitHub repository");
+  }
+  if (stepID === "params") {
+    requireValue(form.name, "Deployment name");
+    requireValue(form.tenant_name, "Tenant name");
+    requireValue(form.backend_image, "Backend image");
+    requireValue(form.frontend_image, "Frontend image");
+    if (form.exposure_mode === "private") {
+      requireValue(form.public_host, "Private host");
+    } else {
+      requireValue(form.cloudflare_credential_id, "Cloudflare credential");
+      requireValue(form.cloudflare_zone_id, "Cloudflare zone");
+      requireValue(form.subdomain, "Subdomain");
+    }
+    requireValue(form.platform_admin_email, "Platform admin email");
+    requireValue(form.platform_admin_username, "Platform admin username");
+    requireValue(form.platform_admin_password, "Platform admin password");
+  }
+  if (stepID === "dependencies") {
+    requireValue(form.database_binding, "Database credential");
+    requireValue(form.tenant_code, "Tenant code");
+    requireValue(form.owner_email, "Tenant admin email");
+    requireValue(form.owner_username, "Tenant admin username");
+    requireValue(form.owner_password, "Tenant admin password");
+  }
+  return missing;
 }
 
 export function sourceLabel(source) {
@@ -382,6 +455,7 @@ export function podContainers(pod) {
 
 export function defaultDeployForm() {
   return {
+    deploy_target: "project",
     deploy_source: "gitops",
     build_source: "github",
     application_type: "single",
@@ -413,6 +487,27 @@ export function defaultDeployForm() {
     env_entries: [],
     components: [],
     dependencies: [],
+    base_url: "",
+    public_host: "",
+    backend_image: "",
+    frontend_image: "",
+    database_binding: "",
+    platform_admin_email: "",
+    platform_admin_username: "",
+    platform_admin_password: "",
+    tenant_name: "",
+    owner_email: "",
+    owner_username: "",
+    owner_password: "",
+    tenant_code: "",
+    description: "",
+    max_apps: "",
+    max_users: "",
+    max_tokens_per_hour: "",
+    service_token: "",
+    automation_token: "",
+    jwt_secret: "",
+    cors_allow_origins: "",
   };
 }
 
@@ -1071,6 +1166,7 @@ export function titleFor(view) {
   const map = {
     dashboard: "Overview",
     deploy: "Deploy",
+    applications: "Applications",
     dependencies: "Dependencies",
     progress: "Progress",
     projects: "Projects",
@@ -1105,6 +1201,7 @@ export function subtitleFor(view, runtime, projects) {
   if (view === "networking")
     return "Service, Ingress, Endpoint, NetworkPolicy, Traefik and Tailscale operations";
   if (view === "projects") return `${projects.length} managed projects`;
+  if (view === "applications") return "Monorepo and multi-project application records";
   if (view === "dependencies")
     return "Reusable managed and external service dependencies";
   if (view === "progress") return "Watch installs and runtime readiness";

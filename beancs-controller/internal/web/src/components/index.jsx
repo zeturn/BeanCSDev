@@ -995,7 +995,19 @@ export function RuntimeTable({
             >
               {keys.map((key) => {
                 const value = formatCell(row[key]);
-                return <ExpandableCell key={key} value={value} max={36} />;
+                const compactFields = new Set([
+                  "status",
+                  "ready_containers",
+                  "total_containers",
+                  "restarts",
+                ]);
+                return (
+                  <ExpandableCell
+                    key={key}
+                    value={value}
+                    max={compactFields.has(key) ? 16 : 30}
+                  />
+                );
               })}
               <span className="row-actions">
                 <Button
@@ -1271,11 +1283,9 @@ export function CredentialManager({
   rows,
   onCreate,
   onDelete,
-  dependencies = [],
 }) {
   const safeRows = rows || [];
   const isCloudflare = kind === "cloudflare";
-  const [basaltDeployMode, setBasaltDeployMode] = useState("external");
   const [createOpen, setCreateOpen] = useState(false);
   const [page, setPage] = useState(1);
   const pageSize = 10;
@@ -1288,21 +1298,10 @@ export function CredentialManager({
   useEffect(() => {
     setPage(1);
   }, [safeRows.length]);
-  const databaseDependencies = (dependencies || []).filter((dependency) =>
-    ["mysql", "postgresql"].includes(dependency.type),
-  );
   const title = isCloudflare ? "Cloudflare accounts" : "BasaltPass tenants";
   const columns = isCloudflare
     ? ["name", "account_id", "is_active"]
-    : [
-        "name",
-        "tenant_code",
-        "tenant_id",
-        "deploy_mode",
-        "base_url",
-        "deploy_status",
-        "is_active",
-      ];
+    : ["name", "tenant_code", "tenant_id", "base_url", "is_active"];
   function renderCreateForm() {
     return (
       <form
@@ -1330,71 +1329,8 @@ export function CredentialManager({
               placeholder="https://auth.example.com"
               required
             />
-            <Select
-              name="deploy_mode"
-              value={basaltDeployMode}
-              onChange={(event) => setBasaltDeployMode(event.target.value)}
-            >
-              <option value="external">Existing tenant</option>
-              <option value="managed">BeanCS managed tenant</option>
-            </Select>
             <Input name="tenant_code" placeholder="Tenant code" required />
             <Input name="tenant_id" placeholder="Tenant ID, optional" />
-            {basaltDeployMode === "managed" && (
-              <>
-                <Input
-                  name="owner_email"
-                  type="email"
-                  placeholder="Tenant owner email"
-                  required
-                />
-                <Input name="namespace" placeholder="Namespace, optional" />
-                <Input
-                  name="backend_image"
-                  placeholder="ghcr.io/owner/basaltpass-backend:tag"
-                  required
-                />
-                <Input
-                  name="frontend_image"
-                  placeholder="ghcr.io/owner/basaltpass-frontend:tag"
-                  required
-                />
-                <Input
-                  name="public_host"
-                  placeholder="auth.example.com, optional"
-                />
-                <Select name="exposure_mode" defaultValue="public">
-                  <option value="public">Public ingress</option>
-                  <option value="private">Private ingress</option>
-                </Select>
-                <Select name="database_binding" required>
-                  <option value="">Database credential</option>
-                  {databaseDependencies.flatMap((dependency) =>
-                    (dependency.credentials || []).map((credential) => (
-                      <option
-                        key={`${dependency.id}:${credential.id}`}
-                        value={`${dependency.id}:${credential.id}`}
-                      >
-                        {dependency.name} / {credential.name}
-                      </option>
-                    )),
-                  )}
-                </Select>
-                <Input name="max_apps" type="number" placeholder="Max apps" />
-                <Input name="max_users" type="number" placeholder="Max users" />
-                <Input
-                  name="jwt_secret"
-                  type="password"
-                  placeholder="JWT secret, generated if empty"
-                />
-                <Input
-                  name="service_token"
-                  type="password"
-                  placeholder="Management service token"
-                  required
-                />
-              </>
-            )}
             <Input
               name="automation_token"
               type="password"
@@ -1569,6 +1505,7 @@ export function Field({
   onChange,
   type = "text",
   required = false,
+  placeholder = "",
 }) {
   return (
     <>
@@ -1577,6 +1514,7 @@ export function Field({
         type={type}
         value={value ?? ""}
         required={required}
+        placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
       />
     </>

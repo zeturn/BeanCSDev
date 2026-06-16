@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as LucideIcons from "lucide-react";
 import {
   canContinueDeployStep,
+  basaltPassStepBlockers,
   sourceLabel,
   sourceSummary,
   defaultDeployForm,
@@ -81,8 +82,8 @@ import {
 const deploySteps = [
   {
     id: "method",
-    label: "Source type",
-    title: "Choose deployment source",
+    label: "Target",
+    title: "Choose deployment target",
   },
   {
     id: "source",
@@ -135,6 +136,47 @@ const deploySteps = [
     title: "Confirm and build",
   },
 ];
+const basaltPassDeploySteps = [
+  {
+    id: "method",
+    label: "Target",
+    title: "Choose deployment target",
+  },
+  {
+    id: "source",
+    label: "Repository",
+    title: "Choose BasaltPass repository",
+  },
+  {
+    id: "params",
+    label: "Runtime",
+    title: "Configure BasaltPass runtime",
+  },
+  {
+    id: "dependencies",
+    label: "Tenant",
+    title: "Create tenant and credentials",
+  },
+  {
+    id: "confirm",
+    label: "Confirm",
+    title: "Confirm BasaltPass deployment",
+  },
+];
+const deployTargetOptions = [
+  {
+    id: "project",
+    label: "Application",
+    icon: Rocket,
+    description: "Deploy an application service or monorepo workload.",
+  },
+  {
+    id: "basaltpass",
+    label: "BasaltPass",
+    icon: ShieldCheck,
+    description: "Deploy a BasaltPass platform and store the new tenant.",
+  },
+];
 const deploySourceOptions = [
   {
     id: "gitops",
@@ -166,6 +208,7 @@ const updateModeOptions = [
   },
 ];
 export default function DeployView({
+  config,
   credentials,
   domains,
   namespaces,
@@ -186,6 +229,7 @@ export default function DeployView({
   dependencyDefinitions,
   reusableDependencies,
   createTrackedImageFromDeploy,
+  deployBasaltPass,
   onConnectGitHub,
   reposLoading,
 }) {
@@ -207,17 +251,39 @@ export default function DeployView({
       .toLowerCase()
       .includes(repoSearch.toLowerCase()),
   );
+  const registryHost = String(config?.registry_host || "")
+    .replace(/^https?:\/\//, "")
+    .replace(/\/+$/, "");
+  const basaltpassImageProject = slugify(
+    String(config?.basaltpass_image_project || "basaltpass"),
+  );
+  const basaltpassImageBase =
+    registryHost && basaltpassImageProject
+      ? `${registryHost}/${basaltpassImageProject}`
+      : "";
+  const isBasaltPassDeploy = form.deploy_target === "basaltpass";
   const publicHost =
     form.subdomain && selectedCloudflareDomain
       ? `${form.subdomain}.${selectedCloudflareDomain.domain}`
       : "";
-  const step = deploySteps[stepIndex];
-  const canContinue = canContinueDeployStep(
-    step.id,
-    form,
-    selectedCredential,
-    analysis,
-  );
+  const basaltPassPublicHost =
+    isBasaltPassDeploy && form.subdomain && selectedCloudflareDomain
+      ? `${form.subdomain}.${selectedCloudflareDomain.domain}`
+      : form.public_host || "";
+  const basaltPassBaseURL = basaltPassPublicHost
+    ? `https://${basaltPassPublicHost}`
+    : form.base_url || "";
+  const activeSteps = isBasaltPassDeploy ? basaltPassDeploySteps : deploySteps;
+  const step = activeSteps[stepIndex] || activeSteps[0];
+  const stepBlockers = isBasaltPassDeploy
+    ? basaltPassStepBlockers(step.id, form, selectedCredential)
+    : [];
+  const basaltPassBuildBlockers = isBasaltPassDeploy
+    ? basaltPassStepBlockers("dependencies", form, selectedCredential)
+    : [];
+  const canContinue = isBasaltPassDeploy
+    ? stepBlockers.length === 0
+    : canContinueDeployStep(step.id, form, selectedCredential, analysis);
   const ghcrPreview = form.github_repo
     ? `ghcr.io/${form.github_repo.toLowerCase()}:beancs-<build>`
     : "ghcr.io/<owner>/<repo>:beancs-<build>";
@@ -232,6 +298,27 @@ export default function DeployView({
       image_choice: deploySource === "registry" ? "existing" : "",
       github_branch: form.github_branch || "main",
       port: form.port || 8080,
+    });
+    setStepIndex(1);
+  };
+  const setDeployTarget = (deployTarget) => {
+    setAnalysis(null);
+    if (deployTarget === "basaltpass") {
+      setForm({
+        ...defaultDeployForm(),
+        deploy_target: "basaltpass",
+        deploy_source: "gitops",
+        build_source: "github",
+        repo_type: "github",
+        application_type: "single",
+        exposure_mode: "public",
+      });
+      setStepIndex(1);
+      return;
+    }
+    setForm({
+      ...defaultDeployForm(),
+      deploy_target: "project",
     });
     setStepIndex(1);
   };
@@ -314,13 +401,47 @@ export default function DeployView({
     runInstallCheck();
   }, [step.id]);
   const next = async () => {
-    if (step.id === "check") {
+    if (step.id === "check" && !isBasaltPassDeploy) {
       const result = await runInstallCheck();
-      if (result && stepIndex < deploySteps.length - 1)
+      if (result && stepIndex < activeSteps.length - 1)
         setStepIndex(stepIndex + 1);
       return;
     }
-    if (stepIndex < deploySteps.length - 1) setStepIndex(stepIndex + 1);
+    if (stepIndex < activeSteps.length - 1) setStepIndex(stepIndex + 1);
+  };
+  const selectRepository = (repo, repoName, branch) => {
+    const nextName = form.name || slugify(repoName);
+    const nextForm = {
+      ...form,
+      github_repo: repo.full_name,
+      github_branch: branch,
+      name: nextName,
+      tenant_name: form.tenant_name || nextName,
+    };
+    if (isBasaltPassDeploy) {
+      const owner = (repo.full_name || "").split("/")[0]?.toLowerCase();
+      const defaultSlug = slugify(nextName);
+      const backendImage = basaltpassImageBase
+        ? `${basaltpassImageBase}/basaltpass-backend:latest`
+        : owner
+          ? `ghcr.io/${owner}/basaltpass-backend:latest`
+          : "";
+      const frontendImage = basaltpassImageBase
+        ? `${basaltpassImageBase}/basaltpass-frontend:latest`
+        : owner
+          ? `ghcr.io/${owner}/basaltpass-frontend:latest`
+          : "";
+      setForm({
+        ...nextForm,
+        backend_image: form.backend_image || backendImage,
+        frontend_image: form.frontend_image || frontendImage,
+        tenant_code: form.tenant_code || defaultSlug,
+        subdomain: form.subdomain || defaultSlug,
+      });
+      return;
+    }
+    setForm(nextForm);
+    analyzeRepo(repo.full_name, branch);
   };
   const back = () => setStepIndex(Math.max(0, stepIndex - 1));
   const updateComponent = (index, patch) => {
@@ -387,18 +508,18 @@ export default function DeployView({
         <div className="wizard-progress-head">
           <span>{step.label}</span>
           <b>
-            {stepIndex + 1} / {deploySteps.length}
+            {stepIndex + 1} / {activeSteps.length}
           </b>
         </div>
         <div className="wizard-progress-track">
           <span
             style={{
-              width: `${((stepIndex + 1) / deploySteps.length) * 100}%`,
+              width: `${((stepIndex + 1) / activeSteps.length) * 100}%`,
             }}
           />
         </div>
         <div className="wizard-step-labels">
-          {deploySteps.map((item, index) => (
+          {activeSteps.map((item, index) => (
             <span
               key={item.id}
               className={
@@ -410,24 +531,27 @@ export default function DeployView({
           ))}
         </div>
       </section>
-      <form className="panel deploy-form wizard-panel" onSubmit={deployProject}>
+      <form
+        className="panel deploy-form wizard-panel"
+        onSubmit={isBasaltPassDeploy ? deployBasaltPass : deployProject}
+      >
         <h2>
           <Rocket size={18} /> {step.title}
         </h2>
         {step.id === "method" && (
           <div className="method-grid">
-            {deploySourceOptions.map((method) => {
+            {deployTargetOptions.map((method) => {
               const Icon = method.icon;
               return (
                 <Button
                   key={method.id}
                   type="button"
                   className={
-                    form.deploy_source === method.id
+                    (form.deploy_target || "project") === method.id
                       ? "method-card active"
                       : "method-card"
                   }
-                  onClick={() => setDeploySource(method.id)}
+                  onClick={() => setDeployTarget(method.id)}
                 >
                   <Icon size={22} />
                   <b>{method.label}</b>
@@ -439,46 +563,76 @@ export default function DeployView({
         )}
         {step.id === "source" && (
           <div className="form-grid">
+            {!isBasaltPassDeploy && (
+              <>
+                <label>Deployment source</label>
+                <div className="method-grid two-up">
+                  {deploySourceOptions.map((method) => {
+                    const Icon = method.icon;
+                    return (
+                      <Button
+                        key={method.id}
+                        type="button"
+                        className={
+                          form.deploy_source === method.id
+                            ? "method-card active"
+                            : "method-card"
+                        }
+                        onClick={() => setDeploySource(method.id)}
+                      >
+                        <Icon size={22} />
+                        <b>{method.label}</b>
+                        <span>{method.description}</span>
+                      </Button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
             {form.deploy_source === "gitops" && (
               <>
-                <label>Repository type</label>
-                <div className="segmented-control">
-                  <Button
-                    type="button"
-                    className={form.repo_type === "github" ? "active" : ""}
-                    onClick={() => setRepoType("github")}
-                  >
-                    <Github size={15} /> GitHub
-                  </Button>
-                  <Button
-                    type="button"
-                    className={form.repo_type === "git-url" ? "active" : ""}
-                    onClick={() => setRepoType("git-url")}
-                  >
-                    <GitBranch size={15} /> Git link
-                  </Button>
-                </div>
-                <label>Repository layout</label>
-                <div className="segmented-control">
-                  <Button
-                    type="button"
-                    className={
-                      form.application_type !== "monorepo" ? "active" : ""
-                    }
-                    onClick={() => setApplicationType("single")}
-                  >
-                    <Box size={15} /> Single service
-                  </Button>
-                  <Button
-                    type="button"
-                    className={
-                      form.application_type === "monorepo" ? "active" : ""
-                    }
-                    onClick={() => setApplicationType("monorepo")}
-                  >
-                    <Layers3 size={15} /> Monorepo
-                  </Button>
-                </div>
+                {!isBasaltPassDeploy && (
+                  <>
+                    <label>Repository type</label>
+                    <div className="segmented-control">
+                      <Button
+                        type="button"
+                        className={form.repo_type === "github" ? "active" : ""}
+                        onClick={() => setRepoType("github")}
+                      >
+                        <Github size={15} /> GitHub
+                      </Button>
+                      <Button
+                        type="button"
+                        className={form.repo_type === "git-url" ? "active" : ""}
+                        onClick={() => setRepoType("git-url")}
+                      >
+                        <GitBranch size={15} /> Git link
+                      </Button>
+                    </div>
+                    <label>Repository layout</label>
+                    <div className="segmented-control">
+                      <Button
+                        type="button"
+                        className={
+                          form.application_type !== "monorepo" ? "active" : ""
+                        }
+                        onClick={() => setApplicationType("single")}
+                      >
+                        <Box size={15} /> Single service
+                      </Button>
+                      <Button
+                        type="button"
+                        className={
+                          form.application_type === "monorepo" ? "active" : ""
+                        }
+                        onClick={() => setApplicationType("monorepo")}
+                      >
+                        <Layers3 size={15} /> Monorepo
+                      </Button>
+                    </div>
+                  </>
+                )}
                 {form.repo_type === "github" && (
                   <>
                     <div className="import-repo-panel">
@@ -595,13 +749,7 @@ export default function DeployView({
                                 <Button
                                   type="button"
                                   onClick={() => {
-                                    setForm({
-                                      ...form,
-                                      github_repo: repo.full_name,
-                                      github_branch: branch,
-                                      name: form.name || slugify(repoName),
-                                    });
-                                    analyzeRepo(repo.full_name, branch);
+                                    selectRepository(repo, repoName, branch);
                                   }}
                                 >
                                   {isSelected ? "Selected" : "Import"}
@@ -925,7 +1073,207 @@ export default function DeployView({
             )}
           </div>
         )}
-        {step.id === "params" && (
+        {step.id === "params" && isBasaltPassDeploy && (
+          <div className="form-grid">
+            <Field
+              label="Deployment name"
+              value={form.name}
+              onChange={(v) =>
+                setForm({
+                  ...form,
+                  name: slugify(v),
+                  tenant_name: form.tenant_name || v.trim(),
+                  tenant_code: form.tenant_code || slugify(v),
+                  subdomain: form.subdomain || slugify(v),
+                })
+              }
+              required
+            />
+            <Field
+              label="Tenant name"
+              value={form.tenant_name}
+              onChange={(v) =>
+                setForm({
+                  ...form,
+                  tenant_name: v.trim(),
+                  tenant_code: form.tenant_code || slugify(v),
+                })
+              }
+              required
+            />
+            <Field
+              label="Namespace"
+              value={form.namespace}
+              onChange={(v) =>
+                setForm({
+                  ...form,
+                  namespace: slugify(v),
+                })
+              }
+              placeholder={form.name ? `bp-${form.name}` : "bp-basaltpass"}
+            />
+            <Field
+              label="Backend image"
+              value={form.backend_image}
+              onChange={(v) =>
+                setForm({
+                  ...form,
+                  backend_image: v.trim(),
+                })
+              }
+              required
+            />
+            <Field
+              label="Frontend image"
+              value={form.frontend_image}
+              onChange={(v) =>
+                setForm({
+                  ...form,
+                  frontend_image: v.trim(),
+                })
+              }
+              required
+            />
+            <label>Traffic</label>
+            <Select
+              value={form.exposure_mode}
+              onChange={(event) =>
+                setForm({
+                  ...form,
+                  exposure_mode: event.target.value,
+                })
+              }
+            >
+              <option value="public">Traefik public ingress</option>
+              <option value="private">Tailscale private ingress</option>
+            </Select>
+            {form.exposure_mode === "public" && (
+              <>
+                <label>Domain</label>
+                <Select
+                  value={
+                    form.cloudflare_zone_id
+                      ? `${form.cloudflare_credential_id}:${form.cloudflare_zone_id}`
+                      : ""
+                  }
+                  onChange={(event) => {
+                    const [credentialID, zoneID] = event.target.value.split(":");
+                    setForm({
+                      ...form,
+                      cloudflare_credential_id: credentialID || "",
+                      cloudflare_zone_id: zoneID || "",
+                    });
+                  }}
+                  required
+                >
+                  <option value="">Choose Cloudflare zone</option>
+                  {(domains || []).map((domain) => (
+                    <option
+                      key={`${domain.credential_id}:${domain.zone_id}`}
+                      value={`${domain.credential_id}:${domain.zone_id}`}
+                    >
+                      {domain.credential} · {domain.domain}
+                    </option>
+                  ))}
+                </Select>
+                <Field
+                  label="Subdomain"
+                  value={form.subdomain}
+                  onChange={(v) =>
+                    setForm({
+                      ...form,
+                      subdomain: slugify(v),
+                    })
+                  }
+                  placeholder="basaltpasstest"
+                  required
+                />
+                <div className="computed-host">
+                  {basaltPassPublicHost || "Choose a domain"}
+                </div>
+                <div className="computed-host">
+                  {basaltPassBaseURL || "Base URL preview"}
+                </div>
+              </>
+            )}
+            {form.exposure_mode === "private" && (
+              <Field
+                label="Private host"
+                value={form.public_host}
+                onChange={(v) =>
+                  setForm({
+                    ...form,
+                    public_host: v.trim().toLowerCase(),
+                  })
+                }
+                placeholder="basaltpass.internal.example"
+                required
+              />
+            )}
+            <Field
+              label="CORS origins"
+              value={form.cors_allow_origins}
+              onChange={(v) =>
+                setForm({
+                  ...form,
+                  cors_allow_origins: v.trim(),
+                })
+              }
+              placeholder="Defaults to Base URL"
+            />
+            <Field
+              label="Platform admin email"
+              type="email"
+              value={form.platform_admin_email}
+              onChange={(v) => {
+                const value = v.trim();
+                setForm({
+                  ...form,
+                  platform_admin_email: value,
+                  platform_admin_username:
+                    form.platform_admin_username || value.split("@")[0],
+                });
+              }}
+              required
+            />
+            <Field
+              label="Platform admin username"
+              value={form.platform_admin_username}
+              onChange={(v) =>
+                setForm({
+                  ...form,
+                  platform_admin_username: v.trim(),
+                })
+              }
+              required
+            />
+            <Field
+              label="Platform admin password"
+              type="password"
+              value={form.platform_admin_password}
+              onChange={(v) =>
+                setForm({
+                  ...form,
+                  platform_admin_password: v,
+                })
+              }
+              required
+            />
+            <Field
+              label="JWT secret"
+              type="password"
+              value={form.jwt_secret}
+              onChange={(v) =>
+                setForm({
+                  ...form,
+                  jwt_secret: v,
+                })
+              }
+              placeholder="Generated if empty"
+            />
+          </div>
+        )}
+        {step.id === "params" && !isBasaltPassDeploy && (
           <div className="form-grid">
             <Field
               label={
@@ -1162,7 +1510,142 @@ export default function DeployView({
             )}
           </div>
         )}
-        {step.id === "dependencies" && (
+        {step.id === "dependencies" && isBasaltPassDeploy && (
+          <div className="form-grid">
+            <label>Database credential</label>
+            <Select
+              value={form.database_binding}
+              onChange={(event) =>
+                setForm({
+                  ...form,
+                  database_binding: event.target.value,
+                })
+              }
+              required
+            >
+              <option value="">Choose MySQL or PostgreSQL credential</option>
+              {(reusableDependencies || [])
+                .filter((dependency) =>
+                  ["mysql", "postgresql"].includes(dependency.type),
+                )
+                .flatMap((dependency) =>
+                  (dependency.credentials || []).map((credential) => (
+                    <option
+                      key={`${dependency.id}:${credential.id}`}
+                      value={`${dependency.id}:${credential.id}`}
+                    >
+                      {dependency.name} / {credential.name}
+                    </option>
+                  )),
+                )}
+            </Select>
+            <Field
+              label="Tenant code"
+              value={form.tenant_code}
+              onChange={(v) =>
+                setForm({
+                  ...form,
+                  tenant_code: slugify(v),
+                })
+              }
+              required
+            />
+            <Field
+              label="Tenant admin email"
+              type="email"
+              value={form.owner_email}
+              onChange={(v) => {
+                const value = v.trim();
+                setForm({
+                  ...form,
+                  owner_email: value,
+                  owner_username: form.owner_username || value.split("@")[0],
+                });
+              }}
+              required
+            />
+            <Field
+              label="Tenant admin username"
+              value={form.owner_username}
+              onChange={(v) =>
+                setForm({
+                  ...form,
+                  owner_username: v.trim(),
+                })
+              }
+              required
+            />
+            <Field
+              label="Tenant admin password"
+              type="password"
+              value={form.owner_password}
+              onChange={(v) =>
+                setForm({
+                  ...form,
+                  owner_password: v,
+                })
+              }
+              required
+            />
+            <Field
+              label="Description"
+              value={form.description}
+              onChange={(v) =>
+                setForm({
+                  ...form,
+                  description: v,
+                })
+              }
+            />
+            <Field
+              label="Max apps"
+              type="number"
+              value={form.max_apps}
+              onChange={(v) =>
+                setForm({
+                  ...form,
+                  max_apps: v,
+                })
+              }
+              placeholder="50"
+            />
+            <Field
+              label="Max users"
+              type="number"
+              value={form.max_users}
+              onChange={(v) =>
+                setForm({
+                  ...form,
+                  max_users: v,
+                })
+              }
+              placeholder="500"
+            />
+            <Field
+              label="Platform management token fallback"
+              type="password"
+              value={form.service_token}
+              onChange={(v) =>
+                setForm({
+                  ...form,
+                  service_token: v,
+                })
+              }
+            />
+            <Field
+              label="Tenant automation token fallback"
+              type="password"
+              value={form.automation_token}
+              onChange={(v) =>
+                setForm({
+                  ...form,
+                  automation_token: v,
+                })
+              }
+            />
+          </div>
+        )}
+        {step.id === "dependencies" && !isBasaltPassDeploy && (
           <div className="form-grid">
             {form.application_type !== "monorepo" && (
               <p className="muted">
@@ -1690,7 +2173,54 @@ export default function DeployView({
             title="Runtime environment"
           />
         )}
-        {step.id === "confirm" && (
+        {step.id === "confirm" && isBasaltPassDeploy && (
+          <div className="detail-list">
+            <span>
+              Target <b>BasaltPass</b>
+            </span>
+            <span>
+              Source{" "}
+              <b>
+                {form.github_repo || "-"} @ {form.github_branch || "main"}
+              </b>
+            </span>
+            <span>
+              Name <b>{form.name || "-"}</b>
+            </span>
+            <span>
+              Namespace{" "}
+              <b>{form.namespace || (form.name ? `bp-${form.name}` : "-")}</b>
+            </span>
+            <span>
+              Base URL <b>{basaltPassBaseURL || "-"}</b>
+            </span>
+            <span>
+              Host <b>{basaltPassPublicHost || "private ingress"}</b>
+            </span>
+            <span>
+              Backend image <b>{form.backend_image || "-"}</b>
+            </span>
+            <span>
+              Frontend image <b>{form.frontend_image || "-"}</b>
+            </span>
+            <span>
+              Tenant <b>{form.tenant_name || "-"}</b>
+            </span>
+            <span>
+              Tenant code <b>{form.tenant_code || "-"}</b>
+            </span>
+            <span>
+              Platform admin <b>{form.platform_admin_email || "-"}</b>
+            </span>
+            <span>
+              Tenant admin <b>{form.owner_email || "-"}</b>
+            </span>
+            <span>
+              Database <b>{form.database_binding || "-"}</b>
+            </span>
+          </div>
+        )}
+        {step.id === "confirm" && !isBasaltPassDeploy && (
           <div className="detail-list">
             <span>
               Install method <b>{sourceLabel(form.build_source)}</b>
@@ -1768,7 +2298,9 @@ export default function DeployView({
             {step.id === "confirm" ? (
               <Button
                 disabled={
-                  form.application_type === "monorepo"
+                  isBasaltPassDeploy
+                    ? basaltPassBuildBlockers.length > 0
+                    : form.application_type === "monorepo"
                     ? !(analysis?.is_monorepo && analysis?.deployable !== false)
                     : !analysis?.deployable
                 }
@@ -1789,6 +2321,11 @@ export default function DeployView({
                 ) : null}{" "}
                 Next
               </Button>
+            )}
+            {!canContinue && stepBlockers.length > 0 && (
+              <p className="warning-note span-2">
+                Missing: {stepBlockers.join(", ")}
+              </p>
             )}
           </div>
         )}

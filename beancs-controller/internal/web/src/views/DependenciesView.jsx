@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Database, KeyRound, RefreshCw, Server, ShieldCheck } from "lucide-react";
+import { Database, KeyRound, ShieldCheck } from "lucide-react";
 import {
   Button,
   Checkbox,
@@ -32,7 +32,6 @@ export default function DependenciesView({
   githubCredentials,
   onCreateDependency,
   onCreateCredential,
-  onRefresh,
 }) {
   const clusterDefinitions = useMemo(
     () =>
@@ -96,26 +95,11 @@ export default function DependenciesView({
 
   return (
     <div className="dependencies-page">
-      <section className="panel action-panel">
-        <div className="panel-heading-inline">
-          <div>
-            <h2>
-              <Server size={18} /> Dependencies
-            </h2>
-            <p className="muted">
-              创建入口已单独放入弹窗，查看列表更清晰。
-            </p>
-          </div>
-          <div className="row-actions">
-            <Button onClick={onRefresh}>
-              <RefreshCw size={15} /> Refresh
-            </Button>
-            <Button type="button" variant="primary" onClick={() => setCreateOpen(true)}>
-              <Database size={15} /> Create dependency
-            </Button>
-          </div>
-        </div>
-      </section>
+      <div className="dependencies-toolbar">
+        <Button type="button" variant="primary" onClick={() => setCreateOpen(true)}>
+          <Database size={15} /> Create dependency
+        </Button>
+      </div>
 
       <section className="dependency-entity-list">
         {pagedDependencies.map((dependency) => (

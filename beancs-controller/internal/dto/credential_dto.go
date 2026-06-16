@@ -76,48 +76,61 @@ type UpdateGitHubCredentialRequest struct {
 }
 
 type CreateBasaltPassCredentialRequest struct {
-	Name                 string `json:"name" validate:"required,max=128"`
-	BaseURL              string `json:"base_url" validate:"required,url"`
-	TenantID             string `json:"tenant_id" validate:"omitempty,max=128"`
-	TenantCode           string `json:"tenant_code" validate:"omitempty,max=128"`
-	DeployMode           string `json:"deploy_mode" validate:"omitempty,oneof=external managed"`
-	Namespace            string `json:"namespace" validate:"omitempty,max=128"`
-	BackendImage         string `json:"backend_image" validate:"omitempty,max=512"`
-	FrontendImage        string `json:"frontend_image" validate:"omitempty,max=512"`
-	PublicHost           string `json:"public_host" validate:"omitempty,max=256"`
-	ExposureMode         string `json:"exposure_mode" validate:"omitempty,oneof=public private"`
-	JWTSecret            string `json:"jwt_secret" validate:"omitempty"`
-	CORSAllowOrigins     string `json:"cors_allow_origins" validate:"omitempty,max=2048"`
-	DatabaseDependencyID uint   `json:"database_dependency_id" validate:"omitempty"`
-	DatabaseCredentialID uint   `json:"database_credential_id" validate:"omitempty"`
-	OwnerEmail           string `json:"owner_email" validate:"omitempty,email"`
-	Description          string `json:"description" validate:"omitempty,max=500"`
-	MaxApps              int    `json:"max_apps" validate:"omitempty,min=1"`
-	MaxUsers             int    `json:"max_users" validate:"omitempty,min=1"`
-	MaxTokensPerHour     int    `json:"max_tokens_per_hour" validate:"omitempty,min=1"`
-	AutomationToken      string `json:"automation_token" validate:"omitempty"`
-	ClientID             string `json:"client_id" validate:"omitempty,max=256"`
-	ClientSecret         string `json:"client_secret" validate:"omitempty"`
-	ServiceToken         string `json:"service_token" validate:"omitempty"`
+	Name            string `json:"name" validate:"required,max=128"`
+	BaseURL         string `json:"base_url" validate:"required,url"`
+	TenantID        string `json:"tenant_id" validate:"omitempty,max=128"`
+	TenantCode      string `json:"tenant_code" validate:"omitempty,max=128"`
+	AutomationToken string `json:"automation_token" validate:"omitempty"`
+	ClientID        string `json:"client_id" validate:"omitempty,max=256"`
+	ClientSecret    string `json:"client_secret" validate:"omitempty"`
+	ServiceToken    string `json:"service_token" validate:"omitempty"`
+}
+
+type DeployBasaltPassRequest struct {
+	Name                   string `json:"name" validate:"required,max=128"`
+	BaseURL                string `json:"base_url" validate:"required,url"`
+	TenantName             string `json:"tenant_name" validate:"omitempty,max=128"`
+	TenantCode             string `json:"tenant_code" validate:"omitempty,max=128"`
+	Namespace              string `json:"namespace" validate:"omitempty,max=128"`
+	BackendImage           string `json:"backend_image" validate:"required,max=512"`
+	FrontendImage          string `json:"frontend_image" validate:"required,max=512"`
+	GitHubCredentialID     uint   `json:"github_credential_id" validate:"omitempty"`
+	GitHubRepo             string `json:"github_repo" validate:"omitempty,max=256"`
+	GitHubBranch           string `json:"github_branch" validate:"omitempty,max=128"`
+	PublicHost             string `json:"public_host" validate:"omitempty,max=256"`
+	ExposureMode           string `json:"exposure_mode" validate:"omitempty,oneof=public private"`
+	JWTSecret              string `json:"jwt_secret" validate:"omitempty"`
+	CORSAllowOrigins       string `json:"cors_allow_origins" validate:"omitempty,max=2048"`
+	PlatformAdminEmail     string `json:"platform_admin_email" validate:"required,email"`
+	PlatformAdminUsername  string `json:"platform_admin_username" validate:"required,max=64"`
+	PlatformAdminPassword  string `json:"platform_admin_password" validate:"required"`
+	CloudflareCredentialID uint   `json:"cloudflare_credential_id" validate:"omitempty"`
+	CloudflareZoneID       string `json:"cloudflare_zone_id" validate:"omitempty,max=128"`
+	DatabaseDependencyID   uint   `json:"database_dependency_id" validate:"required"`
+	DatabaseCredentialID   uint   `json:"database_credential_id" validate:"required"`
+	OwnerEmail             string `json:"owner_email" validate:"required,email"`
+	OwnerUsername          string `json:"owner_username" validate:"required,max=64"`
+	OwnerPassword          string `json:"owner_password" validate:"required"`
+	Description            string `json:"description" validate:"omitempty,max=500"`
+	MaxApps                int    `json:"max_apps" validate:"omitempty,min=1"`
+	MaxUsers               int    `json:"max_users" validate:"omitempty,min=1"`
+	MaxTokensPerHour       int    `json:"max_tokens_per_hour" validate:"omitempty,min=1"`
+	AutomationToken        string `json:"automation_token" validate:"omitempty"`
+	ClientID               string `json:"client_id" validate:"omitempty,max=256"`
+	ClientSecret           string `json:"client_secret" validate:"omitempty"`
+	ServiceToken           string `json:"service_token" validate:"omitempty"`
 }
 
 type UpdateBasaltPassCredentialRequest struct {
-	Name                 *string `json:"name" validate:"omitempty,max=128"`
-	BaseURL              *string `json:"base_url" validate:"omitempty,url"`
-	TenantID             *string `json:"tenant_id" validate:"omitempty,max=128"`
-	TenantCode           *string `json:"tenant_code" validate:"omitempty,max=128"`
-	DeployMode           *string `json:"deploy_mode" validate:"omitempty,oneof=external managed"`
-	Namespace            *string `json:"namespace" validate:"omitempty,max=128"`
-	BackendImage         *string `json:"backend_image" validate:"omitempty,max=512"`
-	FrontendImage        *string `json:"frontend_image" validate:"omitempty,max=512"`
-	PublicHost           *string `json:"public_host" validate:"omitempty,max=256"`
-	DatabaseDependencyID *uint   `json:"database_dependency_id" validate:"omitempty"`
-	DatabaseCredentialID *uint   `json:"database_credential_id" validate:"omitempty"`
-	AutomationToken      *string `json:"automation_token"`
-	ClientID             *string `json:"client_id" validate:"omitempty,max=256"`
-	ClientSecret         *string `json:"client_secret"`
-	ServiceToken         *string `json:"service_token"`
-	IsActive             *bool   `json:"is_active"`
+	Name            *string `json:"name" validate:"omitempty,max=128"`
+	BaseURL         *string `json:"base_url" validate:"omitempty,url"`
+	TenantID        *string `json:"tenant_id" validate:"omitempty,max=128"`
+	TenantCode      *string `json:"tenant_code" validate:"omitempty,max=128"`
+	AutomationToken *string `json:"automation_token"`
+	ClientID        *string `json:"client_id" validate:"omitempty,max=256"`
+	ClientSecret    *string `json:"client_secret"`
+	ServiceToken    *string `json:"service_token"`
+	IsActive        *bool   `json:"is_active"`
 }
 
 type ShareCredentialRequest struct {

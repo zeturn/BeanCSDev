@@ -19,6 +19,7 @@ type BasaltPassRuntime struct {
 	Namespace     string
 	BackendImage  string
 	FrontendImage string
+	PullSecret    string
 	Host          string
 	Exposure      string
 	Env           map[string]string
@@ -47,13 +48,13 @@ func (m *Manager) ApplyBasaltPass(ctx context.Context, in BasaltPassRuntime) err
 	}
 	backendName := in.Name + "-backend"
 	frontendName := in.Name + "-frontend"
-	if err := m.applyBasaltPassDeployment(ctx, in.Namespace, backendName, in.BackendImage, 8101, secretName, true); err != nil {
+	if err := m.applyBasaltPassDeployment(ctx, in.Namespace, backendName, in.BackendImage, 8101, secretName, in.PullSecret, true); err != nil {
 		return err
 	}
 	if err := m.applyBasaltPassService(ctx, in.Namespace, "backend", backendName, 8101); err != nil {
 		return err
 	}
-	if err := m.applyBasaltPassDeployment(ctx, in.Namespace, frontendName, in.FrontendImage, 80, secretName, false); err != nil {
+	if err := m.applyBasaltPassDeployment(ctx, in.Namespace, frontendName, in.FrontendImage, 80, secretName, in.PullSecret, false); err != nil {
 		return err
 	}
 	if err := m.applyBasaltPassService(ctx, in.Namespace, frontendName, frontendName, 80); err != nil {
@@ -67,7 +68,7 @@ func (m *Manager) ApplyBasaltPass(ctx context.Context, in BasaltPassRuntime) err
 	return nil
 }
 
-func (m *Manager) applyBasaltPassDeployment(ctx context.Context, namespace, name, image string, port int32, secretName string, envFromSecret bool) error {
+func (m *Manager) applyBasaltPassDeployment(ctx context.Context, namespace, name, image string, port int32, secretName, pullSecret string, envFromSecret bool) error {
 	labels := Labels(name)
 	container := corev1.Container{
 		Name:  "app",
@@ -81,6 +82,15 @@ func (m *Manager) applyBasaltPassDeployment(ctx context.Context, namespace, name
 	if envFromSecret {
 		container.EnvFrom = []corev1.EnvFromSource{{SecretRef: &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: secretName}}}}
 	}
+	podSpec := corev1.PodSpec{
+		Containers: []corev1.Container{container},
+		NodeSelector: map[string]string{
+			"kubernetes.io/arch": "amd64",
+		},
+	}
+	if strings.TrimSpace(pullSecret) != "" {
+		podSpec.ImagePullSecrets = []corev1.LocalObjectReference{{Name: strings.TrimSpace(pullSecret)}}
+	}
 	dep := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: labels},
 		Spec: appsv1.DeploymentSpec{
@@ -88,9 +98,7 @@ func (m *Manager) applyBasaltPassDeployment(ctx context.Context, namespace, name
 			Selector: &metav1.LabelSelector{MatchLabels: labels},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
-				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{container},
-				},
+				Spec:       podSpec,
 			},
 		},
 	}
@@ -143,9 +151,7 @@ func (m *Manager) applyBasaltPassIngress(ctx context.Context, namespace, name, s
 		annotations["kubernetes.io/ingress.class"] = "traefik"
 		annotations["traefik.ingress.kubernetes.io/router.entrypoints"] = "websecure"
 		annotations["traefik.ingress.kubernetes.io/router.tls"] = "true"
-		if m.CertManager.IssuerName != "" {
-			annotations["cert-manager.io/issuer"] = m.CertManager.IssuerName
-		}
+		annotations["cert-manager.io/cluster-issuer"] = "letsencrypt-prod"
 	}
 	pathType := networkingv1.PathTypePrefix
 	ing := &networkingv1.Ingress{
