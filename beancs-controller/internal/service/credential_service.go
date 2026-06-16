@@ -695,7 +695,7 @@ func hostFromURL(raw string) string {
 
 func waitForBasaltPassHealth(ctx context.Context, baseURL, clientID, clientSecret, serviceToken string) error {
 	client := basaltpass.NewHTTPClientWithServiceToken(baseURL, clientID, clientSecret, strings.TrimSpace(serviceToken))
-	deadline := time.Now().Add(2 * time.Minute)
+	deadline := time.Now().Add(8 * time.Minute)
 	var lastErr error
 	for {
 		if _, err := client.HealthCheck(ctx); err == nil {
