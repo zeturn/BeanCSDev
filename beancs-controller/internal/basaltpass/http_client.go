@@ -42,7 +42,7 @@ func NewHTTPClientWithServiceToken(baseURL, clientID, clientSecret, serviceToken
 		clientID:           clientID,
 		clientSecret:       clientSecret,
 		staticServiceToken: strings.TrimSpace(serviceToken),
-		httpClient:         &http.Client{Timeout: 15 * time.Second},
+		httpClient:         &http.Client{Timeout: 5 * time.Minute},
 	}
 }
 
