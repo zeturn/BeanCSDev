@@ -56,6 +56,12 @@ func ApplyDefaults(doc *ApplicationSpecDocument) {
 		component.Name = strings.TrimSpace(component.Name)
 		component.Kind = defaultString(strings.TrimSpace(component.Kind), "service")
 		component.ProjectName = strings.TrimSpace(component.ProjectName)
+		if component.BasaltPass != nil {
+			component.BasaltPass.CallbackPath = strings.TrimSpace(component.BasaltPass.CallbackPath)
+			component.BasaltPass.RedirectURIs = trimStringList(component.BasaltPass.RedirectURIs)
+			component.BasaltPass.AllowedOrigins = trimStringList(component.BasaltPass.AllowedOrigins)
+			component.BasaltPass.Scopes = trimStringList(component.BasaltPass.Scopes)
+		}
 		if component.Build != nil {
 			component.Build.Context = defaultString(strings.TrimSpace(component.Build.Context), ".")
 			component.Build.Dockerfile = strings.TrimSpace(component.Build.Dockerfile)
@@ -82,4 +88,15 @@ func defaultString(value, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func trimStringList(values []string) []string {
+	out := values[:0]
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
 }

@@ -433,9 +433,9 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID, te
 			Name:           req.Name,
 			Description:    coalesce(req.Description, "BeanCS managed tenant app"),
 			HomepageURL:    projectHome(project),
-			RedirectURIs:   []string{projectHome(project) + "/callback"},
-			AllowedOrigins: []string{projectHome(project)},
-			Scopes:         []string{"openid", "profile", "email"},
+			RedirectURIs:   basaltPassRedirectURIs(project, req.BasaltPass),
+			AllowedOrigins: basaltPassAllowedOrigins(project, req.BasaltPass),
+			Scopes:         basaltPassScopes(req.BasaltPass),
 		})
 		if err != nil {
 			rollback()
@@ -1094,6 +1094,53 @@ func projectHome(p *model.Project) string {
 		return "https://" + p.Domain
 	}
 	return "http://" + p.Name + "." + p.Namespace + ".svc.cluster.local"
+}
+
+func basaltPassRedirectURIs(project *model.Project, cfg *dto.BasaltPassComponentConfig) []string {
+	if cfg != nil && len(cfg.RedirectURIs) > 0 {
+		return uniqueNonEmptyStrings(cfg.RedirectURIs)
+	}
+	home := projectHome(project)
+	if cfg != nil && strings.TrimSpace(cfg.CallbackPath) != "" {
+		return []string{joinURLPath(home, cfg.CallbackPath)}
+	}
+	return []string{home + "/callback"}
+}
+
+func basaltPassAllowedOrigins(project *model.Project, cfg *dto.BasaltPassComponentConfig) []string {
+	if cfg != nil && len(cfg.AllowedOrigins) > 0 {
+		return uniqueNonEmptyStrings(cfg.AllowedOrigins)
+	}
+	return []string{projectHome(project)}
+}
+
+func basaltPassScopes(cfg *dto.BasaltPassComponentConfig) []string {
+	if cfg != nil && len(cfg.Scopes) > 0 {
+		return uniqueNonEmptyStrings(cfg.Scopes)
+	}
+	return []string{"openid", "profile", "email"}
+}
+
+func joinURLPath(base, path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return base
+	}
+	return strings.TrimRight(base, "/") + "/" + strings.TrimLeft(path, "/")
+}
+
+func uniqueNonEmptyStrings(values []string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
 }
 
 func coalesce(v, fallback string) string {

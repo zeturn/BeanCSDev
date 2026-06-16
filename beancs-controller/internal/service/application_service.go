@@ -263,6 +263,7 @@ func monorepoProjectRequest(app dto.CreateMonorepoApplicationRequest, component 
 		HealthCheck:            component.HealthCheck,
 		Volumes:                component.Volumes,
 		WatchPaths:             component.WatchPaths,
+		BasaltPass:             component.BasaltPass,
 	}
 }
 

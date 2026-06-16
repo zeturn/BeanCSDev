@@ -43,6 +43,7 @@ type ComponentSpec struct {
 	Name                string                  `yaml:"name" json:"name"`
 	Kind                string                  `yaml:"kind" json:"kind"`
 	ProjectName         string                  `yaml:"projectName" json:"projectName"`
+	BasaltPass          *BasaltPassSpec         `yaml:"basaltPass,omitempty" json:"basaltPass,omitempty"`
 	Build               *BuildSpec              `yaml:"build,omitempty" json:"build,omitempty"`
 	Image               *ImageSpec              `yaml:"image,omitempty" json:"image,omitempty"`
 	Ports               []PortSpec              `yaml:"ports,omitempty" json:"ports,omitempty"`
@@ -54,6 +55,13 @@ type ComponentSpec struct {
 	Volumes             []VolumeSpec            `yaml:"volumes,omitempty" json:"volumes,omitempty"`
 	Replicas            *int                    `yaml:"replicas,omitempty" json:"replicas,omitempty"`
 	WatchPaths          []string                `yaml:"watchPaths,omitempty" json:"watchPaths,omitempty"`
+}
+
+type BasaltPassSpec struct {
+	CallbackPath   string   `yaml:"callbackPath,omitempty" json:"callbackPath,omitempty"`
+	RedirectURIs   []string `yaml:"redirectURIs,omitempty" json:"redirectURIs,omitempty"`
+	AllowedOrigins []string `yaml:"allowedOrigins,omitempty" json:"allowedOrigins,omitempty"`
+	Scopes         []string `yaml:"scopes,omitempty" json:"scopes,omitempty"`
 }
 
 type BuildSpec struct {

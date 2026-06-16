@@ -3,36 +3,37 @@ package dto
 import "github.com/zeturn/beancs-controller/internal/model"
 
 type CreateProjectRequest struct {
-	Name                   string             `json:"name" validate:"required,hostname_rfc1123,max=63"`
-	DisplayName            string             `json:"display_name" validate:"omitempty,max=256"`
-	Description            string             `json:"description" validate:"omitempty,max=2000"`
-	TeamID                 string             `json:"team_id" validate:"omitempty,max=128"`
-	BuildSource            string             `json:"build_source" validate:"omitempty,oneof=github dockerhub ghcr registry source-upload"`
-	ImageReference         string             `json:"image_reference" validate:"omitempty,max=512"`
-	SourceArchiveName      string             `json:"source_archive_name" validate:"omitempty,max=256"`
-	GitHubCredentialID     uint               `json:"github_credential_id" validate:"omitempty"`
-	GitHubRepo             string             `json:"github_repo" validate:"omitempty,max=256"`
-	GitHubBranch           string             `json:"github_branch" validate:"omitempty,max=128"`
-	DockerfilePath         string             `json:"dockerfile_path" validate:"omitempty,max=512"`
-	BuildContext           string             `json:"build_context" validate:"omitempty,max=512"`
-	BuildArgs              model.JSONMap      `json:"build_args" validate:"omitempty"`
-	AutoDeploy             *bool              `json:"auto_deploy" validate:"omitempty"`
-	Namespace              string             `json:"namespace" validate:"omitempty,hostname_rfc1123,max=63"`
-	BasaltPassInstanceID   *uint              `json:"basaltpass_instance_id"`
-	CloudflareCredentialID *uint              `json:"cloudflare_credential_id"`
-	CloudflareZoneID       string             `json:"cloudflare_zone_id" validate:"omitempty,max=128"`
-	ExposureMode           string             `json:"exposure_mode" validate:"required,oneof=public private internal-only"`
-	Subdomain              string             `json:"subdomain" validate:"omitempty,hostname_rfc1123,max=63"`
-	ResourcePreset         string             `json:"resource_preset" validate:"omitempty,oneof=nano small medium large"`
-	Port                   int                `json:"port" validate:"omitempty,min=1,max=65535"`
-	Ports                  model.ProjectPorts `json:"ports" validate:"required,min=1"`
-	Replicas               int                `json:"replicas" validate:"omitempty,min=1,max=20"`
-	Env                    map[string]string  `json:"env" validate:"omitempty"`
-	DependsOn              []string           `json:"depends_on" validate:"omitempty,dive,max=128"`
-	EnvFromDependencies    model.JSONMap      `json:"env_from_dependencies" validate:"omitempty"`
-	HealthCheck            model.JSONMap      `json:"health_check" validate:"omitempty"`
-	Volumes                model.JSONMap      `json:"volumes" validate:"omitempty"`
-	WatchPaths             []string           `json:"watch_paths" validate:"omitempty,dive,max=512"`
+	Name                   string                     `json:"name" validate:"required,hostname_rfc1123,max=63"`
+	DisplayName            string                     `json:"display_name" validate:"omitempty,max=256"`
+	Description            string                     `json:"description" validate:"omitempty,max=2000"`
+	TeamID                 string                     `json:"team_id" validate:"omitempty,max=128"`
+	BuildSource            string                     `json:"build_source" validate:"omitempty,oneof=github dockerhub ghcr registry source-upload"`
+	ImageReference         string                     `json:"image_reference" validate:"omitempty,max=512"`
+	SourceArchiveName      string                     `json:"source_archive_name" validate:"omitempty,max=256"`
+	GitHubCredentialID     uint                       `json:"github_credential_id" validate:"omitempty"`
+	GitHubRepo             string                     `json:"github_repo" validate:"omitempty,max=256"`
+	GitHubBranch           string                     `json:"github_branch" validate:"omitempty,max=128"`
+	DockerfilePath         string                     `json:"dockerfile_path" validate:"omitempty,max=512"`
+	BuildContext           string                     `json:"build_context" validate:"omitempty,max=512"`
+	BuildArgs              model.JSONMap              `json:"build_args" validate:"omitempty"`
+	AutoDeploy             *bool                      `json:"auto_deploy" validate:"omitempty"`
+	Namespace              string                     `json:"namespace" validate:"omitempty,hostname_rfc1123,max=63"`
+	BasaltPassInstanceID   *uint                      `json:"basaltpass_instance_id"`
+	CloudflareCredentialID *uint                      `json:"cloudflare_credential_id"`
+	CloudflareZoneID       string                     `json:"cloudflare_zone_id" validate:"omitempty,max=128"`
+	ExposureMode           string                     `json:"exposure_mode" validate:"required,oneof=public private internal-only"`
+	Subdomain              string                     `json:"subdomain" validate:"omitempty,hostname_rfc1123,max=63"`
+	ResourcePreset         string                     `json:"resource_preset" validate:"omitempty,oneof=nano small medium large"`
+	Port                   int                        `json:"port" validate:"omitempty,min=1,max=65535"`
+	Ports                  model.ProjectPorts         `json:"ports" validate:"required,min=1"`
+	Replicas               int                        `json:"replicas" validate:"omitempty,min=1,max=20"`
+	Env                    map[string]string          `json:"env" validate:"omitempty"`
+	DependsOn              []string                   `json:"depends_on" validate:"omitempty,dive,max=128"`
+	EnvFromDependencies    model.JSONMap              `json:"env_from_dependencies" validate:"omitempty"`
+	HealthCheck            model.JSONMap              `json:"health_check" validate:"omitempty"`
+	Volumes                model.JSONMap              `json:"volumes" validate:"omitempty"`
+	WatchPaths             []string                   `json:"watch_paths" validate:"omitempty,dive,max=512"`
+	BasaltPass             *BasaltPassComponentConfig `json:"basaltpass" validate:"omitempty"`
 }
 
 type AnalyzeProjectRepositoryRequest struct {

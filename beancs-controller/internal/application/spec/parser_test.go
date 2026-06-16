@@ -112,6 +112,49 @@ func TestParseApplicationSpec(t *testing.T) {
 	}
 }
 
+func TestParseComponentBasaltPassConfig(t *testing.T) {
+	doc, err := Parse([]byte(`apiVersion: beancs.io/v1alpha1
+kind: Application
+metadata:
+  name: app
+spec:
+  type: monorepo
+  repo:
+    name: owner/repo
+  components:
+    - name: control
+      kind: service
+      projectName: app-control
+      basaltPass:
+        callbackPath: " /api/auth/basaltpass/callback/ "
+        redirectURIs:
+          - " https://control.example.com/oauth/callback "
+        allowedOrigins:
+          - " https://front.example.com "
+        scopes:
+          - "openid"
+      build:
+        context: .
+        dockerfile: Dockerfile
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := doc.Spec.Components[0].BasaltPass
+	if cfg == nil {
+		t.Fatal("expected basaltPass config")
+	}
+	if cfg.CallbackPath != "/api/auth/basaltpass/callback/" {
+		t.Fatalf("callbackPath = %q", cfg.CallbackPath)
+	}
+	if got := cfg.RedirectURIs[0]; got != "https://control.example.com/oauth/callback" {
+		t.Fatalf("redirectURIs[0] = %q", got)
+	}
+	if got := cfg.AllowedOrigins[0]; got != "https://front.example.com" {
+		t.Fatalf("allowedOrigins[0] = %q", got)
+	}
+}
+
 func TestParseApplicationSpecInvalidKind(t *testing.T) {
 	doc, err := Parse([]byte(`apiVersion: beancs.io/v1alpha1
 kind: Widget

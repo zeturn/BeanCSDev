@@ -56,6 +56,44 @@ func TestSpecToMonorepoRequestResolvesGeneratedComponentSecrets(t *testing.T) {
 	}
 }
 
+func TestSpecToMonorepoRequestPreservesBasaltPassConfig(t *testing.T) {
+	doc := &appspec.ApplicationSpecDocument{
+		Metadata: appspec.ApplicationMetadata{Name: "araneae"},
+		Spec: appspec.ApplicationSpec{
+			Type: "monorepo",
+			Repo: appspec.RepoSpec{Name: "zeturn/AraneaeDev", Branch: "main"},
+			Components: []appspec.ComponentSpec{{
+				Name:        "control",
+				Kind:        "service",
+				ProjectName: "araneae-control",
+				BasaltPass: &appspec.BasaltPassSpec{
+					CallbackPath: "/api/auth/basaltpass/callback/",
+					Scopes:       []string{"openid", "profile"},
+				},
+			}},
+		},
+	}
+
+	req := (&ApplicationSpecService{}).specToMonorepoRequest(nil, "", doc, dto.ApplicationSpecRepoRequest{GitHubCredentialID: 42})
+	if req.Components[0].BasaltPass == nil {
+		t.Fatal("expected basaltPass config")
+	}
+	if got := req.Components[0].BasaltPass.CallbackPath; got != "/api/auth/basaltpass/callback/" {
+		t.Fatalf("callbackPath = %q", got)
+	}
+	if got := req.Components[0].BasaltPass.Scopes[1]; got != "profile" {
+		t.Fatalf("scope[1] = %q", got)
+	}
+}
+
+func TestBasaltPassRedirectURIsUsesCallbackPath(t *testing.T) {
+	project := &model.Project{Name: "araneae-control", Namespace: "app-araneae", Domain: "araneae-control.hollowdata.com"}
+	uris := basaltPassRedirectURIs(project, &dto.BasaltPassComponentConfig{CallbackPath: "/api/auth/basaltpass/callback/"})
+	if len(uris) != 1 || uris[0] != "https://araneae-control.hollowdata.com/api/auth/basaltpass/callback/" {
+		t.Fatalf("redirect uris = %#v", uris)
+	}
+}
+
 func TestApplyComponentDomainsFillsRoutableHosts(t *testing.T) {
 	component := dto.MonorepoComponentRequest{
 		ProjectName: "araneae-control",

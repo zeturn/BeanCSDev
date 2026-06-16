@@ -42,6 +42,14 @@ type MonorepoComponentRequest struct {
 	HealthCheck         model.JSONMap              `json:"health_check" validate:"omitempty"`
 	Volumes             model.JSONMap              `json:"volumes" validate:"omitempty"`
 	WatchPaths          []string                   `json:"watch_paths" validate:"omitempty,dive,max=512"`
+	BasaltPass          *BasaltPassComponentConfig `json:"basaltpass" validate:"omitempty"`
+}
+
+type BasaltPassComponentConfig struct {
+	CallbackPath   string   `json:"callback_path" validate:"omitempty,max=512"`
+	RedirectURIs   []string `json:"redirect_uris" validate:"omitempty,dive,url"`
+	AllowedOrigins []string `json:"allowed_origins" validate:"omitempty,dive,url"`
+	Scopes         []string `json:"scopes" validate:"omitempty,dive,max=128"`
 }
 
 type EnvFromDependencyRequest struct {

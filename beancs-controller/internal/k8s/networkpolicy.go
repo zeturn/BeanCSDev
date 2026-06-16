@@ -2,6 +2,7 @@ package k8s
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/zeturn/beancs-controller/internal/model"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -99,9 +100,30 @@ func (m *Manager) upsertNetworkPolicy(ctx context.Context, np *networkingv1.Netw
 		if getErr != nil {
 			return getErr
 		}
+		if np.Name == "beancs-allow-ingress" {
+			np.Spec.Ingress = mergeNetworkPolicyIngress(current.Spec.Ingress, np.Spec.Ingress)
+		}
 		current.Spec = np.Spec
 		current.Labels = np.Labels
 		_, err = m.Clientset.NetworkingV1().NetworkPolicies(np.Namespace).Update(ctx, current, metav1.UpdateOptions{})
 	}
 	return err
+}
+
+func mergeNetworkPolicyIngress(existing, desired []networkingv1.NetworkPolicyIngressRule) []networkingv1.NetworkPolicyIngressRule {
+	out := make([]networkingv1.NetworkPolicyIngressRule, 0, len(existing)+len(desired))
+	seen := map[string]bool{}
+	for _, rule := range append(existing, desired...) {
+		keyBytes, err := json.Marshal(rule)
+		key := string(keyBytes)
+		if err != nil {
+			key = rule.String()
+		}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, rule)
+	}
+	return out
 }

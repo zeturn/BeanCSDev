@@ -281,6 +281,14 @@ func specComponentToRequest(component appspec.ComponentSpec) dto.MonorepoCompone
 		HealthCheck: model.JSONMap(toJSONMap(component.HealthCheck)),
 		Volumes:     model.JSONMap{"items": component.Volumes},
 	}
+	if component.BasaltPass != nil {
+		req.BasaltPass = &dto.BasaltPassComponentConfig{
+			CallbackPath:   component.BasaltPass.CallbackPath,
+			RedirectURIs:   component.BasaltPass.RedirectURIs,
+			AllowedOrigins: component.BasaltPass.AllowedOrigins,
+			Scopes:         component.BasaltPass.Scopes,
+		}
+	}
 	if component.Replicas != nil {
 		req.Replicas = *component.Replicas
 	}
