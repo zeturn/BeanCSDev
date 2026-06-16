@@ -272,8 +272,8 @@ func webhookImageReference(project model.Project, tag string) string {
 		return imageRef
 	}
 	base := strings.TrimSpace(project.ImageReference)
-	if base == "" && project.GitHubRepo != "" {
-		base = "ghcr.io/" + strings.ToLower(project.GitHubRepo)
+	if base == "" {
+		base = strings.TrimSpace(project.RegistryImageReference)
 	}
 	if base == "" {
 		return imageRef

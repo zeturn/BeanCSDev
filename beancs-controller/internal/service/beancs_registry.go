@@ -105,13 +105,6 @@ func isAllDigits(value string) bool {
 	return true
 }
 
-func ghcrImageBase(project *model.Project) string {
-	if project == nil || strings.TrimSpace(project.GitHubRepoFullName) == "" {
-		return ""
-	}
-	return "ghcr.io/" + strings.ToLower(project.GitHubRepoFullName)
-}
-
 func normalizeRegistryHost(raw string) string {
 	raw = strings.TrimSpace(strings.TrimRight(raw, "/"))
 	raw = strings.TrimPrefix(raw, "https://")

@@ -183,7 +183,7 @@ const deploySourceOptions = [
     label: "GitOps repository",
     icon: GitBranch,
     description:
-      "Use a GitHub repository as source and publish runtime images to GHCR.",
+      "Use a GitHub repository as source and publish runtime images to BeanCS Harbor.",
   },
   {
     id: "registry",
@@ -198,7 +198,7 @@ const updateModeOptions = [
     label: "Argo CD",
     icon: GitBranch,
     description:
-      "Create GitOps manifests, register an Argo CD app, and let GitHub Actions build the first GHCR image.",
+      "Create GitOps manifests, register an Argo CD app, and let GitHub Actions build the first Harbor image.",
   },
   {
     id: "passive",
@@ -284,9 +284,10 @@ export default function DeployView({
   const canContinue = isBasaltPassDeploy
     ? stepBlockers.length === 0
     : canContinueDeployStep(step.id, form, selectedCredential, analysis);
-  const ghcrPreview = form.github_repo
-    ? `ghcr.io/${form.github_repo.toLowerCase()}:beancs-<build>`
-    : "ghcr.io/<owner>/<repo>:beancs-<build>";
+  const harborPreviewRepo = slugify(form.name || form.github_repo?.split("/").pop() || "app");
+  const harborPreview = registryHost
+    ? `${registryHost}/<tenant>/${harborPreviewRepo}:beancs-<build>`
+    : "<BeanCS Harbor>/<tenant>/<app>:beancs-<build>";
   const setDeploySource = (deploySource) => {
     setAnalysis(null);
     setForm({
@@ -419,18 +420,13 @@ export default function DeployView({
       tenant_name: form.tenant_name || nextName,
     };
     if (isBasaltPassDeploy) {
-      const owner = (repo.full_name || "").split("/")[0]?.toLowerCase();
       const defaultSlug = slugify(nextName);
       const backendImage = basaltpassImageBase
         ? `${basaltpassImageBase}/basaltpass-backend:latest`
-        : owner
-          ? `ghcr.io/${owner}/basaltpass-backend:latest`
-          : "";
+        : "";
       const frontendImage = basaltpassImageBase
         ? `${basaltpassImageBase}/basaltpass-frontend:latest`
-        : owner
-          ? `ghcr.io/${owner}/basaltpass-frontend:latest`
-          : "";
+        : "";
       setForm({
         ...nextForm,
         backend_image: form.backend_image || backendImage,
@@ -2285,7 +2281,7 @@ export default function DeployView({
             {form.deploy_source === "gitops" &&
               form.update_mode === "argocd" && (
                 <span>
-                  Future GHCR image <b>{ghcrPreview}</b>
+                  Future Harbor image <b>{harborPreview}</b>
                 </span>
               )}
           </div>

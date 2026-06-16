@@ -44,7 +44,7 @@ spec:
           tolerationSeconds: 30
       containers:
         - name: controller
-          image: ghcr.io/zeturn/beancs-controller:latest
+          image: registry.beancs.hollowdata.com/hollowdata/beancs-controller:latest
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

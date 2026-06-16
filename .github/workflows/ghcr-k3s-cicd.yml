@@ -1,4 +1,4 @@
-name: GHCR + k3s CI/CD
+name: Harbor + k3s CI/CD
 
 on:
   push:
@@ -11,10 +11,10 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 env:
   IMAGE_NAME: beancs-controller
+  REGISTRY_PROJECT: hollowdata
   NAMESPACE: beancs-system
 
 jobs:
@@ -64,8 +64,11 @@ jobs:
         id: meta
         shell: bash
         run: |
-          OWNER_LC="$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
-          IMAGE="ghcr.io/${OWNER_LC}/${IMAGE_NAME}"
+          REGISTRY_HOST="${{ secrets.BEANCS_REGISTRY_HOST }}"
+          REGISTRY_HOST="${REGISTRY_HOST#https://}"
+          REGISTRY_HOST="${REGISTRY_HOST#http://}"
+          REGISTRY_HOST="${REGISTRY_HOST%/}"
+          IMAGE="${REGISTRY_HOST}/${REGISTRY_PROJECT}/${IMAGE_NAME}"
           echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
           {
             echo "tags<<EOF"
@@ -83,12 +86,12 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to GHCR
+      - name: Login to BeanCS Harbor
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          registry: ${{ secrets.BEANCS_REGISTRY_HOST }}
+          username: ${{ secrets.BEANCS_REGISTRY_USERNAME }}
+          password: ${{ secrets.BEANCS_REGISTRY_TOKEN }}
 
       - name: Build and push controller
         uses: docker/build-push-action@v6
@@ -154,14 +157,13 @@ jobs:
           kubectl -n cert-manager rollout status deployment/cert-manager-webhook --timeout=420s
           kubectl apply -f beancs-controller/deploy/clusterissuer-letsencrypt.yaml
 
-      - name: Configure GHCR pull secret
+      - name: Configure Harbor pull secret
         shell: bash
         run: |
-          OWNER_LC="$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
-          kubectl -n "${NAMESPACE}" create secret docker-registry ghcr-creds \
-            --docker-server=ghcr.io \
-            --docker-username="${OWNER_LC}" \
-            --docker-password="${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}" \
+          kubectl -n "${NAMESPACE}" create secret docker-registry beancs-registry-push \
+            --docker-server="${{ secrets.BEANCS_REGISTRY_HOST }}" \
+            --docker-username="${{ secrets.BEANCS_REGISTRY_USERNAME }}" \
+            --docker-password="${{ secrets.BEANCS_REGISTRY_TOKEN }}" \
             --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Deploy bundled Postgres
@@ -245,7 +247,7 @@ jobs:
           IMAGE="${{ needs.build_and_push.outputs.image }}:${GITHUB_SHA}"
           kubectl -n "${NAMESPACE}" set image deployment/beancs-controller controller="${IMAGE}"
           kubectl -n "${NAMESPACE}" patch deployment beancs-controller \
-            -p '{"spec":{"template":{"spec":{"imagePullSecrets":[{"name":"ghcr-creds"}]}}}}'
+            -p '{"spec":{"template":{"spec":{"imagePullSecrets":[{"name":"beancs-registry-push"}]}}}}'
           if ! kubectl -n "${NAMESPACE}" rollout status deployment/beancs-controller --timeout=240s; then
             kubectl -n "${NAMESPACE}" describe deployment beancs-controller
             kubectl -n "${NAMESPACE}" get replicasets,pods -l app=beancs-controller -o wide

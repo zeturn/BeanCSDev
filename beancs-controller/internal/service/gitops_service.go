@@ -307,7 +307,10 @@ func (s *GitOpsService) RenderManifests(project *model.Project) map[string]strin
 	base := "apps/" + project.Name
 	image := strings.TrimSpace(project.ImageReference)
 	if image == "" {
-		image = "ghcr.io/" + strings.ToLower(project.GitHubRepo) + ":latest"
+		image = strings.TrimSpace(project.RegistryImageReference)
+	}
+	if image == "" {
+		image = project.Name + ":latest"
 	}
 	imageName := extractImageName(image)
 	imageTag := extractImageTag(image)

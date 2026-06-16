@@ -55,7 +55,18 @@ func (s *GitHubBuildService) Start(ctx context.Context, project *model.Project, 
 	if branch == "" {
 		branch = "main"
 	}
+	if project.RegistryImageReference == "" {
+		if err := configureBeanCSRegistry(project, s.cfg, project.TenantCode); err != nil {
+			return nil, err
+		}
+		if err := ensureHarborProject(ctx, s.cfg, project.RegistryProject); err != nil {
+			return nil, err
+		}
+	}
 	image := buildImageReference(project)
+	if image == "" {
+		return nil, fmt.Errorf("BeanCS registry image reference could not be resolved")
+	}
 	if err := s.ensureWorkflow(ctx, token, owner, repo, project); err != nil {
 		return nil, err
 	}
@@ -186,7 +197,6 @@ func (s *GitHubBuildService) ensureWebhookSecrets(ctx context.Context, token, ow
 func (s *GitHubBuildService) dispatchWorkflow(ctx context.Context, token, owner, repo, branch string, project *model.Project, image string) error {
 	inputs := map[string]any{
 		"image":           image,
-		"ghcr_image":      ghcrDispatchImage(project, image),
 		"dockerfile_path": coalesce(project.DockerfilePath, "Dockerfile"),
 		"context":         coalesce(project.BuildContext, "."),
 		"build_args":      encodeBuildArgs(project.BuildArgs),
@@ -377,12 +387,12 @@ func (s *GitHubBuildService) workflowRun(ctx context.Context, token, owner, repo
 }
 
 func buildImageReference(project *model.Project) string {
-	base := strings.TrimSpace(project.ImageReference)
+	base := strings.TrimSpace(project.RegistryImageReference)
 	if base == "" {
-		base = strings.TrimSpace(project.RegistryImageReference)
+		base = strings.TrimSpace(project.ImageReference)
 	}
 	if base == "" {
-		base = "ghcr.io/" + strings.ToLower(project.GitHubRepo)
+		return ""
 	}
 	if strings.Contains(base, "@") {
 		base = strings.Split(base, "@")[0]
@@ -393,18 +403,6 @@ func buildImageReference(project *model.Project) string {
 		base = base[:lastColon]
 	}
 	return base + ":beancs-" + time.Now().UTC().Format("20060102150405")
-}
-
-func ghcrDispatchImage(project *model.Project, image string) string {
-	base := ghcrImageBase(project)
-	if base == "" {
-		base = "ghcr.io/" + strings.ToLower(project.GitHubRepo)
-	}
-	tag := "latest"
-	if i := strings.LastIndex(image, ":"); i > strings.LastIndex(image, "/") {
-		tag = image[i+1:]
-	}
-	return base + ":" + tag
 }
 
 func (s *GitHubBuildService) webhookURL() string {
@@ -561,21 +559,12 @@ func beancsBuildWorkflow(project *model.Project, callbackEnabled bool) string {
 	if imageBase == "" {
 		imageBase = strings.TrimSpace(project.ImageReference)
 	}
-	if imageBase == "" {
-		imageBase = "ghcr.io/" + strings.ToLower(project.GitHubRepo)
-	}
-	ghcrBase := ghcrImageBase(project)
-	if ghcrBase == "" {
-		ghcrBase = "ghcr.io/" + strings.ToLower(project.GitHubRepo)
-	}
+	buildArgs := indentForHeredoc(encodeBuildArgs(project.BuildArgs), "          ")
 	trigger := `  workflow_dispatch:
     inputs:
       image:
         description: Target BeanCS registry image reference
         required: true
-      ghcr_image:
-        description: Target GHCR image reference
-        required: false
       dockerfile_path:
         description: Dockerfile path
         required: false
@@ -622,7 +611,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
   build:
@@ -630,7 +618,6 @@ jobs:
     env:
       BEANCS_PROJECT: %s
       BEANCS_IMAGE_BASE: %s
-      BEANCS_GHCR_IMAGE_BASE: %s
     steps:
       - uses: actions/checkout@v4
       - name: Resolve image
@@ -639,31 +626,38 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             IMAGE="${{ inputs.image }}"
-            GHCR_IMAGE="${{ inputs.ghcr_image }}"
           elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
             TAG="${GITHUB_REF#refs/tags/}"
             VERSION_TAG="$TAG"
             VERSION_TAG="${VERSION_TAG#${BEANCS_PROJECT}-}"
             VERSION_TAG="${VERSION_TAG#all-}"
             IMAGE="${BEANCS_IMAGE_BASE}:${VERSION_TAG}"
-            GHCR_IMAGE="${BEANCS_GHCR_IMAGE_BASE}:${VERSION_TAG}"
           else
             IMAGE="${BEANCS_IMAGE_BASE}:beancs-${GITHUB_SHA::12}"
-            GHCR_IMAGE="${BEANCS_GHCR_IMAGE_BASE}:beancs-${GITHUB_SHA::12}"
-          fi
-          if [ -z "$GHCR_IMAGE" ]; then
-            TAG="${IMAGE##*:}"
-            GHCR_IMAGE="${BEANCS_GHCR_IMAGE_BASE}:${TAG}"
           fi
           echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
-          echo "ghcr_image=$GHCR_IMAGE" >> "$GITHUB_OUTPUT"
+      - name: Resolve build args
+        id: build_args
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            {
+              echo "value<<EOF"
+              printf '%%s\n' "${{ inputs.build_args }}"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          else
+            cat <<'EOF' >/tmp/beancs-build-args
+%s
+          EOF
+            {
+              echo "value<<EOF"
+              cat /tmp/beancs-build-args
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          fi
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/login-action@v3
         with:
           registry: ${{ secrets.BEANCS_REGISTRY_HOST }}
@@ -673,13 +667,25 @@ jobs:
         with:
           context: ${{ github.event_name == 'workflow_dispatch' && inputs.context || '%s' }}
           file: ${{ github.event_name == 'workflow_dispatch' && inputs.dockerfile_path || '%s' }}
-          build-args: ${{ github.event_name == 'workflow_dispatch' && inputs.build_args || '%s' }}
+          build-args: ${{ steps.build_args.outputs.value }}
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
             ${{ steps.meta.outputs.image }}
-            ${{ steps.meta.outputs.ghcr_image }}
-%s`, projectName, trigger, projectName, imageBase, ghcrBase, coalesce(project.BuildContext, "."), coalesce(project.DockerfilePath, "Dockerfile"), yamlSingleLine(encodeBuildArgs(project.BuildArgs)), callback)
+%s`, projectName, trigger, projectName, imageBase, buildArgs, coalesce(project.BuildContext, "."), coalesce(project.DockerfilePath, "Dockerfile"), callback)
+}
+
+func indentForHeredoc(value, indent string) string {
+	if strings.TrimSpace(value) == "" {
+		return ""
+	}
+	lines := strings.Split(strings.ReplaceAll(value, "\r\n", "\n"), "\n")
+	for i, line := range lines {
+		if line != "" {
+			lines[i] = indent + line
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func encodeBuildArgs(args model.JSONMap) string {
@@ -755,10 +761,6 @@ func workflowWatchPaths(project *model.Project) []string {
 
 func yamlSingleQuoted(value string) string {
 	return strings.ReplaceAll(value, "'", "''")
-}
-
-func yamlSingleLine(value string) string {
-	return strings.ReplaceAll(strings.ReplaceAll(value, "\r", ""), "\n", "\\n")
 }
 
 func beancsWorkflowSlug(project *model.Project) string {

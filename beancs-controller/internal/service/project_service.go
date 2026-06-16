@@ -837,9 +837,6 @@ func validateProjectSource(req *dto.CreateProjectRequest) error {
 		if _, _, ok := splitRepo(req.GitHubRepo); !ok {
 			return fmt.Errorf("github_repo must be in owner/repo format")
 		}
-		if req.ImageReference == "" {
-			req.ImageReference = "ghcr.io/" + strings.ToLower(req.GitHubRepo) + ":latest"
-		}
 	case model.BuildSourceDockerHub:
 		if err := validateImageReference(req.ImageReference); err != nil {
 			return fmt.Errorf("docker hub image_reference: %w", err)
