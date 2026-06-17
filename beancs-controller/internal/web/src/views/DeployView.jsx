@@ -263,7 +263,7 @@ export default function DeployView({
       : "";
   const isBasaltPassDeploy = form.deploy_target === "basaltpass";
   const databaseDependencies = (reusableDependencies || []).filter(
-    (dependency) => ["mysql", "postgresql"].includes(dependency.type),
+    (dependency) => ["mysql", "postgresql", "timescaledb"].includes(dependency.type),
   );
   const selectedDatabaseDependency = databaseDependencies.find(
     (dependency) => String(dependency.id) === String(form.database_dependency_id),

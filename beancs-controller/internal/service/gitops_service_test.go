@@ -210,6 +210,60 @@ func TestRenderPostgreSQLDependencyManifestsUsePostgreSQLSecretKeys(t *testing.T
 	assertContains(t, app, "targetRevision: 18.6.7")
 }
 
+func TestRenderTimescaleDBDependencyManifests(t *testing.T) {
+	service := NewGitOpsService(nil, nil)
+	registry, err := NewDependencyDefinitionRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	def, ok := registry.Get("timescale")
+	if !ok {
+		t.Fatal("timescaledb definition not found")
+	}
+	dep := model.ManagedDependency{
+		Name:         "timescale",
+		Type:         "timescaledb",
+		Namespace:    "app-araneae",
+		ServiceName:  "timescale",
+		SecretName:   "araneae-timescale-credentials",
+		DeployMethod: model.DependencyDeployMethodHelm,
+		Config: model.JSONMap{
+			"database":      "metrics",
+			"username":      "admin",
+			"replica_count": "1",
+			"persistence":   map[string]any{"enabled": true, "size": "20Gi", "storageClass": "longhorn"},
+		},
+		Outputs: model.JSONMap{
+			"username": map[string]any{"value": "admin", "secret": true},
+			"database": map[string]any{"value": "metrics"},
+			"password": map[string]any{"value": "secret-password", "secret": true},
+		},
+	}
+
+	files := service.RenderDependencyManifests(model.Application{Name: "araneae"}, dep, def)
+	values := files[path.Join("apps", "araneae", "dependencies", "timescale", "values.yaml")]
+	assertContains(t, values, `credentialsSecretName: "araneae-timescale-credentials"`)
+	assertContains(t, values, `storageClass: "longhorn"`)
+	if strings.Contains(values, "secret-password") {
+		t.Fatalf("dependency values must not include secret plaintext:\n%s", values)
+	}
+	secretData := dependencySecretRuntimeData(dep)
+	if secretData["PATRONI_SUPERUSER_PASSWORD"] != "secret-password" {
+		t.Fatalf("expected TimescaleDB superuser password in runtime secret data")
+	}
+	if secretData["PATRONI_REPLICATION_PASSWORD"] != "secret-password" {
+		t.Fatalf("expected TimescaleDB replication password in runtime secret data")
+	}
+	if secretData["PATRONI_admin_PASSWORD"] != "secret-password" {
+		t.Fatalf("expected TimescaleDB admin password in runtime secret data")
+	}
+
+	app := files[path.Join("apps", "araneae", "dependencies", "timescale", "application.yaml")]
+	assertContains(t, app, "repoURL: https://charts.timescale.com")
+	assertContains(t, app, "chart: timescaledb-single")
+	assertContains(t, app, "targetRevision: 0.33.1")
+}
+
 func assertContains(t *testing.T, text, want string) {
 	t.Helper()
 	if !strings.Contains(text, want) {

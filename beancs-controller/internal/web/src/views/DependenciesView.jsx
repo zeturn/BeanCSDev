@@ -14,12 +14,13 @@ import { dependencyDefaultConfig } from "../utils/index";
 const defaultPorts = {
   mysql: "3306",
   postgresql: "5432",
+  timescaledb: "5432",
   rabbitmq: "5672",
   redis: "6379",
 };
 
-const databaseTypes = new Set(["mysql", "postgresql"]);
-const controlledTypes = new Set(["mysql", "postgresql", "rabbitmq"]);
+const databaseTypes = new Set(["mysql", "postgresql", "timescaledb"]);
+const controlledTypes = new Set(["mysql", "postgresql", "timescaledb", "rabbitmq"]);
 
 function displayName(definitions, type) {
   const definition = (definitions || []).find((item) => item.name === type);

@@ -122,6 +122,9 @@ func (r *DependencyDefinitionRegistry) Get(name string) (DependencyDefinition, b
 	if name == "pgsql" || name == "postgres" {
 		name = "postgresql"
 	}
+	if name == "timescale" {
+		name = "timescaledb"
+	}
 	def, ok := r.definitions[name]
 	return def, ok
 }
