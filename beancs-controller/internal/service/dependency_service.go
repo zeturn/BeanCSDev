@@ -560,7 +560,7 @@ func (s *DependencyService) reconcileRuntimeCredential(ctx context.Context, dep 
 			DependencyName: dep.Name,
 			CredentialName: cred.Name,
 		})
-	case "postgresql":
+	case "postgresql", "timescaledb":
 		if dep.External && dep.Controlled {
 			return s.k8s.ReconcileExternalPostgreSQLCredential(ctx, externalDatabaseRuntime(dep, cred, flattenDependencyOutputs(cred.Outputs)))
 		}
@@ -577,7 +577,7 @@ func (s *DependencyService) reconcileRuntimeCredential(ctx context.Context, dep 
 
 func validateExternalAdminConfig(depType string, config model.JSONMap) error {
 	switch depType {
-	case "mysql", "postgresql", "rabbitmq":
+	case "mysql", "postgresql", "timescaledb", "rabbitmq":
 	default:
 		return fmt.Errorf("controlled external %s dependencies are not supported yet", depType)
 	}

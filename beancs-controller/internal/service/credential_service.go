@@ -609,7 +609,7 @@ func (s *CredentialService) deployManagedBasaltPass(ctx context.Context, userID 
 		return "", "", fmt.Errorf("selected database credential does not expose url output")
 	}
 	driver := "mysql"
-	if dep.Type == "postgresql" {
+	if isPostgreSQLCompatibleDependency(dep.Type) {
 		driver = "postgres"
 	}
 	jwtSecret := strings.TrimSpace(req.JWTSecret)
@@ -1707,8 +1707,8 @@ func (s *CredentialService) validateBasaltPassDatabaseCredential(ctx context.Con
 		First(&dep).Error; err != nil {
 		return fmt.Errorf("database dependency not found or not accessible")
 	}
-	if dep.Type != "mysql" && dep.Type != "postgresql" {
-		return fmt.Errorf("BasaltPass database dependency must be mysql or postgresql")
+	if dep.Type != "mysql" && !isPostgreSQLCompatibleDependency(dep.Type) {
+		return fmt.Errorf("BasaltPass database dependency must be mysql, postgresql, or timescaledb")
 	}
 	var cred model.DependencyCredential
 	if err := s.db.WithContext(ctx).
@@ -1717,6 +1717,15 @@ func (s *CredentialService) validateBasaltPassDatabaseCredential(ctx context.Con
 		return fmt.Errorf("database credential not found for dependency")
 	}
 	return nil
+}
+
+func isPostgreSQLCompatibleDependency(depType string) bool {
+	switch strings.ToLower(strings.TrimSpace(depType)) {
+	case "postgresql", "timescaledb":
+		return true
+	default:
+		return false
+	}
 }
 
 func validateExternalHTTPSURL(raw string) error {

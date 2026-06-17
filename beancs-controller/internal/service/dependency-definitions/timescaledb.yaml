@@ -1,0 +1,98 @@
+apiVersion: beancs.io/v1
+kind: DependencyDefinition
+metadata:
+  name: timescaledb
+  displayName: TimescaleDB
+  category: database
+spec:
+  type: timescaledb
+  supportedDeployMethods: [helm, external]
+  defaultDeployMethod: helm
+  helm:
+    chart:
+      repo: https://charts.timescale.com
+      name: timescaledb-single
+      version: "0.33.1"
+    valuesTemplate: timescaledb.values.yaml
+  configSchema:
+    type: object
+    properties:
+      database:
+        type: string
+        default: app
+      host:
+        type: string
+      port:
+        type: string
+        default: "5432"
+      username:
+        type: string
+        default: admin
+      password:
+        type: string
+        secret: true
+        generate:
+          length: 32
+      admin_username:
+        type: string
+      admin_password:
+        type: string
+        secret: true
+      persistence:
+        type: object
+        properties:
+          enabled:
+            type: boolean
+            default: true
+          size:
+            type: string
+            default: 20Gi
+          storageClass:
+            type: string
+      replica_count:
+        type: integer
+        default: 1
+  services:
+    - name: postgres
+      port: 5432
+      protocol: tcp
+      default: true
+  outputs:
+    host:
+      valueFrom:
+        serviceHost: postgres
+    port:
+      valueFrom:
+        config: port
+    database:
+      valueFrom:
+        config: database
+    username:
+      valueFrom:
+        config: username
+    password:
+      valueFrom:
+        secretKey: password
+    url:
+      secretTemplate: "postgresql://{{username}}:{{password}}@{{host}}:{{port}}/{{database}}"
+  envPresets:
+    timescaledb_default:
+      env:
+        TIMESCALEDB_HOST:
+          output: host
+        TIMESCALEDB_PORT:
+          output: port
+        TIMESCALEDB_DATABASE:
+          output: database
+        TIMESCALEDB_USERNAME:
+          output: username
+          secret: true
+        TIMESCALEDB_PASSWORD:
+          output: password
+          secret: true
+        TIMESCALEDB_URL:
+          output: url
+          secret: true
+        DATABASE_URL:
+          output: url
+          secret: true

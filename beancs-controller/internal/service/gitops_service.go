@@ -477,6 +477,8 @@ func renderDependencyHelmValues(dep model.ManagedDependency) string {
 		return renderRabbitMQValues(dep)
 	case "postgresql":
 		return renderPostgreSQLValues(dep)
+	case "timescaledb":
+		return renderTimescaleDBValues(dep)
 	case "mysql":
 		return renderMySQLValues(dep)
 	case "redis":
@@ -542,6 +544,25 @@ primary:
 %s
     size: %s
 `, dep.ServiceName, yamlScalar(coalesce(username, "app")), yamlScalar(coalesce(database, "app")), dep.SecretName, yamlBool(configBool(dep.Config, "persistence.enabled", true)), renderDependencyStorageClass(dep, 4), yamlScalar(configString(dep.Config, "persistence.size", "20Gi")))
+}
+
+func renderTimescaleDBValues(dep model.ManagedDependency) string {
+	return fmt.Sprintf(`fullnameOverride: %s
+replicaCount: %s
+secrets:
+  credentialsSecretName: %s
+persistentVolumes:
+  data:
+    enabled: %s
+%s
+    size: %s
+  wal:
+    enabled: %s
+%s
+    size: %s
+networkPolicy:
+  enabled: false
+`, dep.ServiceName, yamlScalar(configString(dep.Config, "replica_count", "1")), yamlScalar(dep.SecretName), yamlBool(configBool(dep.Config, "persistence.enabled", true)), renderDependencyStorageClass(dep, 4), yamlScalar(configString(dep.Config, "persistence.size", "20Gi")), yamlBool(configBool(dep.Config, "persistence.enabled", true)), renderDependencyStorageClass(dep, 4), yamlScalar(configString(dep.Config, "persistence.walSize", "5Gi")))
 }
 
 func renderMySQLValues(dep model.ManagedDependency) string {
@@ -624,6 +645,10 @@ func dependencySecretRuntimeData(dep model.ManagedDependency) map[string]string 
 		case "postgresql":
 			data["postgres-password"] = password
 			data["replication-password"] = password
+		case "timescaledb":
+			data["PATRONI_SUPERUSER_PASSWORD"] = password
+			data["PATRONI_REPLICATION_PASSWORD"] = password
+			data["PATRONI_admin_PASSWORD"] = password
 		}
 	}
 	if username := dependencyOutputValue(dep, "username"); username != "" {
