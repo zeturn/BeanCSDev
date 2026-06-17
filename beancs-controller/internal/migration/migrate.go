@@ -6,6 +6,10 @@ import (
 )
 
 func AutoMigrate(db *gorm.DB) error {
+	db.Config.DisableForeignKeyConstraintWhenMigrating = true
+	if err := dropProcessForeignKeys(db); err != nil {
+		return err
+	}
 	if err := db.AutoMigrate(
 		&model.CloudflareCredential{},
 		&model.CloudflareDomainCache{},
@@ -63,10 +67,7 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := db.Exec("ALTER TABLE processes ALTER COLUMN project_id DROP NOT NULL").Error; err != nil {
 		return err
 	}
-	if err := db.Exec("ALTER TABLE processes DROP CONSTRAINT IF EXISTS fk_processes_project").Error; err != nil {
-		return err
-	}
-	if err := db.Exec("ALTER TABLE processes DROP CONSTRAINT IF EXISTS fk_processes_deployment").Error; err != nil {
+	if err := dropProcessForeignKeys(db); err != nil {
 		return err
 	}
 	if err := db.Exec("ALTER TABLE dns_records ALTER COLUMN proxied SET DEFAULT FALSE").Error; err != nil {
@@ -79,4 +80,11 @@ func AutoMigrate(db *gorm.DB) error {
 		return err
 	}
 	return db.Exec("UPDATE projects SET auto_deploy = TRUE WHERE auto_deploy IS NULL").Error
+}
+
+func dropProcessForeignKeys(db *gorm.DB) error {
+	if err := db.Exec("ALTER TABLE processes DROP CONSTRAINT IF EXISTS fk_processes_project").Error; err != nil {
+		return err
+	}
+	return db.Exec("ALTER TABLE processes DROP CONSTRAINT IF EXISTS fk_processes_deployment").Error
 }
