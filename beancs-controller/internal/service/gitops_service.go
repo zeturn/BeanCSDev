@@ -371,9 +371,9 @@ spec:
 %s
           envFrom:
             - secretRef:
-                name: app-env-vars
+                name: %s
 %s%s
-`, project.Name, project.Namespace, project.Name, project.Replicas, project.Name, project.Name, pullSecrets, renderPodVolumesBlock(volumes, project.Name), image, renderContainerPortsBlock(ports), renderProbeBlock(project.HealthCheckConfig(), ports), renderContainerVolumeMountsBlock(volumes)),
+`, project.Name, project.Namespace, project.Name, project.Replicas, project.Name, project.Name, pullSecrets, renderPodVolumesBlock(volumes, project.Name), image, renderContainerPortsBlock(ports), project.EnvSecretName(), renderProbeBlock(project.HealthCheckConfig(), ports), renderContainerVolumeMountsBlock(volumes)),
 		path.Join(base, "base", "kustomization.yaml"): renderBaseKustomization(ports, volumes),
 		path.Join(base, "overlays", "dev", "kustomization.yaml"): fmt.Sprintf(`resources:
   - ../../base

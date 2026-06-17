@@ -460,7 +460,7 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID, te
 	rollbacks = append(rollbacks, func() { _ = s.k8s.DeleteNamespace(context.Background(), project.Namespace) })
 
 	if project.BasaltClientID != "" {
-		if err := s.k8s.UpsertSecret(ctx, project.Namespace, "basaltpass-keys", project.Name, basaltPassRuntimeEnv(bpInstance, project, secret, map[string]string{"client_id": project.BasaltClientID, "client_secret": secret})); err != nil {
+		if err := s.k8s.UpsertSecret(ctx, project.Namespace, project.BasaltPassKeysSecretName(), project.Name, basaltPassRuntimeEnv(bpInstance, project, secret, map[string]string{"client_id": project.BasaltClientID, "client_secret": secret})); err != nil {
 			rollback()
 			return nil, err
 		}
@@ -476,7 +476,7 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID, te
 			return nil, err
 		}
 	}
-	if err := s.k8s.UpsertSecret(ctx, project.Namespace, "app-env-vars", project.Name, basaltPassRuntimeEnv(bpInstance, project, secret, req.Env)); err != nil {
+	if err := s.k8s.UpsertSecret(ctx, project.Namespace, project.EnvSecretName(), project.Name, basaltPassRuntimeEnv(bpInstance, project, secret, req.Env)); err != nil {
 		rollback()
 		return nil, err
 	}

@@ -36,6 +36,7 @@ func TestRenderManifestsIncludesHealthCheckAndPVC(t *testing.T) {
 	deployment := files[path.Join("apps", project.Name, "base", "deployment.yaml")]
 	assertContains(t, deployment, "path: /healthz")
 	assertContains(t, deployment, "port: http")
+	assertContains(t, deployment, "name: app-env-vars-araneae-control")
 	assertContains(t, deployment, "volumeMounts:")
 	assertContains(t, deployment, "mountPath: /data")
 	assertContains(t, deployment, "claimName: araneae-control-data")

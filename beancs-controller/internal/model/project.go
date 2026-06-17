@@ -127,6 +127,14 @@ type ResourceSpec struct {
 	MemoryMB   int
 }
 
+func (p Project) EnvSecretName() string {
+	return "app-env-vars-" + p.Name
+}
+
+func (p Project) BasaltPassKeysSecretName() string {
+	return "basaltpass-keys-" + p.Name
+}
+
 var ResourcePresets = map[string]ResourceSpec{
 	"nano":   {CPURequest: "50m", CPULimit: "100m", MemRequest: "64Mi", MemLimit: "128Mi", CPUMillis: 100, MemoryMB: 128},
 	"small":  {CPURequest: "100m", CPULimit: "250m", MemRequest: "128Mi", MemLimit: "256Mi", CPUMillis: 250, MemoryMB: 256},

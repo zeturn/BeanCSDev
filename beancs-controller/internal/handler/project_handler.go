@@ -111,7 +111,7 @@ func (h *ProjectHandler) delete(c *fiber.Ctx) error {
 
 func (h *ProjectHandler) getEnv(c *fiber.Ctx) error {
 	project := projectFromCtx(c)
-	out, err := h.k8s.SecretData(c.UserContext(), project.Namespace, "app-env-vars")
+	out, err := h.k8s.SecretData(c.UserContext(), project.Namespace, project.EnvSecretName())
 	if err != nil {
 		return fail(c, 400, err)
 	}
@@ -124,9 +124,9 @@ func (h *ProjectHandler) setEnv(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "invalid request body"})
 	}
-	current, _ := h.k8s.SecretPlainData(c.UserContext(), project.Namespace, "app-env-vars")
+	current, _ := h.k8s.SecretPlainData(c.UserContext(), project.Namespace, project.EnvSecretName())
 	next := mergeMaskedSecretValues(current, req)
-	if err := h.k8s.UpsertSecret(c.UserContext(), project.Namespace, "app-env-vars", project.Name, next); err != nil {
+	if err := h.k8s.UpsertSecret(c.UserContext(), project.Namespace, project.EnvSecretName(), project.Name, next); err != nil {
 		return fail(c, 400, err)
 	}
 	if err := h.k8s.RestartDeployment(c.UserContext(), project.Namespace, project.Name); err != nil && !apierrors.IsNotFound(err) {
@@ -137,7 +137,7 @@ func (h *ProjectHandler) setEnv(c *fiber.Ctx) error {
 
 func (h *ProjectHandler) patchEnv(c *fiber.Ctx) error {
 	project := projectFromCtx(c)
-	current, err := h.k8s.SecretPlainData(c.UserContext(), project.Namespace, "app-env-vars")
+	current, err := h.k8s.SecretPlainData(c.UserContext(), project.Namespace, project.EnvSecretName())
 	if err != nil {
 		return fail(c, 400, err)
 	}
@@ -154,7 +154,7 @@ func (h *ProjectHandler) patchEnv(c *fiber.Ctx) error {
 		}
 		current[k] = v
 	}
-	if err := h.k8s.UpsertSecret(c.UserContext(), project.Namespace, "app-env-vars", project.Name, current); err != nil {
+	if err := h.k8s.UpsertSecret(c.UserContext(), project.Namespace, project.EnvSecretName(), project.Name, current); err != nil {
 		return fail(c, 400, err)
 	}
 	if err := h.k8s.RestartDeployment(c.UserContext(), project.Namespace, project.Name); err != nil && !apierrors.IsNotFound(err) {

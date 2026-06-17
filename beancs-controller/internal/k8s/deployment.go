@@ -66,7 +66,7 @@ func (m *Manager) ApplyProjectDeployment(ctx context.Context, project model.Proj
 		Name:    "app",
 		Image:   image,
 		Ports:   containerPorts,
-		EnvFrom: []corev1.EnvFromSource{{SecretRef: &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: "app-env-vars"}}}},
+		EnvFrom: []corev1.EnvFromSource{{SecretRef: &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: project.EnvSecretName()}}}},
 		Resources: corev1.ResourceRequirements{
 			Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(resources.CPURequest), corev1.ResourceMemory: resource.MustParse(resources.MemRequest)},
 			Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(resources.CPULimit), corev1.ResourceMemory: resource.MustParse(resources.MemLimit)},
