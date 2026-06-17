@@ -548,7 +548,7 @@ primary:
 
 func renderTimescaleDBValues(dep model.ManagedDependency) string {
 	return fmt.Sprintf(`fullnameOverride: %s
-replicaCount: %s
+replicaCount: %d
 secrets:
   credentialsSecretName: %s
 persistentVolumes:
@@ -562,7 +562,7 @@ persistentVolumes:
     size: %s
 networkPolicy:
   enabled: false
-`, dep.ServiceName, yamlScalar(configString(dep.Config, "replica_count", "1")), yamlScalar(dep.SecretName), yamlBool(configBool(dep.Config, "persistence.enabled", true)), renderDependencyStorageClass(dep, 4), yamlScalar(configString(dep.Config, "persistence.size", "20Gi")), yamlBool(configBool(dep.Config, "persistence.enabled", true)), renderDependencyStorageClass(dep, 4), yamlScalar(configString(dep.Config, "persistence.walSize", "5Gi")))
+`, dep.ServiceName, configInt(dep.Config, "replica_count", 1), yamlScalar(dep.SecretName), yamlBool(configBool(dep.Config, "persistence.enabled", true)), renderDependencyStorageClass(dep, 4), yamlScalar(configString(dep.Config, "persistence.size", "20Gi")), yamlBool(configBool(dep.Config, "persistence.enabled", true)), renderDependencyStorageClass(dep, 4), yamlScalar(configString(dep.Config, "persistence.walSize", "5Gi")))
 }
 
 func renderMySQLValues(dep model.ManagedDependency) string {
@@ -692,6 +692,27 @@ func configBool(config model.JSONMap, path string, fallback bool) bool {
 	default:
 		return fallback
 	}
+}
+
+func configInt(config model.JSONMap, path string, fallback int) int {
+	value, ok := nestedConfigValue(config, path)
+	if !ok {
+		return fallback
+	}
+	switch v := value.(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	case string:
+		parsed, err := strconv.Atoi(strings.TrimSpace(v))
+		if err == nil {
+			return parsed
+		}
+	}
+	return fallback
 }
 
 func nestedConfigValue(config model.JSONMap, path string) (any, bool) {

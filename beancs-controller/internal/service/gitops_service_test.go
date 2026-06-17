@@ -243,8 +243,12 @@ func TestRenderTimescaleDBDependencyManifests(t *testing.T) {
 
 	files := service.RenderDependencyManifests(model.Application{Name: "araneae"}, dep, def)
 	values := files[path.Join("apps", "araneae", "dependencies", "timescale", "values.yaml")]
+	assertContains(t, values, "replicaCount: 1")
 	assertContains(t, values, `credentialsSecretName: "araneae-timescale-credentials"`)
 	assertContains(t, values, `storageClass: "longhorn"`)
+	if strings.Contains(values, `replicaCount: "1"`) {
+		t.Fatalf("timescaledb replicaCount must be rendered as an integer:\n%s", values)
+	}
 	if strings.Contains(values, "secret-password") {
 		t.Fatalf("dependency values must not include secret plaintext:\n%s", values)
 	}
