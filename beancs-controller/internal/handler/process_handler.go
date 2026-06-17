@@ -40,7 +40,11 @@ func (h *ProcessHandler) get(c *fiber.Ctx) error {
 	if err != nil {
 		return fail(c, 404, err)
 	}
-	if out.Project.OwnerID != middleware.UserID(c) && !middleware.HasScope(c, "beancs.admin") {
+	userID := middleware.UserID(c)
+	if out.ProjectID != 0 && out.Project.OwnerID != userID && !middleware.HasScope(c, "beancs.admin") {
+		return fail(c, fiber.StatusForbidden, errors.New("forbidden"))
+	}
+	if out.ProjectID == 0 && out.OwnerID != userID && !middleware.HasScope(c, "beancs.admin") {
 		return fail(c, fiber.StatusForbidden, errors.New("forbidden"))
 	}
 	return c.JSON(out)

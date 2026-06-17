@@ -94,9 +94,9 @@ func (s *ProcessService) List(ctx context.Context, userID string) ([]model.Proce
 	var out []model.Process
 	q := s.db.WithContext(ctx).Preload("Project").Preload("Deployment").Preload("Jobs", func(db *gorm.DB) *gorm.DB {
 		return db.Order("step_index asc")
-	}).Order("processes.created_at desc").Limit(100)
+	}).Joins("LEFT JOIN projects ON projects.id = processes.project_id").Order("processes.created_at desc").Limit(100)
 	if userID != "" {
-		q = q.Joins("JOIN projects ON projects.id = processes.project_id").Where("projects.owner_id = ?", userID)
+		q = q.Where("projects.owner_id = ? OR processes.owner_id = ?", userID, userID)
 	}
 	return out, q.Find(&out).Error
 }

@@ -3,7 +3,8 @@ package model
 import "time"
 
 const (
-	ProcessTypeDeployment = "deployment"
+	ProcessTypeDeployment           = "deployment"
+	ProcessTypeBasaltPassDeployment = "basaltpass_deployment"
 
 	ProcessStatusQueued    = "queued"
 	ProcessStatusRunning   = "running"
@@ -15,8 +16,9 @@ type Process struct {
 	ID            uint         `gorm:"primaryKey" json:"id"`
 	Type          string       `gorm:"size:64;not null;index" json:"type"`
 	Status        string       `gorm:"size:32;not null;index" json:"status"`
-	ProjectID     uint         `gorm:"not null;index" json:"project_id"`
+	ProjectID     uint         `gorm:"index" json:"project_id"`
 	DeploymentID  uint         `gorm:"index" json:"deployment_id"`
+	OwnerID       string       `gorm:"size:128;index" json:"owner_id,omitempty"`
 	Title         string       `gorm:"size:256" json:"title"`
 	TriggeredBy   string       `gorm:"size:128" json:"triggered_by"`
 	FailureReason string       `gorm:"size:1000" json:"failure_reason"`

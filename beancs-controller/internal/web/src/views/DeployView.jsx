@@ -262,6 +262,14 @@ export default function DeployView({
       ? `${registryHost}/${basaltpassImageProject}`
       : "";
   const isBasaltPassDeploy = form.deploy_target === "basaltpass";
+  const databaseDependencies = (reusableDependencies || []).filter(
+    (dependency) => ["mysql", "postgresql"].includes(dependency.type),
+  );
+  const selectedDatabaseDependency = databaseDependencies.find(
+    (dependency) => String(dependency.id) === String(form.database_dependency_id),
+  );
+  const selectedDatabaseCredentials =
+    selectedDatabaseDependency?.credentials || [];
   const publicHost =
     form.subdomain && selectedCloudflareDomain
       ? `${form.subdomain}.${selectedCloudflareDomain.domain}`
@@ -1508,33 +1516,146 @@ export default function DeployView({
         )}
         {step.id === "dependencies" && isBasaltPassDeploy && (
           <div className="form-grid">
-            <label>Database credential</label>
+            <label>Database</label>
             <Select
-              value={form.database_binding}
-              onChange={(event) =>
+              value={form.database_dependency_id}
+              onChange={(event) => {
+                const dependencyID = event.target.value;
+                const dependency = databaseDependencies.find(
+                  (item) => String(item.id) === String(dependencyID),
+                );
+                const firstCredential = (dependency?.credentials || [])[0];
                 setForm({
                   ...form,
-                  database_binding: event.target.value,
-                })
-              }
+                  database_dependency_id: dependencyID,
+                  database_binding: firstCredential
+                    ? `${dependencyID}:${firstCredential.id}`
+                    : "",
+                });
+              }}
               required
             >
-              <option value="">Choose MySQL or PostgreSQL credential</option>
-              {(reusableDependencies || [])
-                .filter((dependency) =>
-                  ["mysql", "postgresql"].includes(dependency.type),
-                )
-                .flatMap((dependency) =>
-                  (dependency.credentials || []).map((credential) => (
-                    <option
-                      key={`${dependency.id}:${credential.id}`}
-                      value={`${dependency.id}:${credential.id}`}
-                    >
-                      {dependency.name} / {credential.name}
-                    </option>
-                  )),
-                )}
+              <option value="">Choose MySQL or PostgreSQL</option>
+              {databaseDependencies.map((dependency) => (
+                <option key={dependency.id} value={dependency.id}>
+                  {dependency.name} · {dependency.type}
+                </option>
+              ))}
             </Select>
+            <label>Credential mode</label>
+            <div className="segmented-control">
+              <Button
+                type="button"
+                className={
+                  form.database_credential_mode !== "new" ? "active" : ""
+                }
+                onClick={() =>
+                  setForm({
+                    ...form,
+                    database_credential_mode: "existing",
+                  })
+                }
+              >
+                <ShieldCheck size={15} /> Existing
+              </Button>
+              <Button
+                type="button"
+                className={form.database_credential_mode === "new" ? "active" : ""}
+                onClick={() =>
+                  setForm({
+                    ...form,
+                    database_credential_mode: "new",
+                    database_binding: "",
+                  })
+                }
+              >
+                <Plus size={15} /> New
+              </Button>
+            </div>
+            {form.database_credential_mode === "new" ? (
+              <>
+                <Field
+                  label="Credential name"
+                  value={form.database_credential_name}
+                  onChange={(v) =>
+                    setForm({
+                      ...form,
+                      database_credential_name: v.trim(),
+                    })
+                  }
+                  required
+                />
+                <Field
+                  label="Database name"
+                  value={form.database_name}
+                  onChange={(v) =>
+                    setForm({
+                      ...form,
+                      database_name: v.trim(),
+                    })
+                  }
+                  required
+                />
+                <Field
+                  label="Database username"
+                  value={form.database_username}
+                  onChange={(v) =>
+                    setForm({
+                      ...form,
+                      database_username: v.trim(),
+                    })
+                  }
+                  required
+                />
+                <Field
+                  label="Database password"
+                  type="password"
+                  value={form.database_password}
+                  onChange={(v) =>
+                    setForm({
+                      ...form,
+                      database_password: v,
+                    })
+                  }
+                  required
+                />
+                <Field
+                  label="Credential description"
+                  value={form.database_credential_description}
+                  onChange={(v) =>
+                    setForm({
+                      ...form,
+                      database_credential_description: v,
+                    })
+                  }
+                />
+              </>
+            ) : (
+              <>
+                <label>Database credential</label>
+                <Select
+                  value={form.database_binding}
+                  onChange={(event) =>
+                    setForm({
+                      ...form,
+                      database_binding: event.target.value,
+                    })
+                  }
+                  required
+                  disabled={!selectedDatabaseDependency}
+                >
+                  <option value="">Choose existing credential</option>
+                  {selectedDatabaseCredentials.map((credential) => (
+                    <option
+                      key={`${selectedDatabaseDependency.id}:${credential.id}`}
+                      value={`${selectedDatabaseDependency.id}:${credential.id}`}
+                    >
+                      {credential.name}
+                    </option>
+                  ))}
+                </Select>
+              </>
+            )}
             <Field
               label="Tenant code"
               value={form.tenant_code}
@@ -2212,7 +2333,17 @@ export default function DeployView({
               Tenant admin <b>{form.owner_email || "-"}</b>
             </span>
             <span>
-              Database <b>{form.database_binding || "-"}</b>
+              Database{" "}
+              <b>
+                {selectedDatabaseDependency?.name || "-"} /{" "}
+                {form.database_credential_mode === "new"
+                  ? form.database_credential_name || "new credential"
+                  : selectedDatabaseCredentials.find(
+                      (credential) =>
+                        form.database_binding ===
+                        `${selectedDatabaseDependency?.id}:${credential.id}`,
+                    )?.name || "-"}
+              </b>
             </span>
           </div>
         )}

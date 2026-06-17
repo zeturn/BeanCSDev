@@ -333,8 +333,16 @@ export function canContinueDeployStep(
   }
   if (stepID === "dependencies") {
     if (form.deploy_target === "basaltpass") {
+      const hasDatabaseCredential =
+        form.database_credential_mode === "new"
+          ? form.database_credential_name &&
+            form.database_name &&
+            form.database_username &&
+            form.database_password
+          : form.database_binding;
       return Boolean(
-        form.database_binding &&
+        form.database_dependency_id &&
+          hasDatabaseCredential &&
           form.owner_email &&
           form.owner_username &&
           form.owner_password,
@@ -397,7 +405,15 @@ export function basaltPassStepBlockers(stepID, form, selectedCredential) {
     requireValue(form.platform_admin_password, "Platform admin password");
   }
   if (stepID === "dependencies") {
-    requireValue(form.database_binding, "Database credential");
+    requireValue(form.database_dependency_id, "Database");
+    if (form.database_credential_mode === "new") {
+      requireValue(form.database_credential_name, "New credential name");
+      requireValue(form.database_name, "Database name");
+      requireValue(form.database_username, "Database username");
+      requireValue(form.database_password, "Database password");
+    } else {
+      requireValue(form.database_binding, "Database credential");
+    }
     requireValue(form.tenant_code, "Tenant code");
     requireValue(form.owner_email, "Tenant admin email");
     requireValue(form.owner_username, "Tenant admin username");
@@ -491,7 +507,14 @@ export function defaultDeployForm() {
     public_host: "",
     backend_image: "",
     frontend_image: "",
+    database_dependency_id: "",
     database_binding: "",
+    database_credential_mode: "existing",
+    database_credential_name: "",
+    database_name: "",
+    database_username: "",
+    database_password: "",
+    database_credential_description: "",
     platform_admin_email: "",
     platform_admin_username: "",
     platform_admin_password: "",

@@ -60,6 +60,9 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := db.Exec("ALTER TABLE projects ALTER COLUMN git_hub_repo DROP NOT NULL").Error; err != nil {
 		return err
 	}
+	if err := db.Exec("ALTER TABLE processes ALTER COLUMN project_id DROP NOT NULL").Error; err != nil {
+		return err
+	}
 	if err := db.Exec("ALTER TABLE dns_records ALTER COLUMN proxied SET DEFAULT FALSE").Error; err != nil {
 		return err
 	}

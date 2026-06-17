@@ -81,7 +81,7 @@ export default function ProgressListView({
             <span>
               {process.project?.display_name ||
                 process.project?.name ||
-                `project #${process.project_id}`}
+                (process.project_id ? `project #${process.project_id}` : "-")}
             </span>
             <span>{process.type || "-"}</span>
             <span>{process.status || "-"}</span>

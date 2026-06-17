@@ -1841,9 +1841,13 @@ function App() {
   }
   async function deployBasaltPass(event) {
     event.preventDefault();
-    const [dependencyID, credentialID] = String(
-      deployForm.database_binding || "",
-    ).split(":");
+    let dependencyID = String(deployForm.database_dependency_id || "");
+    let credentialID = "";
+    if (deployForm.database_credential_mode !== "new") {
+      const binding = String(deployForm.database_binding || "").split(":");
+      dependencyID = binding[0] || dependencyID;
+      credentialID = binding[1] || "";
+    }
     const selectedCF =
       (domains || []).find(
         (domain) =>
@@ -1922,11 +1926,30 @@ function App() {
       ],
     });
     try {
-      await api.post("/credentials/basaltpass/deployments", body);
-      setNotice("BasaltPass deployed and tenant credential stored.");
+      if (deployForm.database_credential_mode === "new") {
+        const credential = await api.post(
+          `/dependencies/${dependencyID}/credentials`,
+          {
+            name: deployForm.database_credential_name,
+            description:
+              deployForm.database_credential_description || undefined,
+            config: {
+              database: deployForm.database_name,
+              username: deployForm.database_username,
+              password: deployForm.database_password,
+            },
+          },
+        );
+        credentialID = String(credential.id || "");
+        body.database_credential_id = Number(credentialID || 0);
+      }
+      const result = await api.post("/credentials/basaltpass/deployments", body);
+      if (result.process?.id) setActiveProcessID(String(result.process.id));
+      setNotice("BasaltPass deployment process started.");
       setDeployForm(defaultDeployForm());
       await loadWorkspace();
-      setView("accessControl");
+      await loadProcesses();
+      setView("progress");
     } catch (err) {
       setError(err.message);
     } finally {

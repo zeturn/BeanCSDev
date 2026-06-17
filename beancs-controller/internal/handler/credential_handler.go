@@ -173,11 +173,13 @@ func (h *CredentialHandler) deployBasaltPass(c *fiber.Ctx) error {
 	if err := h.parseAndValidate(c, &req); err != nil {
 		return err
 	}
-	out, err := h.service.DeployBasaltPass(c.UserContext(), middleware.UserID(c), req)
+	userID := middleware.UserID(c)
+	process, err := h.service.CreateBasaltPassDeploymentProcess(c.UserContext(), userID, req)
 	if err != nil {
 		return fail(c, 400, err)
 	}
-	return c.Status(201).JSON(out)
+	h.service.StartBasaltPassDeployment(process.ID, userID, req)
+	return c.Status(201).JSON(fiber.Map{"process": process})
 }
 
 func (h *CredentialHandler) listCloudflare(c *fiber.Ctx) error {

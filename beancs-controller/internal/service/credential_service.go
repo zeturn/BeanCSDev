@@ -225,7 +225,61 @@ func (s *CredentialService) CreateBasaltPass(ctx context.Context, userID string,
 	return cred, err
 }
 
+type basaltPassDeployLogFunc func(step, line string)
+
+func (s *CredentialService) CreateBasaltPassDeploymentProcess(ctx context.Context, userID string, req dto.DeployBasaltPassRequest) (*model.Process, error) {
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		name = "BasaltPass"
+	}
+	process := &model.Process{
+		Type:        model.ProcessTypeBasaltPassDeployment,
+		Status:      model.ProcessStatusQueued,
+		OwnerID:     userID,
+		Title:       "BasaltPass deployment: " + name,
+		TriggeredBy: userID,
+	}
+	jobs := []processJobSpec{
+		{Name: "validate", DisplayName: "Validate deployment request"},
+		{Name: "runtime", DisplayName: "Prepare images and apply runtime"},
+		{Name: "dns", DisplayName: "Prepare DNS"},
+		{Name: "health", DisplayName: "Wait for BasaltPass health"},
+		{Name: "tenant", DisplayName: "Create tenant owner"},
+		{Name: "store", DisplayName: "Store tenant credential"},
+	}
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(process).Error; err != nil {
+			return err
+		}
+		for i, spec := range jobs {
+			job := model.ProcessJob{ProcessID: process.ID, Name: spec.Name, DisplayName: spec.DisplayName, Status: model.ProcessStatusQueued, StepIndex: i}
+			if err := tx.Create(&job).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	var out model.Process
+	if err := s.db.WithContext(ctx).Preload("Jobs", func(db *gorm.DB) *gorm.DB {
+		return db.Order("step_index asc")
+	}).First(&out, process.ID).Error; err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (s *CredentialService) StartBasaltPassDeployment(processID uint, userID string, req dto.DeployBasaltPassRequest) {
+	go s.runBasaltPassDeploymentProcess(context.Background(), processID, userID, req)
+}
+
 func (s *CredentialService) DeployBasaltPass(ctx context.Context, userID string, req dto.DeployBasaltPassRequest) (*model.BasaltPassInstance, error) {
+	return s.deployBasaltPass(ctx, userID, req, nil)
+}
+
+func (s *CredentialService) deployBasaltPass(ctx context.Context, userID string, req dto.DeployBasaltPassRequest, log basaltPassDeployLogFunc) (*model.BasaltPassInstance, error) {
 	req.BaseURL = strings.TrimRight(strings.TrimSpace(req.BaseURL), "/")
 	req.Name = strings.TrimSpace(req.Name)
 	req.TenantName = strings.TrimSpace(req.TenantName)
@@ -275,8 +329,17 @@ func (s *CredentialService) DeployBasaltPass(ctx context.Context, userID string,
 	if req.MaxTokensPerHour <= 0 {
 		req.MaxTokensPerHour = 10000
 	}
+	if log != nil {
+		log("validate", "request normalized")
+		log("validate", "namespace="+req.Namespace)
+		log("validate", "base_url="+req.BaseURL)
+	}
 	if err := s.validateBasaltPassDatabaseCredential(ctx, userID, req.DatabaseDependencyID, req.DatabaseCredentialID, true); err != nil {
 		return nil, err
+	}
+	if log != nil {
+		log("validate", "database credential access verified")
+		log("runtime", "preparing BasaltPass images")
 	}
 	backendImage, frontendImage, err := s.deployManagedBasaltPass(ctx, userID, req)
 	if err != nil {
@@ -284,17 +347,37 @@ func (s *CredentialService) DeployBasaltPass(ctx context.Context, userID string,
 	}
 	req.BackendImage = backendImage
 	req.FrontendImage = frontendImage
+	if log != nil {
+		log("runtime", "backend_image="+backendImage)
+		log("runtime", "frontend_image="+frontendImage)
+		log("runtime", "runtime manifests applied")
+		log("dns", "preparing route for "+coalesce(req.PublicHost, hostFromURL(req.BaseURL)))
+	}
 	if err := s.ensureBasaltPassDNS(ctx, userID, req); err != nil {
 		return nil, err
 	}
+	if log != nil {
+		log("dns", "DNS step completed")
+	}
 	runtimeReq := req
 	runtimeReq.BaseURL = basaltPassInternalBaseURL(req.Namespace)
+	if log != nil {
+		log("health", "waiting for "+runtimeReq.BaseURL)
+	}
 	if err := waitForBasaltPassHealth(ctx, runtimeReq.BaseURL, runtimeReq.ClientID, runtimeReq.ClientSecret, runtimeReq.ServiceToken); err != nil {
 		return nil, err
+	}
+	if log != nil {
+		log("health", "BasaltPass health check succeeded")
+		log("tenant", "creating tenant "+coalesce(req.TenantCode, req.Name))
 	}
 	created, err := s.createBasaltPassTenant(ctx, runtimeReq)
 	if err != nil {
 		return nil, err
+	}
+	if log != nil {
+		log("tenant", fmt.Sprintf("tenant created id=%v code=%s", created.ID, coalesce(created.Code, req.TenantCode)))
+		log("store", "encrypting automation token")
 	}
 	tenantID := fmt.Sprint(created.ID)
 	tenantCode := coalesce(req.TenantCode, created.Code)
@@ -315,6 +398,9 @@ func (s *CredentialService) DeployBasaltPass(ctx context.Context, userID string,
 		if err != nil {
 			return nil, err
 		}
+	}
+	if log != nil {
+		log("store", "storing BasaltPass credential")
 	}
 	cred := &model.BasaltPassInstance{
 		Name:                 req.TenantName,
@@ -341,7 +427,86 @@ func (s *CredentialService) DeployBasaltPass(ctx context.Context, userID string,
 		}
 		return tx.Create(&model.UserCredential{UserID: userID, CredentialType: model.CredentialTypeBasaltPass, CredentialID: cred.ID, Role: model.CredentialRoleOwner}).Error
 	})
+	if err == nil && log != nil {
+		log("store", fmt.Sprintf("stored credential id=%d", cred.ID))
+	}
 	return cred, err
+}
+
+func (s *CredentialService) runBasaltPassDeploymentProcess(ctx context.Context, processID uint, userID string, req dto.DeployBasaltPassRequest) {
+	started := time.Now().UTC()
+	_ = s.db.WithContext(ctx).Model(&model.Process{}).Where("id = ?", processID).Updates(map[string]any{
+		"status": model.ProcessStatusRunning, "started_at": &started,
+	}).Error
+	var active *model.ProcessJob
+	log := func(step, line string) {
+		if active == nil || active.Name != step {
+			if active != nil {
+				_ = s.finishBasaltPassProcessJob(ctx, active, model.ProcessStatusSucceeded, "")
+			}
+			job, err := s.startBasaltPassProcessJob(ctx, processID, step)
+			if err != nil {
+				return
+			}
+			active = job
+		}
+		s.appendBasaltPassProcessJobLog(ctx, active, line)
+	}
+	log("validate", "starting BasaltPass deployment")
+	_, err := s.deployBasaltPass(ctx, userID, req, log)
+	if err != nil {
+		if active != nil {
+			_ = s.finishBasaltPassProcessJob(ctx, active, model.ProcessStatusFailed, err.Error())
+		}
+		finished := time.Now().UTC()
+		_ = s.db.WithContext(ctx).Model(&model.Process{}).Where("id = ?", processID).Updates(map[string]any{
+			"status": model.ProcessStatusFailed, "finished_at": &finished, "failure_reason": truncateFailure(err.Error()),
+		}).Error
+		return
+	}
+	if active != nil {
+		_ = s.finishBasaltPassProcessJob(ctx, active, model.ProcessStatusSucceeded, "")
+	}
+	finished := time.Now().UTC()
+	_ = s.db.WithContext(ctx).Model(&model.Process{}).Where("id = ?", processID).Updates(map[string]any{
+		"status": model.ProcessStatusSucceeded, "finished_at": &finished, "failure_reason": "",
+	}).Error
+}
+
+func (s *CredentialService) startBasaltPassProcessJob(ctx context.Context, processID uint, name string) (*model.ProcessJob, error) {
+	now := time.Now().UTC()
+	var job model.ProcessJob
+	if err := s.db.WithContext(ctx).Where("process_id = ? AND name = ?", processID, name).First(&job).Error; err != nil {
+		return nil, err
+	}
+	if err := s.db.WithContext(ctx).Model(&job).Updates(map[string]any{"status": model.ProcessStatusRunning, "started_at": &now}).Error; err != nil {
+		return nil, err
+	}
+	job.Status = model.ProcessStatusRunning
+	job.StartedAt = &now
+	return &job, nil
+}
+
+func (s *CredentialService) appendBasaltPassProcessJobLog(ctx context.Context, job *model.ProcessJob, line string) {
+	if job == nil {
+		return
+	}
+	entry := fmt.Sprintf("[%s] %s\n", time.Now().UTC().Format(time.RFC3339), strings.TrimRight(line, "\n"))
+	job.Logs += entry
+	_ = s.db.WithContext(ctx).Model(job).Update("logs", job.Logs).Error
+}
+
+func (s *CredentialService) finishBasaltPassProcessJob(ctx context.Context, job *model.ProcessJob, status, failure string) error {
+	if job == nil {
+		return nil
+	}
+	if failure != "" {
+		s.appendBasaltPassProcessJobLog(ctx, job, "ERROR: "+failure)
+	}
+	now := time.Now().UTC()
+	return s.db.WithContext(ctx).Model(job).Updates(map[string]any{
+		"status": status, "finished_at": &now, "failure_reason": truncateFailure(failure),
+	}).Error
 }
 
 func basaltPassInternalBaseURL(namespace string) string {
