@@ -476,7 +476,8 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID, te
 			return nil, err
 		}
 	}
-	if err := s.k8s.UpsertSecret(ctx, project.Namespace, project.EnvSecretName(), project.Name, basaltPassRuntimeEnv(bpInstance, project, secret, req.Env)); err != nil {
+	runtimeEnv := basaltPassComponentRuntimeBaseEnv(project, req.BasaltPass, req.Env)
+	if err := s.k8s.UpsertSecret(ctx, project.Namespace, project.EnvSecretName(), project.Name, basaltPassRuntimeEnv(bpInstance, project, secret, runtimeEnv)); err != nil {
 		rollback()
 		return nil, err
 	}
@@ -750,11 +751,16 @@ func basaltPassRuntimeEnv(inst *model.BasaltPassInstance, project *model.Project
 		return out
 	}
 	baseURL := strings.TrimRight(inst.BaseURL, "/")
-	redirectURI := projectHome(project) + "/callback"
+	redirectURI := strings.TrimSpace(out["BASALTPASS_REDIRECT_URI"])
+	if redirectURI == "" {
+		redirectURI = projectHome(project) + "/callback"
+	}
 	out["BASALTPASS_BASE_URL"] = baseURL
 	out["BASALTPASS_CLIENT_ID"] = project.BasaltClientID
 	out["BASALTPASS_CLIENT_SECRET"] = clientSecret
 	out["BASALTPASS_REDIRECT_URI"] = redirectURI
+	setDefaultEnv(out, "BASALTPASS_ENABLED", "true")
+	setDefaultEnv(out, "BASALTPASS_OAUTH_ENABLED", "true")
 	setDefaultEnv(out, "BASALTPASS_OAUTH_CLIENT_ID", project.BasaltClientID)
 	setDefaultEnv(out, "BASALTPASS_OAUTH_CLIENT_SECRET", clientSecret)
 	setDefaultEnv(out, "BASALTPASS_OAUTH_REDIRECT_URI", redirectURI)
@@ -772,6 +778,25 @@ func basaltPassRuntimeEnv(inst *model.BasaltPassInstance, project *model.Project
 	}
 	if project.BasaltAppID != 0 {
 		out["BASALTPASS_APP_ID"] = strconv.FormatUint(uint64(project.BasaltAppID), 10)
+	}
+	return out
+}
+
+func basaltPassComponentRuntimeBaseEnv(project *model.Project, cfg *dto.BasaltPassComponentConfig, base map[string]string) map[string]string {
+	out := make(map[string]string, len(base)+4)
+	for key, value := range base {
+		out[key] = value
+	}
+	if project == nil || project.BasaltClientID == "" {
+		return out
+	}
+	setDefaultEnv(out, "BASALTPASS_ENABLED", "true")
+	setDefaultEnv(out, "BASALTPASS_OAUTH_ENABLED", "true")
+	if cfg != nil && strings.TrimSpace(cfg.CallbackPath) != "" {
+		redirectURI := joinURLPath(projectHome(project), cfg.CallbackPath)
+		out["BASALTPASS_REDIRECT_URI"] = redirectURI
+		setDefaultEnv(out, "BASALTPASS_OAUTH_REDIRECT_URI", redirectURI)
+		setDefaultEnv(out, "BASALT_REDIRECT_URI", redirectURI)
 	}
 	return out
 }

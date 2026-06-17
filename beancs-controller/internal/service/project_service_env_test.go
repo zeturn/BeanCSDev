@@ -3,6 +3,7 @@ package service
 import (
 	"testing"
 
+	"github.com/zeturn/beancs-controller/internal/dto"
 	"github.com/zeturn/beancs-controller/internal/model"
 )
 
@@ -48,6 +49,35 @@ func TestBasaltPassRuntimeEnvKeepsExplicitCompatibilityAlias(t *testing.T) {
 
 	assertEnv(t, env, "BASALTPASS_REDIRECT_URI", "http://demo.proj-demo.svc.cluster.local/callback")
 	assertEnv(t, env, "BASALTPASS_OAUTH_REDIRECT_URI", "https://app.example.com/custom/callback")
+}
+
+func TestBasaltPassRuntimeEnvEnablesOAuthAndKeepsCanonicalRedirect(t *testing.T) {
+	inst := &model.BasaltPassInstance{BaseURL: "https://auth.example.com"}
+	project := &model.Project{Name: "demo", Namespace: "proj-demo", BasaltClientID: "client-id"}
+
+	env := basaltPassRuntimeEnv(inst, project, "client-secret", map[string]string{
+		"BASALTPASS_REDIRECT_URI": "https://app.example.com/api/auth/basaltpass/callback/",
+	})
+
+	assertEnv(t, env, "BASALTPASS_ENABLED", "true")
+	assertEnv(t, env, "BASALTPASS_OAUTH_ENABLED", "true")
+	assertEnv(t, env, "BASALTPASS_REDIRECT_URI", "https://app.example.com/api/auth/basaltpass/callback/")
+	assertEnv(t, env, "BASALTPASS_OAUTH_REDIRECT_URI", "https://app.example.com/api/auth/basaltpass/callback/")
+}
+
+func TestBasaltPassComponentRuntimeBaseEnvUsesCallbackPath(t *testing.T) {
+	project := &model.Project{
+		Name:           "demo",
+		Namespace:      "proj-demo",
+		Domain:         "demo.example.com",
+		BasaltClientID: "client-id",
+	}
+
+	env := basaltPassComponentRuntimeBaseEnv(project, &dto.BasaltPassComponentConfig{CallbackPath: "/api/auth/basaltpass/callback/"}, map[string]string{"APP_MODE": "prod"})
+
+	assertEnv(t, env, "APP_MODE", "prod")
+	assertEnv(t, env, "BASALTPASS_ENABLED", "true")
+	assertEnv(t, env, "BASALTPASS_REDIRECT_URI", "https://demo.example.com/api/auth/basaltpass/callback/")
 }
 
 func assertEnv(t *testing.T, env map[string]string, key, want string) {
