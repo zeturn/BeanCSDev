@@ -42,6 +42,7 @@ jobs:
         with:
           languages: go
           build-mode: manual
+          config-file: ./.github/codeql/codeql-config.yml
 
       - name: Build embedded web assets
         working-directory: beancs-controller/internal/web
@@ -81,6 +82,7 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: none
+          config-file: ./.github/codeql/codeql-config.yml
 
       - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@v4
