@@ -1,0 +1,88 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [master, main, deploy]
+  pull_request:
+    branches: [master, main, deploy]
+  schedule:
+    - cron: "27 3 * * 1"
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
+jobs:
+  analyze-go:
+    name: CodeQL (go)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: beancs-controller/go.mod
+          cache-dependency-path: |
+            beancs-controller/go.sum
+            beanctl/go.sum
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: beancs-controller/internal/web/package-lock.json
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: go
+          build-mode: manual
+
+      - name: Build embedded web assets
+        working-directory: beancs-controller/internal/web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build controller
+        working-directory: beancs-controller
+        run: go build ./...
+
+      - name: Build CLI
+        working-directory: beanctl
+        run: go build ./...
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:go
+
+  analyze-script-and-actions:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        language:
+          - javascript-typescript
+          - actions
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}
