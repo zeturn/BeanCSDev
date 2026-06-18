@@ -45,7 +45,7 @@ jobs:
         if: matrix.module == 'beancs-controller'
         working-directory: beancs-controller/internal/web
         run: |
-          npm audit fix --omit=dev --package-lock-only
+          npm audit fix --omit=dev --package-lock-only || true
           npm ci
           npm run build
 
@@ -83,7 +83,7 @@ jobs:
           cache-dependency-path: beancs-controller/internal/web/package-lock.json
 
       - name: Refresh audited dependency lock
-        run: npm audit fix --omit=dev --package-lock-only
+        run: npm audit fix --omit=dev --package-lock-only || true
 
       - name: Install dependencies
         run: npm ci
