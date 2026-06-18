@@ -2,6 +2,10 @@
 
 Thanks for helping improve BeanCSDev. This guide describes the checks expected before opening or merging changes.
 
+## Code of Conduct
+
+All participation in this project is covered by `CODE_OF_CONDUCT.md`. Please keep discussions respectful, constructive, and focused on improving the project.
+
 ## Development Setup
 
 1. Install Go matching the versions declared in the module files.
@@ -57,6 +61,6 @@ docker build -t beancs-controller:dev .
 
 The default branch is `master`. The `deploy` branch and version tags are used by the k3s deployment workflow. Release tags should be created from commits that are already contained in `origin/deploy`.
 
-## Licensing Note
+## License
 
-This repository does not yet declare a license. Project owners should add a `LICENSE` file before accepting outside contributions that require clear redistribution terms.
+By contributing to this repository, you agree that your contributions are licensed under the ISC License unless a different written agreement applies.
