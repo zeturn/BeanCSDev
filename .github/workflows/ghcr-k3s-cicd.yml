@@ -2,7 +2,7 @@ name: Harbor + k3s CI/CD
 
 on:
   push:
-    branches: [main, deploy]
+    branches: [master, main, deploy]
     tags:
       - "v*"
       - "beancs-v*"
