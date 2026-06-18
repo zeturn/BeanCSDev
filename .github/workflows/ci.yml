@@ -33,6 +33,22 @@ jobs:
           go-version-file: ${{ matrix.module }}/go.mod
           cache-dependency-path: ${{ matrix.module }}/go.sum
 
+      - name: Set up Node
+        if: matrix.module == 'beancs-controller'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: beancs-controller/internal/web/package-lock.json
+
+      - name: Build embedded web assets
+        if: matrix.module == 'beancs-controller'
+        working-directory: beancs-controller/internal/web
+        run: |
+          npm audit fix --omit=dev --package-lock-only
+          npm ci
+          npm run build
+
       - name: Download dependencies
         working-directory: ${{ matrix.module }}
         run: go mod download
@@ -65,6 +81,9 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: beancs-controller/internal/web/package-lock.json
+
+      - name: Refresh audited dependency lock
+        run: npm audit fix --omit=dev --package-lock-only
 
       - name: Install dependencies
         run: npm ci
