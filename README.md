@@ -9,7 +9,7 @@ BeanCSDev is the development repository for BeanCS, a control panel for Californ
 - `beancs-controller/internal/` - application packages for config, handlers, middleware, services, models, migrations, Kubernetes operations, registry operations, and web assets.
 - `beancs-controller/internal/web/` - Vite/React/Tailwind web UI.
 - `beanctl/` - Go CLI for interacting with BeanCS.
-- `.github/workflows/` - CI/CD, k3s diagnostics, and maintenance workflows.
+- `.github/workflows/` - CI/CD, CodeQL, k3s diagnostics, and maintenance workflows.
 - `GITHUB_ACTIONS_K3S_DEPLOY.md` - production deployment workflow notes.
 
 ## Prerequisites
@@ -89,11 +89,12 @@ docker build -t beancs-controller:dev .
 
 The Dockerfile builds the web UI first, compiles the Go controller, and packages the binary into an Alpine runtime image.
 
-## CI/CD
+## CI/CD and Security Scanning
 
-This repository has two workflow categories:
+This repository has several workflow categories:
 
 - `CI` runs lightweight validation on pull requests and pushes to `master`, `main`, and `deploy`.
+- `CodeQL` scans Go, JavaScript/TypeScript, and GitHub Actions workflow code.
 - `Harbor + k3s CI/CD` builds and publishes the controller image, then deploys tagged releases to k3s.
 
 Deployment setup and required secrets are documented in `GITHUB_ACTIONS_K3S_DEPLOY.md`.
@@ -106,8 +107,8 @@ Please see `SECURITY.md` before reporting a vulnerability.
 
 ## Contributing
 
-Please see `CONTRIBUTING.md` for the local checks and pull request expectations.
+Please see `CONTRIBUTING.md` for the local checks and pull request expectations. All project participation is covered by `CODE_OF_CONDUCT.md`.
 
 ## License
 
-No repository license has been declared yet. Before redistributing or accepting external contributions, the project owner should add an explicit `LICENSE` file.
+This project is licensed under the ISC License. See `LICENSE` for details.
