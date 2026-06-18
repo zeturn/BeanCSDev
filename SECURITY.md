@@ -30,6 +30,7 @@ The project should keep the following checks healthy:
 
 - Go tests and `go vet` for both Go modules.
 - Web UI dependency installation and production build.
-- `govulncheck` for Go modules.
+- CodeQL analysis for Go, JavaScript/TypeScript, and GitHub Actions workflows.
+- `govulncheck` advisory scans for Go modules.
 - Dependabot updates for Go modules, npm, GitHub Actions, and Docker base images.
 - Container image scanning before production deployment when registry tooling is available.
