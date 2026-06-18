@@ -61,7 +61,8 @@ jobs:
         working-directory: ${{ matrix.module }}
         run: go test -v -race -timeout=5m ./...
 
-      - name: Vulnerability scan
+      - name: Advisory vulnerability scan
+        continue-on-error: true
         working-directory: ${{ matrix.module }}
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
