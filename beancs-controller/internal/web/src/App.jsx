@@ -2447,8 +2447,8 @@ function App() {
               )}
               <span>
                 {callbackBusy
-                  ? "已登录，正在为你重定向到控制台。"
-                  : "正在前往 BasaltPass..."}
+                  ? "Login successful. Redirecting..."
+                  : "Communicating with the identity server..."}
               </span>
             </div>
           ) : (
