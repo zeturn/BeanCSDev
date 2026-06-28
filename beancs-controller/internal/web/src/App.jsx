@@ -97,6 +97,8 @@ import {
 import "./style.css";
 const API = "/v1/api";
 const tokenKey = "beancs.accessToken";
+const hasOAuthCallback = () =>
+  new URLSearchParams(window.location.search).has("code");
 const emptyRuntime = {
   namespaces: [],
   pods: [],
@@ -308,6 +310,9 @@ import ProjectModal from "./views/ProjectModal";
 function App() {
   const [config, setConfig] = useState(null);
   const [token, setToken] = useState(localStorage.getItem(tokenKey) || "");
+  const [loginPhase, setLoginPhase] = useState(() =>
+    hasOAuthCallback() ? "completing" : "idle",
+  );
   const [basaltProfile, setBasaltProfile] = useState(null);
   const [view, setView] = useState("dashboard");
   const [notice, setNotice] = useState("");
@@ -498,16 +503,22 @@ function App() {
       const cfg = await publicJSON(`${API}/ui/config`);
       setConfig(cfg);
       if (location.search.includes("code=")) {
+        setLoginPhase("completing");
         const accessToken = await finishLogin(cfg);
+        setLoginPhase("authenticated");
         localStorage.setItem(tokenKey, accessToken);
         setToken(accessToken);
         history.replaceState({}, "", location.pathname);
       } else if (location.search.includes("github_app=connected")) {
+        setLoginPhase("idle");
         setView("github");
         setNotice("GitHub App connected.");
         history.replaceState({}, "", location.pathname);
+      } else {
+        setLoginPhase("idle");
       }
     } catch (err) {
+      setLoginPhase("idle");
       setError(err.message);
     }
   }
@@ -635,7 +646,9 @@ function App() {
     }
   }
   async function startLogin() {
-    if (!config) return;
+    if (!config || loginPhase !== "idle") return;
+    setLoginPhase("redirecting");
+    setError("");
     const verifier = randomString(64);
     const challenge = await codeChallenge(verifier);
     const authState = randomString(32);
@@ -659,6 +672,7 @@ function App() {
   function logout() {
     localStorage.removeItem(tokenKey);
     setToken("");
+    setLoginPhase("idle");
     setBasaltProfile(null);
     setRuntime(emptyRuntime);
     setProjects([]);
@@ -2413,6 +2427,9 @@ function App() {
     setView(item.id);
   }
   if (!token) {
+    const loginBusy = loginPhase !== "idle";
+    const callbackBusy =
+      loginPhase === "completing" || loginPhase === "authenticated";
     return (
       <main className="login-screen">
         <section className="login-copy">
@@ -2421,9 +2438,24 @@ function App() {
             Operate k3s projects, GitHub App deployments, DNS, and traffic
             routes from one console.
           </p>
-          <Button onClick={startLogin} variant="primary">
-            <Lock size={18} /> Sign in with BasaltPass
-          </Button>
+          {loginBusy ? (
+            <div className="login-status" role="status" aria-live="polite">
+              {callbackBusy ? (
+                <CheckCircle2 size={18} />
+              ) : (
+                <LoaderCircle className="spin" size={18} />
+              )}
+              <span>
+                {callbackBusy
+                  ? "已登录，正在为你重定向到控制台。"
+                  : "正在前往 BasaltPass..."}
+              </span>
+            </div>
+          ) : (
+            <Button onClick={startLogin} variant="primary" disabled={!config}>
+              <Lock size={18} /> Sign in with BasaltPass
+            </Button>
+          )}
           {error && <p className="error-text">{error}</p>}
         </section>
       </main>
