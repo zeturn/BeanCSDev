@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM node:24-alpine AS web-builder
+FROM --platform=$BUILDPLATFORM node:26-alpine AS web-builder
 WORKDIR /app
 COPY internal/web/package*.json ./
 RUN npm ci
