@@ -8,6 +8,7 @@ import {
   Checkbox,
 } from "../components/index";
 import CloudflareAccountDrawer from "./CloudflareAccountDrawer";
+import { t } from "../i18n/index";
 import {
   Activity,
   AlertTriangle,
@@ -103,11 +104,12 @@ export default function CloudflareView({
       <section className="panel action-panel">
         <div>
           <h2>
-            <Cloud size={18} /> Cloudflare accounts
+            <Cloud size={18} /> {t("Cloudflare accounts")}
           </h2>
           <p>
-            Link a Cloudflare account once, then choose cached zones from that
-            account.
+            {t(
+              "Link a Cloudflare account once, then choose cached zones from that account.",
+            )}
           </p>
         </div>
         <Button
@@ -115,14 +117,14 @@ export default function CloudflareView({
           onClick={() => setDrawerOpen(true)}
           variant="primary"
         >
-          <Plus size={15} /> Add account
+          <Plus size={15} /> {t("Add account")}
         </Button>
       </section>
 
       <section className="panel">
         <div className="account-header">
           <h2>
-            <KeyRound size={18} /> Existing accounts
+            <KeyRound size={18} /> {t("Existing accounts")}
           </h2>
           <Button
             type="button"
@@ -130,7 +132,7 @@ export default function CloudflareView({
             onClick={() => selected && onDelete(selected.id)}
             variant="danger"
           >
-            <Trash2 size={15} /> Delete selected
+            <Trash2 size={15} /> {t("Delete selected")}
           </Button>
         </div>
         <div className="cloudflare-account-grid">
@@ -155,16 +157,17 @@ export default function CloudflareView({
                 <div>
                   <b>{cred.name}</b>
                   <small>
-                    {cred.account_id || "No account id"} · {count} domain
-                    {count === 1 ? "" : "s"}
+                    {cred.account_id || t("No account id")} ·{" "}
+                    {count}{" "}
+                    {count === 1 ? t("domain") : t("domains")}
                   </small>
                 </div>
-                <em>{cred.is_active ? "Active" : "Inactive"}</em>
+                <em>{cred.is_active ? t("Active") : t("Inactive")}</em>
               </Button>
             );
           })}
           {credentials.length === 0 && (
-            <div className="empty">No Cloudflare accounts linked yet.</div>
+            <div className="empty">{t("No Cloudflare accounts linked yet.")}</div>
           )}
         </div>
       </section>
@@ -172,7 +175,9 @@ export default function CloudflareView({
       <section className="panel">
         <h2>
           <Globe2 size={18} />{" "}
-          {selected ? `${selected.name} domains` : "Account domains"}
+          {selected
+            ? t("{name} domains", { name: selected.name })
+            : t("Account domains")}
         </h2>
         <div className="domain-grid">
           {accountDomains.map((domain) => (
@@ -189,19 +194,19 @@ export default function CloudflareView({
               <Globe2 size={20} />
               <div>
                 <b>{domain.domain}</b>
-                <span>{domain.status || "cached zone"}</span>
+                <span>{domain.status || t("cached zone")}</span>
                 <small>{domain.zone_id}</small>
               </div>
-              <em>{domain.active ? "Active" : "Inactive"}</em>
+              <em>{domain.active ? t("Active") : t("Inactive")}</em>
             </Button>
           ))}
           {!selected && (
             <div className="empty">
-              Choose a Cloudflare account to view its domains.
+              {t("Choose a Cloudflare account to view its domains.")}
             </div>
           )}
           {selected && accountDomains.length === 0 && (
-            <div className="empty">No cached domains for this account.</div>
+            <div className="empty">{t("No cached domains for this account.")}</div>
           )}
         </div>
       </section>
@@ -209,18 +214,18 @@ export default function CloudflareView({
       <section className="panel">
         <div className="account-header">
           <h2>
-            <Network size={18} /> DNS records{" "}
+            <Network size={18} /> {t("DNS records")}{" "}
             {selectedDomain
-              ? `for ${selectedDomain.domain}`
+              ? t("for {name}", { name: selectedDomain.domain })
               : selected
-                ? `for ${selected.name}`
+                ? t("for {name}", { name: selected.name })
                 : ""}
           </h2>
           <Button
             disabled={!selectedID || !selectedZoneID}
             onClick={() => onLoadDNS(selectedID, selectedZoneID)}
           >
-            <RefreshCw size={15} /> Refresh DNS
+            <RefreshCw size={15} /> {t("Refresh DNS")}
           </Button>
         </div>
         <form
@@ -243,7 +248,7 @@ export default function CloudflareView({
           />
           <Input
             name="content"
-            placeholder="Target content"
+            placeholder={t("Target content")}
             defaultValue={editingRecord?.content || ""}
             required
           />
@@ -259,11 +264,11 @@ export default function CloudflareView({
               type="checkbox"
               defaultChecked={Boolean(editingRecord?.proxied)}
             />{" "}
-            Proxied
+            {t("Proxied")}
           </label>
           <Input
             name="comment"
-            placeholder="Comment"
+            placeholder={t("Comment")}
             defaultValue={editingRecord?.comment || ""}
           />
           <Button
@@ -271,22 +276,22 @@ export default function CloudflareView({
             type="submit"
             variant="primary"
           >
-            {editingRecord ? "Save DNS" : "Add DNS"}
+            {editingRecord ? t("Save DNS") : t("Add DNS")}
           </Button>
           {editingRecord && (
             <Button type="button" onClick={() => setEditingRecord(null)}>
-              Cancel
+              {t("Cancel")}
             </Button>
           )}
         </form>
         <div className="table dns-table">
           <div className="tr head">
-            <span>Type</span>
-            <span>Name</span>
-            <span>Content</span>
-            <span>TTL</span>
-            <span>Proxy</span>
-            <span>Actions</span>
+            <span>{t("Type")}</span>
+            <span>{t("Name")}</span>
+            <span>{t("Content")}</span>
+            <span>{t("TTL")}</span>
+            <span>{t("Proxy")}</span>
+            <span>{t("Actions")}</span>
           </div>
           {dnsRecords.map((record) => (
             <div className="tr" key={record.id}>
@@ -294,9 +299,14 @@ export default function CloudflareView({
               <ExpandableCell value={record.name} max={36} />
               <ExpandableCell value={record.content} max={42} />
               <ExpandableCell value={record.ttl} max={12} />
-              <ExpandableCell value={record.proxied ? "Yes" : "No"} max={12} />
+              <ExpandableCell
+                value={record.proxied ? t("Yes") : t("No")}
+                max={12}
+              />
               <span className="row-actions">
-                <Button onClick={() => setEditingRecord(record)}>Edit</Button>
+                <Button onClick={() => setEditingRecord(record)}>
+                  {t("Edit")}
+                </Button>
                 <Button onClick={() => onDeleteDNS(record)} variant="danger">
                   <Trash2 size={15} />
                 </Button>
@@ -306,8 +316,8 @@ export default function CloudflareView({
           {dnsRecords.length === 0 && (
             <div className="empty">
               {selectedID && selectedZoneID
-                ? "No DNS records loaded."
-                : "Choose a zone to view DNS records."}
+                ? t("No DNS records loaded.")
+                : t("Choose a zone to view DNS records.")}
             </div>
           )}
         </div>

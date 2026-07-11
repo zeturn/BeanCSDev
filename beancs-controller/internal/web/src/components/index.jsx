@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { t } from "../i18n/index";
 import * as LucideIcons from "lucide-react";
 export * from "./ui";
 import { Button, Input, Select, Textarea, Checkbox, Modal, Drawer } from "./ui";
@@ -70,7 +71,7 @@ export function SidebarNavGroup({ label, items, view, onSelect }) {
   if (!items?.length) return null;
   return (
     <div className="nav-group">
-      {label && <div className="nav-group-label">{label}</div>}
+      {label && <div className="nav-group-label">{t(label)}</div>}
       {items.map((item) => {
         const Icon = item.icon;
         return (
@@ -81,7 +82,7 @@ export function SidebarNavGroup({ label, items, view, onSelect }) {
             onClick={() => onSelect(item)}
           >
             <Icon size={18} />
-            <span>{item.label}</span>
+            <span>{t(item.label)}</span>
             {item.badge && <em>{item.badge}</em>}
           </Button>
         );
@@ -442,7 +443,7 @@ export function ProgressEvidence({
             .join("\n"),
         )
         .join("\n\n")
-    : "No deployment records yet.";
+    : t("No deployment records yet.");
   const eventText = events.length
     ? events
         .slice(0, 20)
@@ -458,7 +459,7 @@ export function ProgressEvidence({
             .join("\n"),
         )
         .join("\n\n")
-    : "No Kubernetes events reported for this project.";
+    : t("No Kubernetes events reported for this project.");
   const runText = [
     `process=${selectedProcess?.id ? `#${selectedProcess.id}` : "-"}`,
     `title=${selectedProcess?.title || progress?.project?.display_name || progress?.project?.name || "-"}`,
@@ -490,46 +491,50 @@ export function ProgressEvidence({
     <div className="process-detail-panel">
       {activeTab === "run" && (
         <section className="process-evidence-card">
-          <h3>Run details</h3>
-          <pre>{filteredRunText || "No run details matched the search."}</pre>
+          <h3>{t("Run details")}</h3>
+          <pre>
+            {filteredRunText || t("No run details matched the search.")}
+          </pre>
         </section>
       )}
       {activeTab === "install" && (
         <section className="process-evidence-card">
-          <h3>Install log</h3>
+          <h3>{t("Install log")}</h3>
           <pre>
-            {filteredInstallLogs || "No active install log for this project."}
+            {filteredInstallLogs ||
+              t("No active install log for this project.")}
           </pre>
         </section>
       )}
       {activeTab === "deployments" && (
         <section className="process-evidence-card">
-          <h3>Deployment records</h3>
+          <h3>{t("Deployment records")}</h3>
           <pre>
             {filteredDeploymentText ||
-              "No deployment records matched the search."}
+              t("No deployment records matched the search.")}
           </pre>
         </section>
       )}
       {activeTab === "events" && (
         <section className="process-evidence-card">
-          <h3>Kubernetes events</h3>
+          <h3>{t("Kubernetes events")}</h3>
           <pre>
-            {filteredEventText || "No Kubernetes events matched the search."}
+            {filteredEventText ||
+              t("No Kubernetes events matched the search.")}
           </pre>
         </section>
       )}
       {activeTab === "runtime" && (
         <section className="process-evidence-card">
           <div className="process-evidence-head">
-            <h3>Runtime logs</h3>
+            <h3>{t("Runtime logs")}</h3>
             <div className="row-actions process-log-actions">
               <Button type="button" onClick={onRefresh} disabled={logFollow}>
-                <RefreshCw size={15} /> Snapshot
+                <RefreshCw size={15} /> {t("Snapshot")}
               </Button>
               {logFollow ? (
                 <Button type="button" onClick={onStopLogFollow}>
-                  Stop follow
+                  {t("Stop follow")}
                 </Button>
               ) : (
                 <Button
@@ -538,7 +543,7 @@ export function ProgressEvidence({
                   onClick={onStartLogFollow}
                   disabled={!progress?.project?.id}
                 >
-                  Follow live
+                  {t("Follow live")}
                 </Button>
               )}
             </div>
@@ -546,7 +551,9 @@ export function ProgressEvidence({
           {logStatus && <p className="log-status">{logStatus}</p>}
           <pre>
             {logs ||
-              "No container logs yet. If the workload has not created pods, Kubernetes events above are the source of truth."}
+              t(
+                "No container logs yet. If the workload has not created pods, Kubernetes events above are the source of truth.",
+              )}
           </pre>
         </section>
       )}
@@ -600,7 +607,7 @@ export function EventTimeline({ events }) {
       ))}
       {events.length === 0 && (
         <div className="empty">
-          No warning events in the latest cluster feed.
+          {t("No warning events in the latest cluster feed.")}
         </div>
       )}
     </div>
@@ -699,7 +706,7 @@ export function GitOpsRepoEditor({ cred, onUpdate }) {
           gap: "0.35rem",
         }}
       >
-        <GitBranch size={14} /> GitOps Repo
+        <GitBranch size={14} /> {t("GitOps Repo")}
       </span>
       {editing ? (
         <div style={{ display: "flex", gap: "0.4rem", alignItems: "center" }}>
@@ -714,7 +721,7 @@ export function GitOpsRepoEditor({ cred, onUpdate }) {
             onClick={save}
             style={{ padding: "0.3rem 0.7rem", fontSize: "0.8rem" }}
           >
-            Save
+            {t("Save")}
           </Button>
           <Button
             onClick={() => {
@@ -723,21 +730,21 @@ export function GitOpsRepoEditor({ cred, onUpdate }) {
             }}
             style={{ padding: "0.3rem 0.7rem", fontSize: "0.8rem" }}
           >
-            Cancel
+            {t("Cancel")}
           </Button>
         </div>
       ) : (
         <div style={{ display: "flex", gap: "0.4rem", alignItems: "center" }}>
           <span style={{ fontFamily: "monospace", fontSize: "0.85rem" }}>
             {cred.gitops_repo || (
-              <em style={{ opacity: 0.5 }}>Not configured</em>
+              <em style={{ opacity: 0.5 }}>{t("Not configured")}</em>
             )}
           </span>
           <Button
             onClick={() => setEditing(true)}
             style={{ padding: "0.2rem 0.5rem", fontSize: "0.75rem" }}
           >
-            <Edit3 size={13} /> Edit
+            <Edit3 size={13} /> {t("Edit")}
           </Button>
         </div>
       )}
@@ -751,8 +758,8 @@ export function IngressForm({ onSubmit }) {
       <Input name="namespace" placeholder="namespace" required />
       <Input name="name" placeholder="ingress-name" required />
       <Select name="class_name" defaultValue="traefik">
-        <option value="traefik">Traefik public</option>
-        <option value="tailscale">Tailscale private</option>
+        <option value="traefik">{t("Traefik public")}</option>
+        <option value="tailscale">{t("Tailscale private")}</option>
         <option value="nginx">nginx</option>
       </Select>
       <Input
@@ -777,7 +784,7 @@ export function IngressForm({ onSubmit }) {
       />
       <Input name="labels" placeholder="labels: app=my-app" />
       <Button variant="primary" type="submit">
-        Save ingress
+        {t("Save ingress")}
       </Button>
     </form>
   );
@@ -796,21 +803,21 @@ export function NetworkPolicyForm({ onSubmit }) {
           value="Ingress"
           defaultChecked
         />{" "}
-        Ingress
+        {t("Ingress")}
       </label>
       <label className="check-row">
-        <Input name="policy_types" type="checkbox" value="Egress" /> Egress
+        <Input name="policy_types" type="checkbox" value="Egress" /> {t("Egress")}
       </label>
       <label className="check-row">
-        <Input name="allow_same_namespace" type="checkbox" /> Allow same
-        namespace
+        <Input name="allow_same_namespace" type="checkbox" />{" "}
+        {t("Allow same namespace")}
       </label>
       <label className="check-row">
-        <Input name="allow_dns" type="checkbox" /> Allow DNS egress
+        <Input name="allow_dns" type="checkbox" /> {t("Allow DNS egress")}
       </label>
       <Input name="labels" placeholder="labels: managed-by=beancs" />
       <Button variant="primary" type="submit">
-        Save policy
+        {t("Save policy")}
       </Button>
     </form>
   );
@@ -851,8 +858,13 @@ export function PaginationBar({
     <div className="pagination-bar">
       <small className="muted">
         {totalItems === 0
-          ? `No ${label}`
-          : `${start}-${end} / ${totalItems} ${label}`}
+          ? t("No {label}", { label })
+          : t("{start}-{end} / {total} {label}", {
+              start,
+              end,
+              total: totalItems,
+              label,
+            })}
       </small>
       <div className="row-actions">
         <Button
@@ -860,17 +872,17 @@ export function PaginationBar({
           onClick={() => onPageChange(safePage - 1)}
           disabled={safePage <= 1}
         >
-          Prev
+          {t("Prev")}
         </Button>
         <small className="muted">
-          Page {safePage}/{totalPages}
+          {t("Page {page}/{pages}", { page: safePage, pages: totalPages })}
         </small>
         <Button
           type="button"
           onClick={() => onPageChange(safePage + 1)}
           disabled={safePage >= totalPages}
         >
-          Next
+          {t("Next")}
         </Button>
       </div>
     </div>
@@ -899,7 +911,7 @@ export function SimpleTable({
           {columns.map((column) => (
             <span key={column}>{column.replaceAll("_", " ")}</span>
           ))}
-          {actions && <span>Actions</span>}
+          {actions && <span>{t("Actions")}</span>}
         </div>
         {pagedRows.map((row, index) => (
           <div
@@ -913,7 +925,9 @@ export function SimpleTable({
             {actions && <span className="row-actions">{actions(row)}</span>}
           </div>
         ))}
-        {safeRows.length === 0 && <div className="empty">No records found.</div>}
+        {safeRows.length === 0 && (
+          <div className="empty">{t("No records found.")}</div>
+        )}
       </div>
       <PaginationBar
         page={safePage}
@@ -959,18 +973,23 @@ export function RuntimeTable({
             <h2>
               {kind === "namespaces" ? (
                 <>
-                  <Layers3 size={18} /> Namespaces
+                  <Layers3 size={18} /> {t("Namespaces")}
                 </>
               ) : (
                 <>
-                  <Database size={18} /> Services
+                  <Database size={18} /> {t("Services")}
                 </>
               )}
             </h2>
-            <p className="muted">创建入口已从列表中分离，避免页面过长。</p>
+            <p className="muted">
+              {t(
+                "The create form is separated from the list to keep the page concise.",
+              )}
+            </p>
           </div>
           <Button variant="primary" type="button" onClick={() => setCreateOpen(true)}>
-            <Plus size={15} /> {kind === "namespaces" ? "Create namespace" : "Create service"}
+            <Plus size={15} />{" "}
+            {kind === "namespaces" ? t("Create namespace") : t("Create service")}
           </Button>
         </section>
       )}
@@ -981,12 +1000,12 @@ export function RuntimeTable({
         />
       )}
       <section className="panel">
-        <div className="table runtime-table">
+          <div className="table runtime-table">
           <div className="tr head">
             {keys.map((key) => (
-              <span key={key}>{key.replaceAll("_", " ")}</span>
+              <span key={key}>{t(key.replaceAll("_", " "))}</span>
             ))}
-            <span>Actions</span>
+            <span>{t("Actions")}</span>
           </div>
           {pagedRows.map((row, index) => (
             <div
@@ -1019,7 +1038,7 @@ export function RuntimeTable({
                         : onDetail({ kind, row })
                   }
                 >
-                  Details
+                  {t("Details")}
                 </Button>
                 {kind === "namespaces" && (
                   <Button
@@ -1031,7 +1050,7 @@ export function RuntimeTable({
                 )}
                 {kind === "pods" && (
                   <>
-                    <Button onClick={() => onPodLogs(row)}>Logs</Button>
+                    <Button onClick={() => onPodLogs(row)}>{t("Logs")}</Button>
                     <Button
                       onClick={() => onDeletePod(row)}
                       className="danger-button"
@@ -1045,7 +1064,7 @@ export function RuntimeTable({
                     <Button
                       onClick={() => onDetail({ kind: "service-edit", row })}
                     >
-                      Edit
+                      {t("Edit")}
                     </Button>
                     <Button
                       onClick={() => onDeleteService(row)}
@@ -1058,7 +1077,9 @@ export function RuntimeTable({
               </span>
             </div>
           ))}
-          {rows.length === 0 && <div className="empty">No {kind} found.</div>}
+          {rows.length === 0 && (
+            <div className="empty">{t("No {kind} found.", { kind })}</div>
+          )}
         </div>
         <PaginationBar
           page={safePage}
@@ -1070,8 +1091,10 @@ export function RuntimeTable({
       </section>
       {createOpen && kind === "namespaces" && (
         <Modal
-          title="Create namespace"
-          subtitle="将创建表单放在弹窗中，便于聚焦输入。"
+          title={t("Create namespace")}
+          subtitle={t(
+            "The create form is placed in a dialog to keep focus on the inputs.",
+          )}
           onClose={() => setCreateOpen(false)}
         >
           <form
@@ -1085,10 +1108,10 @@ export function RuntimeTable({
             <Input name="labels" placeholder="labels: env=dev,team=platform" />
             <div className="modal-actions">
               <Button type="button" onClick={() => setCreateOpen(false)}>
-                Cancel
+                {t("Cancel")}
               </Button>
               <Button variant="primary" type="submit">
-                <Plus size={15} /> Create
+                <Plus size={15} /> {t("Create")}
               </Button>
             </div>
           </form>
@@ -1096,8 +1119,8 @@ export function RuntimeTable({
       )}
       {createOpen && kind === "services" && (
         <Modal
-          title="Create service"
-          subtitle="填写服务参数后保存。"
+          title={t("Create service")}
+          subtitle={t("Fill in the service parameters, then save.")}
           onClose={() => setCreateOpen(false)}
           className="wide-modal"
         >
@@ -1110,7 +1133,7 @@ export function RuntimeTable({
           />
           <div className="modal-actions">
             <Button type="button" onClick={() => setCreateOpen(false)}>
-              Close
+              {t("Close")}
             </Button>
           </div>
         </Modal>
@@ -1125,23 +1148,24 @@ export function NodeJoinPanel({ command, onLoad }) {
       <div className="action-panel">
         <div>
           <h2>
-            <Server size={18} /> K3s node join
+            <Server size={18} /> {t("K3s node join")}
           </h2>
           <p>
-            Generate an agent or server join command from the configured K3s
-            server URL and node token.
+            {t(
+              "Generate an agent or server join command from the configured K3s server URL and node token.",
+            )}
           </p>
         </div>
         <div className="row-actions">
-          <Button onClick={() => onLoad("agent")}>Agent command</Button>
-          <Button onClick={() => onLoad("server")}>Server command</Button>
+          <Button onClick={() => onLoad("agent")}>{t("Agent command")}</Button>
+          <Button onClick={() => onLoad("server")}>{t("Server command")}</Button>
         </div>
       </div>
       {command?.configured ? (
         <pre className="command-box">{command.command}</pre>
       ) : (
         <p className="muted">
-          {command?.message || "Loading join command configuration..."}
+          {command?.message || t("Loading join command configuration...")}
         </p>
       )}
     </section>
@@ -1168,7 +1192,7 @@ export function ContainerLogViewer({
     <div className="container-log-viewer">
       <div className="log-header">
         <span className="muted">
-          {logStatus || "Choose a container to load logs."}
+          {logStatus || t("Choose a container to load logs.")}
         </span>
         <div className="row-actions">
           <Select
@@ -1177,19 +1201,19 @@ export function ContainerLogViewer({
             disabled={logFollow}
             onChange={(event) => onSetTail(Number(event.target.value))}
           >
-            <option value={100}>Last 100 lines</option>
-            <option value={200}>Last 200 lines</option>
-            <option value={500}>Last 500 lines</option>
-            <option value={1000}>Last 1000 lines</option>
+            <option value={100}>{t("Last 100 lines")}</option>
+            <option value={200}>{t("Last 200 lines")}</option>
+            <option value={500}>{t("Last 500 lines")}</option>
+            <option value={1000}>{t("Last 1000 lines")}</option>
           </Select>
           <Button disabled={!canRead || logFollow} onClick={onLoad}>
-            <RefreshCw size={15} /> Load
+            <RefreshCw size={15} /> {t("Load")}
           </Button>
           {logFollow ? (
-            <Button onClick={onStop}>Stop follow</Button>
+            <Button onClick={onStop}>{t("Stop follow")}</Button>
           ) : (
             <Button variant="primary" disabled={!canRead} onClick={onFollow}>
-              Follow live
+              {t("Follow live")}
             </Button>
           )}
         </div>
@@ -1212,13 +1236,15 @@ export function ContainerLogViewer({
           </Button>
         ))}
         {containers.length === 0 && (
-          <div className="empty">No containers reported for this pod.</div>
+          <div className="empty">{t("No containers reported for this pod.")}</div>
         )}
       </div>
       <pre className="modal-log">
         {loaded
-          ? logs || "No logs returned for this container."
-          : "Logs are not loaded yet. Select a container, then click Load or Follow live."}
+          ? logs || t("No logs returned for this container.")
+          : t(
+              "Logs are not loaded yet. Select a container, then click Load or Follow live.",
+            )}
       </pre>
     </div>
   );
@@ -1267,12 +1293,12 @@ export function ServiceForm({ existing, onSubmit }) {
       <Input name="load_balancer_ip" placeholder="LoadBalancer IP, optional" />
       <Input name="external_ips" placeholder="External IPs: 1.2.3.4,5.6.7.8" />
       <Select name="external_traffic_policy" defaultValue="">
-        <option value="">Traffic policy</option>
+        <option value="">{t("Traffic policy")}</option>
         <option value="Cluster">Cluster</option>
         <option value="Local">Local</option>
       </Select>
       <Button variant="primary" type="submit">
-        {existing ? "Save service" : "Create service"}
+        {existing ? t("Save service") : t("Create service")}
       </Button>
     </form>
   );
@@ -1298,7 +1324,9 @@ export function CredentialManager({
   useEffect(() => {
     setPage(1);
   }, [safeRows.length]);
-  const title = isCloudflare ? "Cloudflare accounts" : "BasaltPass tenants";
+  const title = isCloudflare
+    ? t("Cloudflare accounts")
+    : t("BasaltPass tenants");
   const columns = isCloudflare
     ? ["name", "account_id", "is_active"]
     : ["name", "tenant_code", "tenant_id", "base_url", "is_active"];
@@ -1311,14 +1339,14 @@ export function CredentialManager({
           if (ok) setCreateOpen(false);
         }}
       >
-        <Input name="name" placeholder="Name" required />
+        <Input name="name" placeholder={t("Name")} required />
         {isCloudflare ? (
           <>
-            <Input name="account_id" placeholder="Account ID, optional" />
+            <Input name="account_id" placeholder={t("Account ID, optional")} />
             <Input
               name="api_token"
               type="password"
-              placeholder="Cloudflare API token"
+              placeholder={t("Cloudflare API token")}
               required
             />
           </>
@@ -1329,22 +1357,22 @@ export function CredentialManager({
               placeholder="https://auth.example.com"
               required
             />
-            <Input name="tenant_code" placeholder="Tenant code" required />
-            <Input name="tenant_id" placeholder="Tenant ID, optional" />
+            <Input name="tenant_code" placeholder={t("Tenant code")} required />
+            <Input name="tenant_id" placeholder={t("Tenant ID, optional")} />
             <Input
               name="automation_token"
               type="password"
-              placeholder="Tenant automation token bpk_..."
+              placeholder={t("Tenant automation token bpk_...")}
               required
             />
           </>
         )}
         <div className="modal-actions">
           <Button type="button" onClick={() => setCreateOpen(false)}>
-            Cancel
+            {t("Cancel")}
           </Button>
           <Button variant="primary" type="submit">
-            <Plus size={16} /> Add
+            <Plus size={16} /> {t("Add")}
           </Button>
         </div>
       </form>
@@ -1357,11 +1385,15 @@ export function CredentialManager({
           <h2>
             <KeyRound size={18} /> {title}
           </h2>
-          <p className="muted">创建表单已单独放入弹窗，列表区域更聚焦。</p>
+          <p className="muted">
+            {t(
+              "The create form is placed in its own dialog so the list stays focused.",
+            )}
+          </p>
         </div>
         <Button type="button" variant="primary" onClick={() => setCreateOpen(true)}>
-          <Plus size={16} /> Add{" "}
-          {isCloudflare ? "Cloudflare account" : "BasaltPass tenant"}
+          <Plus size={16} /> {t("Add")}{" "}
+          {isCloudflare ? t("Cloudflare account") : t("BasaltPass tenant")}
         </Button>
       </section>
       <section className="panel">
@@ -1371,9 +1403,9 @@ export function CredentialManager({
         <div className={`table compact ${isCloudflare ? "" : "basaltpass-table"}`}>
           <div className="tr head">
             {columns.map((column) => (
-              <span key={column}>{column.replaceAll("_", " ")}</span>
+              <span key={column}>{t(column.replaceAll("_", " "))}</span>
             ))}
-            <span>Actions</span>
+            <span>{t("Actions")}</span>
           </div>
           {pagedRows.map((row) => (
             <div className="tr" key={row.id}>
@@ -1392,7 +1424,7 @@ export function CredentialManager({
             </div>
           ))}
           {safeRows.length === 0 && (
-            <div className="empty">No credentials found.</div>
+            <div className="empty">{t("No credentials found.")}</div>
           )}
         </div>
         <PaginationBar
@@ -1400,15 +1432,15 @@ export function CredentialManager({
           pageSize={pageSize}
           total={safeRows.length}
           onPageChange={setPage}
-          label="credentials"
+          label={t("credentials")}
         />
       </section>
       {createOpen && (
         <Modal
           title={
-            isCloudflare ? "Add Cloudflare account" : "Add BasaltPass tenant"
+            isCloudflare ? t("Add Cloudflare account") : t("Add BasaltPass tenant")
           }
-          subtitle="创建表单已与列表分离。"
+          subtitle={t("The create form is separated from the list.")}
           className="wide-modal"
           onClose={() => setCreateOpen(false)}
         >
@@ -1450,9 +1482,9 @@ export function EnvEditor({
   return (
     <div className="env-editor">
       <div className="section-head">
-        <h3>{title}</h3>
+        <h3>{t(title)}</h3>
         <Button type="button" onClick={addEntry}>
-          <Plus size={15} /> Add variable
+          <Plus size={15} /> {t("Add variable")}
         </Button>
       </div>
       <div className="env-list">
@@ -1479,21 +1511,22 @@ export function EnvEditor({
           </div>
         ))}
         {(entries || []).length === 0 && (
-          <div className="empty">No runtime variables configured.</div>
+          <div className="empty">{t("No runtime variables configured.")}</div>
         )}
       </div>
-      <label>Import .env</label>
+      <label>{t("Import .env")}</label>
       <Textarea
         value={bulkText}
         placeholder={"DATABASE_URL=postgres://...\nRABBITMQ_URL=amqp://..."}
         onChange={(event) => setBulkText(event.target.value)}
       />
       <Button type="button" onClick={importBulk} disabled={!bulkText.trim()}>
-        <Upload size={15} /> Import variables
+        <Upload size={15} /> {t("Import variables")}
       </Button>
       <p className="muted">
-        Values are stored in the Kubernetes app-env-vars Secret. Existing masked
-        values stay unchanged unless replaced.
+        {t(
+          "Values are stored in the Kubernetes app-env-vars Secret. Existing masked values stay unchanged unless replaced.",
+        )}
       </p>
     </div>
   );

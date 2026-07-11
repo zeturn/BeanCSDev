@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as LucideIcons from "lucide-react";
+import { t } from "../i18n/index";
 import { formatTime, formatBytes, formatPercent } from "../utils/index";
 import { MetricCard, IndustrialMeter, Button } from "../components/index";
 import {
@@ -55,7 +56,7 @@ export default function MetricsView({ dashboard, runtime, refresh }) {
   if (!dashboard) {
     return (
       <section className="panel">
-        <div className="empty">Loading metrics...</div>
+        <div className="empty">{t("Loading metrics...")}</div>
       </section>
     );
   }
@@ -66,43 +67,44 @@ export default function MetricsView({ dashboard, runtime, refresh }) {
       <section className="panel action-panel">
         <div>
           <h2>
-            <LineChart size={18} /> Metrics
+            <LineChart size={18} /> {t("Metrics")}
           </h2>
           <p>
-            Cluster capacity, utilization, and node-level resource readings from
-            metrics-server and node stats.
+            {t(
+              "Cluster capacity, utilization, and node-level resource readings from metrics-server and node stats.",
+            )}
           </p>
         </div>
         <Button onClick={refresh}>
-          <RefreshCw size={15} /> Refresh
+          <RefreshCw size={15} /> {t("Refresh")}
         </Button>
       </section>
       <section className="dashboard-kpis">
         <MetricCard
           icon={Cpu}
-          label="CPU"
+          label={t("CPU")}
           value={`${formatPercent(resources.cpu_percent)}%`}
           detail={`${resources.cpu_used_millis || 0}m / ${resources.cpu_total_millis || 0}m`}
         />
         <MetricCard
           icon={MemoryStick}
-          label="Memory"
+          label={t("Memory")}
           value={`${formatPercent(resources.memory_percent)}%`}
           detail={`${formatBytes(resources.memory_used_bytes)} / ${formatBytes(resources.memory_total_bytes)}`}
         />
         <MetricCard
           icon={HardDrive}
-          label="Disk"
+          label={t("Disk")}
           value={`${formatPercent(resources.disk_percent)}%`}
           detail={`${formatBytes(resources.disk_used_bytes)} / ${formatBytes(resources.disk_total_bytes)}`}
         />
         <MetricCard
           icon={Activity}
-          label="Metrics source"
-          value={dashboard.metrics_available ? "Live" : "Partial"}
+          label={t("Metrics source")}
+          value={dashboard.metrics_available ? t("Live") : t("Partial")}
           detail={
             dashboard.metrics_error ||
-            `Checked ${formatTime(dashboard.checked_at)}`
+            t("Checked {time}", { time: formatTime(dashboard.checked_at) })
           }
           tone={dashboard.metrics_available ? "good" : "warning"}
         />
@@ -110,21 +112,21 @@ export default function MetricsView({ dashboard, runtime, refresh }) {
       <section className="dashboard-grid">
         <div className="panel dashboard-panel">
           <h2>
-            <Activity size={18} /> Utilization
+            <Activity size={18} /> {t("Utilization")}
           </h2>
           <div className="industrial-meters">
             <IndustrialMeter
-              label="CPU"
+              label={t("CPU")}
               value={resources.cpu_percent}
               detail={`${resources.cpu_used_millis || 0}m / ${resources.cpu_total_millis || 0}m`}
             />
             <IndustrialMeter
-              label="Memory"
+              label={t("Memory")}
               value={resources.memory_percent}
               detail={`${formatBytes(resources.memory_used_bytes)} / ${formatBytes(resources.memory_total_bytes)}`}
             />
             <IndustrialMeter
-              label="Disk"
+              label={t("Disk")}
               value={resources.disk_percent}
               detail={`${formatBytes(resources.disk_used_bytes)} / ${formatBytes(resources.disk_total_bytes)}`}
             />
@@ -132,7 +134,7 @@ export default function MetricsView({ dashboard, runtime, refresh }) {
         </div>
         <div className="panel">
           <h2>
-            <Server size={18} /> Node readings
+            <Server size={18} /> {t("Node readings")}
           </h2>
           <div className="mini-table">
             {nodes.map((node) => (
@@ -150,7 +152,7 @@ export default function MetricsView({ dashboard, runtime, refresh }) {
               </div>
             ))}
             {nodes.length === 0 && (
-              <div className="empty">Node runtime data is not loaded yet.</div>
+              <div className="empty">{t("Node runtime data is not loaded yet.")}</div>
             )}
           </div>
         </div>

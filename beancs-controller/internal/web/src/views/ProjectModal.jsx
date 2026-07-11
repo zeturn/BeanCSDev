@@ -11,6 +11,7 @@ import {
 import * as LucideIcons from "lucide-react";
 import { envObjectFromEntries, envEntriesFromObject } from "../utils/index";
 import { EnvEditor } from "../components/index";
+import { t } from "../i18n/index";
 import {
   Activity,
   AlertTriangle,
@@ -92,12 +93,12 @@ export default function ProjectModal({
   return (
     <Modal className="wide-modal">
       <form className="drawer-form" onSubmit={submit}>
-        <h2>Edit {project.name}</h2>
-        <label>Display name</label>
+        <h2>{t("Edit {name}", { name: project.name })}</h2>
+        <label>{t("Display name")}</label>
         <Input name="display_name" defaultValue={project.display_name || ""} />
-        <label>Description</label>
+        <label>{t("Description")}</label>
         <Textarea name="description" defaultValue={project.description || ""} />
-        <label>Replicas</label>
+        <label>{t("Replicas")}</label>
         <Input
           name="replicas"
           type="number"
@@ -105,11 +106,11 @@ export default function ProjectModal({
           max="20"
           defaultValue={project.replicas || 1}
         />
-        <label>Status</label>
+        <label>{t("Status")}</label>
         <Select name="status" defaultValue={project.status || "active"}>
-          <option value="active">Active</option>
-          <option value="suspended">Suspended</option>
-          <option value="deleted">Deleted</option>
+          <option value="active">{t("Active")}</option>
+          <option value="suspended">{t("Suspended")}</option>
+          <option value="deleted">{t("Deleted")}</option>
         </Select>
         {project.build_source === "github" && (
           <label className="checkbox-row">
@@ -118,28 +119,28 @@ export default function ProjectModal({
               type="checkbox"
               defaultChecked={project.auto_deploy !== false}
             />
-            Auto build and deploy on GitHub push
+            {t("Auto build and deploy on GitHub push")}
           </label>
         )}
         {envLoading ? (
-          <div className="empty">Loading environment variables...</div>
+          <div className="empty">{t("Loading environment variables...")}</div>
         ) : (
           <>
             {envError && <p className="warning-note">{envError}</p>}
             <EnvEditor
               entries={envEntries}
               onChange={setEnvEntries}
-              title="Runtime environment"
+              title={t("Runtime environment")}
               masked
             />
           </>
         )}
         <div className="modal-actions">
           <Button type="button" onClick={onClose}>
-            Cancel
+            {t("Cancel")}
           </Button>
           <Button variant="primary" type="submit" disabled={envLoading}>
-            Save
+            {t("Save")}
           </Button>
         </div>
       </form>

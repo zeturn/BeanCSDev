@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as LucideIcons from "lucide-react";
+import { t } from "../i18n/index";
 import { ExpandableCell, Button, Input } from "../components/index";
 import {
   Activity,
@@ -92,17 +93,17 @@ export default function ProjectsView({
           <Input
             value={projectSearch}
             onChange={(event) => setProjectSearch(event.target.value)}
-            placeholder="Search projects"
+            placeholder={t("Search projects")}
           />
         </div>
         <div className="table">
           <div className="tr head project-table-row">
-            <span>Name</span>
-            <span>Repo</span>
-            <span>Route</span>
-            <span>Deps</span>
-            <span>Status</span>
-            <span>Actions</span>
+            <span>{t("Name")}</span>
+            <span>{t("Repo")}</span>
+            <span>{t("Route")}</span>
+            <span>{t("Deps")}</span>
+            <span>{t("Status")}</span>
+            <span>{t("Actions")}</span>
           </div>
           {visibleProjects.map((project) => (
             <div className="tr project-table-row" key={project.id}>
@@ -132,28 +133,31 @@ export default function ProjectsView({
               <span className="row-actions">
                 <Button
                   onClick={() => onTracking(project)}
-                  title="Release history"
+                  title={t("Release history")}
                 >
-                  <ScrollText size={15} /> History
+                  <ScrollText size={15} /> {t("History")}
                 </Button>
-                <Button onClick={() => onProgress(project)} title="Progress">
-                  <LoaderCircle size={15} /> Progress
+                <Button
+                  onClick={() => onProgress(project)}
+                  title={t("Progress")}
+                >
+                  <LoaderCircle size={15} /> {t("Progress")}
                 </Button>
-                <Button onClick={() => onBuild(project)} title="Rebuild">
-                  <Play size={15} /> Rebuild
+                <Button onClick={() => onBuild(project)} title={t("Rebuild")}>
+                  <Play size={15} /> {t("Rebuild")}
                 </Button>
-                <Button onClick={() => onRestart(project)} title="Restart">
+                <Button onClick={() => onRestart(project)} title={t("Restart")}>
                   <RotateCcw size={15} />
                 </Button>
-                <Button onClick={() => onEdit(project)} title="Edit">
+                <Button onClick={() => onEdit(project)} title={t("Edit")}>
                   <Edit3 size={15} />
                 </Button>
                 <Button
                   onClick={() => onDelete(project)}
-                  title="Delete"
+                  title={t("Delete")}
                   variant="danger"
                 >
-                  <Trash2 size={15} /> Delete
+                  <Trash2 size={15} /> {t("Delete")}
                 </Button>
               </span>
             </div>
@@ -161,8 +165,8 @@ export default function ProjectsView({
           {visibleProjects.length === 0 && (
             <div className="empty">
               {projectSearch
-                ? "No projects match this search."
-                : "No projects yet."}
+                ? t("No projects match this search.")
+                : t("No projects yet.")}
             </div>
           )}
         </div>

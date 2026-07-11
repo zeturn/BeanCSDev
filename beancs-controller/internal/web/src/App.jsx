@@ -95,6 +95,8 @@ import {
   X,
 } from "lucide-react";
 import "./style.css";
+import { I18nProvider, useI18n, t } from "./i18n/index";
+import { LanguageSwitcher } from "./i18n/LanguageSwitcher";
 const API = "/v1/api";
 const tokenKey = "beancs.accessToken";
 const hasOAuthCallback = () =>
@@ -308,6 +310,7 @@ import NodeDetailView from "./views/NodeDetailView";
 import NamespaceDetailView from "./views/NamespaceDetailView";
 import ProjectModal from "./views/ProjectModal";
 function App() {
+  const { t } = useI18n();
   const [config, setConfig] = useState(null);
   const [token, setToken] = useState(localStorage.getItem(tokenKey) || "");
   const [loginPhase, setLoginPhase] = useState(() =>
@@ -512,7 +515,7 @@ function App() {
       } else if (location.search.includes("github_app=connected")) {
         setLoginPhase("idle");
         setView("github");
-        setNotice("GitHub App connected.");
+        setNotice(t("GitHub App connected."));
         history.replaceState({}, "", location.pathname);
       } else {
         setLoginPhase("idle");
@@ -741,7 +744,7 @@ function App() {
     try {
       await api.post("/dependencies", body);
       form.reset();
-      setNotice("Dependency added.");
+      setNotice(t("Dependency added."));
       await loadWorkspace();
       return true;
     } catch (err) {
@@ -773,7 +776,7 @@ function App() {
     try {
       await api.post(`/dependencies/${dependencyID}/credentials`, body);
       form.reset();
-      setNotice("Credential added.");
+      setNotice(t("Credential added."));
       await loadWorkspace();
       return true;
     } catch (err) {
@@ -793,7 +796,7 @@ function App() {
     try {
       await api.patch(`/credentials/github/${id}`, updates);
       await loadWorkspace();
-      setNotice("GitHub credential updated.");
+      setNotice(t("GitHub credential updated."));
     } catch (err) {
       setError(err.message);
     }
@@ -818,7 +821,7 @@ function App() {
     }
   }
   async function deleteCredential(kind, id) {
-    if (!confirm(`Delete this ${kind} credential?`)) return;
+    if (!confirm(t("Delete this {kind} credential?", { kind }))) return;
     try {
       await api.delete(`/credentials/${kind}/${id}`);
       await loadWorkspace();
@@ -917,10 +920,17 @@ function App() {
     }
   }
   async function deleteContainerRegistry(row) {
-    if (!confirm(`删除镜像源「${row.name}」？关联的镜像跟踪也会删除。`)) return;
+    if (
+      !confirm(
+        t('Delete image registry "{name}"? Linked image tracking will also be removed.', {
+          name: row.name,
+        }),
+      )
+    )
+      return;
     try {
       await api.delete(`/container-registries/${row.id}`);
-      setNotice("镜像源已删除。");
+      setNotice(t("Image registry deleted."));
       await loadRegistriesPage();
     } catch (err) {
       setError(err.message);
@@ -936,7 +946,7 @@ function App() {
       repository: String(data.get("repository") || "").trim(),
     };
     if (!body.registry_id || !body.repository) {
-      setError("请选择镜像源并填写仓库路径。");
+      setError(t("Select a registry and enter the repository path."));
       return;
     }
     try {
@@ -962,7 +972,12 @@ function App() {
     }
   }
   async function deleteTrackedImage(row) {
-    if (!confirm(`从列表中移除「${row.repository}」？`)) return;
+    if (
+      !confirm(
+        t('Remove "{repository}" from the list?', { repository: row.repository }),
+      )
+    )
+      return;
     try {
       await api.delete(`/container-images/${row.id}`);
       await loadContainerImages();
@@ -993,7 +1008,9 @@ function App() {
   async function revokeAPIKey(key) {
     if (
       !confirm(
-        `Revoke API key ${key.name}? Existing clients using it will stop working.`,
+        t("Revoke API key {name}? Existing clients using it will stop working.", {
+          name: key.name,
+        }),
       )
     )
       return;
@@ -1078,7 +1095,10 @@ function App() {
     }
   }
   async function deleteDNSRecord(record) {
-    if (!selectedCloudflareID || !confirm(`Delete DNS record ${record.name}?`))
+    if (
+      !selectedCloudflareID ||
+      !confirm(t("Delete DNS record {name}?", { name: record.name }))
+    )
       return;
     try {
       const qs = selectedCloudflareZoneID
@@ -1165,7 +1185,7 @@ function App() {
     }
   }
   async function deleteResourceQuota(namespace, name) {
-    if (!confirm(`Delete ResourceQuota ${name}?`)) return;
+    if (!confirm(t("Delete ResourceQuota {name}?", { name }))) return;
     try {
       await api.delete(
         `/runtime/namespaces/${encodeURIComponent(namespace)}/resource-quotas/${encodeURIComponent(name)}`,
@@ -1195,7 +1215,7 @@ function App() {
     }
   }
   async function deleteLimitRange(namespace, name) {
-    if (!confirm(`Delete LimitRange ${name}?`)) return;
+    if (!confirm(t("Delete LimitRange {name}?", { name }))) return;
     try {
       await api.delete(
         `/runtime/namespaces/${encodeURIComponent(namespace)}/limit-ranges/${encodeURIComponent(name)}`,
@@ -1225,7 +1245,7 @@ function App() {
     }
   }
   async function deleteNamespacePermission(namespace, name) {
-    if (!confirm(`Delete namespace permission ${name}?`)) return;
+    if (!confirm(t("Delete namespace permission {name}?", { name }))) return;
     try {
       await api.delete(
         `/runtime/namespaces/${encodeURIComponent(namespace)}/permissions/${encodeURIComponent(name)}`,
@@ -1256,7 +1276,9 @@ function App() {
   async function deleteNamespace(namespace) {
     if (
       !confirm(
-        `Delete namespace ${namespace}? This removes resources inside it.`,
+        t("Delete namespace {namespace}? This removes resources inside it.", {
+          namespace,
+        }),
       )
     )
       return;
@@ -1268,7 +1290,8 @@ function App() {
     }
   }
   async function deletePod(pod) {
-    if (!confirm(`Delete pod ${pod.name}? Kubernetes may recreate it.`)) return;
+    if (!confirm(t("Delete pod {name}? Kubernetes may recreate it.", { name: pod.name })))
+      return;
     try {
       await api.delete(`/runtime/pods/${pod.namespace}/${pod.name}`);
       await loadWorkspace();
@@ -1331,7 +1354,7 @@ function App() {
       await api.patch(`/runtime/nodes/${encodeURIComponent(nodeName)}/labels`, {
         labels: parseKeyValues(labelsText),
       });
-      setNotice(`${nodeName} labels updated.`);
+      setNotice(t("{name} labels updated.", { name: nodeName }));
       await loadWorkspace();
       await loadNodeDetail(
         {
@@ -1348,7 +1371,7 @@ function App() {
       await api.put(`/runtime/nodes/${encodeURIComponent(nodeName)}/taints`, {
         taints: parseTaints(taintsText),
       });
-      setNotice(`${nodeName} taints updated.`);
+      setNotice(t("{name} taints updated.", { name: nodeName }));
       await loadWorkspace();
       await loadNodeDetail(
         {
@@ -1366,7 +1389,12 @@ function App() {
         `/runtime/nodes/${encodeURIComponent(nodeName)}/${schedulable ? "uncordon" : "cordon"}`,
         {},
       );
-      setNotice(`${nodeName} ${schedulable ? "uncordoned" : "cordoned"}.`);
+      setNotice(
+        t("{name} {state}.", {
+          name: nodeName,
+          state: schedulable ? t("uncordoned") : t("cordoned"),
+        }),
+      );
       await loadWorkspace();
       await loadNodeDetail(
         {
@@ -1381,7 +1409,9 @@ function App() {
   async function drainNode(nodeName, options) {
     if (
       !confirm(
-        `Drain node ${nodeName}? Workloads will be evicted from this node.`,
+        t("Drain node {nodeName}? Workloads will be evicted from this node.", {
+          nodeName,
+        }),
       )
     )
       return;
@@ -1391,7 +1421,11 @@ function App() {
         options,
       );
       setNotice(
-        `Drain started for ${nodeName}: ${(data.data?.evicted_pods || []).length} pods evicted, ${(data.data?.skipped_pods || []).length} skipped.`,
+        t("Drain started for {name}: {evicted} pods evicted, {skipped} skipped.", {
+          name: nodeName,
+          evicted: (data.data?.evicted_pods || []).length,
+          skipped: (data.data?.skipped_pods || []).length,
+        }),
       );
       await loadWorkspace();
       await loadNodeDetail(
@@ -1408,7 +1442,7 @@ function App() {
     try {
       await api.delete(`/runtime/nodes/${encodeURIComponent(nodeName)}`);
       setRuntimeDetail(null);
-      setNotice(`${nodeName} deleted from the cluster.`);
+      setNotice(t("{name} deleted from the cluster.", { name: nodeName }));
       await loadWorkspace();
     } catch (err) {
       setError(err.message);
@@ -1532,7 +1566,7 @@ function App() {
     }
   }
   async function deleteService(service) {
-    if (!confirm(`Delete service ${service.name}?`)) return;
+    if (!confirm(t("Delete service {name}?", { name: service.name }))) return;
     try {
       await api.delete(
         `/runtime/services/${service.namespace}/${service.name}`,
@@ -1560,14 +1594,21 @@ function App() {
         await api.post("/runtime/ingresses", body);
         event.currentTarget.reset();
       }
-      setNotice(`Ingress ${body.name || existing?.name} saved.`);
+      setNotice(t("Ingress {name} saved.", { name: body.name || existing?.name }));
       await loadWorkspace();
     } catch (err) {
       setError(err.message);
     }
   }
   async function deleteIngress(ingress) {
-    if (!confirm(`Delete ingress ${ingress.namespace}/${ingress.name}?`))
+    if (
+      !confirm(
+        t("Delete ingress {namespace}/{name}?", {
+          namespace: ingress.namespace,
+          name: ingress.name,
+        }),
+      )
+    )
       return;
     try {
       await api.delete(
@@ -1602,14 +1643,23 @@ function App() {
         await api.post("/runtime/network-policies", body);
         event.currentTarget.reset();
       }
-      setNotice(`NetworkPolicy ${body.name || existing?.name} saved.`);
+      setNotice(
+        t("NetworkPolicy {name} saved.", { name: body.name || existing?.name }),
+      );
       await loadWorkspace();
     } catch (err) {
       setError(err.message);
     }
   }
   async function deleteNetworkPolicy(policy) {
-    if (!confirm(`Delete NetworkPolicy ${policy.namespace}/${policy.name}?`))
+    if (
+      !confirm(
+        t("Delete NetworkPolicy {namespace}/{name}?", {
+          namespace: policy.namespace,
+          name: policy.name,
+        }),
+      )
+    )
       return;
     try {
       await api.delete(
@@ -1708,7 +1758,7 @@ function App() {
     }
     const image = (nextForm.image_reference || "").trim();
     if (!image) {
-      setError("Image reference is required for registry deployments.");
+      setError(t("Image reference is required for registry deployments."));
       return false;
     }
     setAnalysis({
@@ -1788,7 +1838,7 @@ function App() {
       );
       if (deploymentResult.process?.id)
         setActiveProcessID(String(deploymentResult.process.id));
-      setNotice("Project created. Deployment process queued.");
+      setNotice(t("Project created. Deployment process queued."));
       setActiveProgressProjectID(String(created.id));
       setInstallProgress((current) =>
         current
@@ -1959,7 +2009,7 @@ function App() {
       }
       const result = await api.post("/credentials/basaltpass/deployments", body);
       if (result.process?.id) setActiveProcessID(String(result.process.id));
-      setNotice("BasaltPass deployment process started.");
+      setNotice(t("BasaltPass deployment process started."));
       setDeployForm(defaultDeployForm());
       await loadWorkspace();
       await loadProcesses();
@@ -1983,7 +2033,7 @@ function App() {
       },
     );
     if (!payload.components.length) {
-      setError("Select at least one monorepo component.");
+      setError(t("Select at least one monorepo component."));
       return;
     }
     setLoading(true);
@@ -2028,7 +2078,14 @@ function App() {
         created.dependencies || created.data?.dependencies || [];
       const firstProject = projects[0];
       setNotice(
-        `Application ${payload.name} created with ${projects.length} components and ${dependencies.length} dependencies.`,
+        t(
+          "Application {name} created with {count} components and {deps} dependencies.",
+          {
+            name: payload.name,
+            count: projects.length,
+            deps: dependencies.length,
+          },
+        ),
       );
       if (firstProject?.id) setActiveProgressProjectID(String(firstProject.id));
       setInstallProgress((current) =>
@@ -2142,7 +2199,10 @@ function App() {
       const dependencies = app.dependencies || [];
       const firstProject = projects[0];
       setNotice(
-        `Application ${app.name || deployForm.name} applied from ${payload.config_path}.`,
+        t("Application {name} applied from {path}.", {
+          name: app.name || deployForm.name,
+          path: payload.config_path,
+        }),
       );
       if (firstProject?.id) setActiveProgressProjectID(String(firstProject.id));
       setInstallProgress((current) =>
@@ -2280,7 +2340,7 @@ function App() {
       }
     }
     if (!selected) {
-      setProjectLogStatus("Choose a project before following logs.");
+      setProjectLogStatus(t("Choose a project before following logs."));
       return;
     }
     projectLogController.current?.abort();
@@ -2331,7 +2391,7 @@ function App() {
     await api.patch(`/projects/${editingProject.id}`, body);
     if (envData) {
       await api.put(`/projects/${editingProject.id}/env`, envData);
-      setNotice(`${editingProject.name} updated and restarted.`);
+      setNotice(t("{name} updated and restarted.", { name: editingProject.name }));
     }
     setEditingProject(null);
     await loadWorkspace();
@@ -2345,7 +2405,7 @@ function App() {
     setError("");
     try {
       await api.delete(`/projects/${deletingProject.id}`);
-      setNotice(`${deletingProject.name} deleted.`);
+      setNotice(t("{name} deleted.", { name: deletingProject.name }));
       setDeletingProject(null);
       if (String(activeProgressProjectID) === String(deletingProject.id)) {
         setActiveProgressProjectID("");
@@ -2367,7 +2427,7 @@ function App() {
     setError("");
     try {
       await api.delete(`/applications/${deletingApplication.id}`);
-      setNotice(`${deletingApplication.name} deleted.`);
+      setNotice(t("{name} deleted.", { name: deletingApplication.name }));
       setDeletingApplication(null);
       await loadWorkspace();
     } catch (err) {
@@ -2392,7 +2452,7 @@ function App() {
         tag: project.image_reference || "github-actions",
         commit_sha: project.github_branch || "",
       });
-      setNotice(`${project.name} build started.`);
+      setNotice(t("{name} build started.", { name: project.name }));
       setActiveProgressProjectID(String(project.id));
       if (result.process?.id) setActiveProcessID(String(result.process.id));
       setView("progress");
@@ -2433,10 +2493,11 @@ function App() {
     return (
       <main className="login-screen">
         <section className="login-copy">
-          <h1>BeanCS</h1>
+          <h1>{t("BeanCS")}</h1>
           <p>
-            Operate k3s projects, GitHub App deployments, DNS, and traffic
-            routes from one console.
+            {t(
+              "Operate k3s projects, GitHub App deployments, DNS, and traffic routes from one console.",
+            )}
           </p>
           {loginBusy ? (
             <div className="login-status" role="status" aria-live="polite">
@@ -2447,13 +2508,13 @@ function App() {
               )}
               <span>
                 {callbackBusy
-                  ? "Login successful. Redirecting..."
-                  : "Communicating with the identity server..."}
+                  ? t("Login successful. Redirecting...")
+                  : t("Communicating with the identity server...")}
               </span>
             </div>
           ) : (
             <Button onClick={startLogin} variant="primary" disabled={!config}>
-              <Lock size={18} /> Sign in with BasaltPass
+              <Lock size={18} /> {t("Sign in with BasaltPass")}
             </Button>
           )}
           {error && <p className="error-text">{error}</p>}
@@ -2472,14 +2533,14 @@ function App() {
           <span className="brand-orb">
             <Coffee size={16} />
           </span>
-          <b>BeanCS</b>
+          <b>{t("BeanCS")}</b>
         </div>
         <label className="sidebar-search">
           <Search size={19} />
           <Input
             value={sidebarQuery}
             onChange={(event) => setSidebarQuery(event.target.value)}
-            placeholder="Find..."
+            placeholder={t("Find...")}
           />
           <kbd>F</kbd>
         </label>
@@ -2503,10 +2564,11 @@ function App() {
           {sidebarQuery &&
             filteredOverview.length === 0 &&
             filteredNavSections.length === 0 && (
-              <div className="nav-empty">No matches</div>
+              <div className="nav-empty">{t("No matches")}</div>
             )}
         </div>
         <div className="sidebar-user">
+          <LanguageSwitcher />
           <div className="user-avatar">
             {userProfile.avatar ? (
               <img
@@ -2523,14 +2585,14 @@ function App() {
           </div>
           <Button
             type="button"
-            aria-label="More account actions"
+            aria-label={t("More account actions")}
             variant="icon"
           >
             <MoreHorizontal size={16} />
           </Button>
           <Button
             type="button"
-            aria-label="Sign out"
+            aria-label={t("Sign out")}
             variant="icon"
             onClick={logout}
           >
@@ -2542,21 +2604,21 @@ function App() {
         <div className="mobile-topbar">
           <Button
             type="button"
-            aria-label="Open navigation"
+            aria-label={t("Open navigation")}
             onClick={() => setSidebarOpen(true)}
             variant="icon"
           >
             <Menu size={18} />
           </Button>
-          <span className="mobile-brand">BeanCS</span>
+          <span className="mobile-brand">{t("BeanCS")}</span>
         </div>
         <PageHeading
           title={
             view === "dashboard"
-              ? dashboard?.cluster_name || "Overview"
+              ? dashboard?.cluster_name || t("Overview")
               : titleFor(view)
           }
-          topLabel={view === "dashboard" ? "Overview" : undefined}
+          topLabel={view === "dashboard" ? t("Overview") : undefined}
           subtitle={
             view === "dashboard"
               ? `Kubernetes ${dashboard?.kubernetes_version || "-"}${dashboard?.k3s_version ? ` · K3s ${dashboard.k3s_version}` : ""}`
@@ -2899,4 +2961,8 @@ function App() {
     </div>
   );
 }
-createRoot(document.getElementById("root")).render(<App />);
+createRoot(document.getElementById("root")).render(
+  <I18nProvider>
+    <App />
+  </I18nProvider>,
+);

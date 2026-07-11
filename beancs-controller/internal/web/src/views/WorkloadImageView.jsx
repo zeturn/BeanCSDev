@@ -2,6 +2,7 @@ import { Button } from "../components/index";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as LucideIcons from "lucide-react";
 import { formatTime } from "../utils/index";
+import { t } from "../i18n/index";
 import {
   Activity,
   AlertTriangle,
@@ -63,24 +64,27 @@ export default function WorkloadImageView({
       <section className="panel action-panel">
         <div>
           <h2>
-            <ImageIcon size={18} /> Image
+            <ImageIcon size={18} /> {t("Image")}
           </h2>
           <p>
-            Running workload images are visible on Pods and Deployments. Tracked
-            registry tags and sync use <b>Integrations → Image Registry</b>.
+            {t(
+              "Running workload images are visible on Pods and Deployments. Tracked registry tags and sync use",
+            )}{" "}
+            <b>Integrations → Image Registry</b>.
           </p>
         </div>
         <Button type="button" onClick={onRefresh}>
-          <RefreshCw size={15} /> Refresh
+          <RefreshCw size={15} /> {t("Refresh")}
         </Button>
       </section>
       <section className="panel">
         <h2>
-          <Package size={18} /> Tracked image tags
+          <Package size={18} /> {t("Tracked image tags")}
         </h2>
         <p className="muted">
-          Mirrors and tag lists you have registered. To add registries or
-          repositories, open Image Registry.
+          {t(
+            "Mirrors and tag lists you have registered. To add registries or repositories, open Image Registry.",
+          )}
         </p>
         <div
           className="row-actions"
@@ -89,7 +93,7 @@ export default function WorkloadImageView({
           }}
         >
           <Button type="button" onClick={onOpenRegistry} variant="primary">
-            <Package size={15} /> Open Image Registry
+            <Package size={15} /> {t("Open Image Registry")}
           </Button>
         </div>
         {(images || []).map((im) => (
@@ -104,35 +108,37 @@ export default function WorkloadImageView({
               </div>
               <div className="row-actions">
                 <Button type="button" onClick={() => onRefreshImage(im.id)}>
-                  <RefreshCw size={15} /> Sync
+                  <RefreshCw size={15} /> {t("Sync")}
                 </Button>
                 <Button
                   type="button"
                   onClick={() => onDeleteImage(im)}
                   variant="danger"
                 >
-                  <Trash2 size={15} /> Remove
+                  <Trash2 size={15} /> {t("Remove")}
                 </Button>
               </div>
             </div>
             <div className="tag-chip-grid">
-              {(im.tags || []).slice(0, 120).map((t) => (
-                <span className="tag-chip" key={t}>
-                  {t}
+              {(im.tags || []).slice(0, 120).map((tg) => (
+                <span className="tag-chip" key={tg}>
+                  {tg}
                 </span>
               ))}
               {(im.tags || []).length > 120 && (
-                <span className="muted">… {(im.tags || []).length} tags</span>
+                <span className="muted">
+                  … {t("{count} tags", { count: (im.tags || []).length })}
+                </span>
               )}
               {(im.tags || []).length === 0 && (
-                <span className="muted">No tags cached yet.</span>
+                <span className="muted">{t("No tags cached yet.")}</span>
               )}
             </div>
           </div>
         ))}
         {(images || []).length === 0 && (
           <div className="empty">
-            No tracked images. Configure mirrors under Image Registry.
+            {t("No tracked images. Configure mirrors under Image Registry.")}
           </div>
         )}
       </section>

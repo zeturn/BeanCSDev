@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as LucideIcons from "lucide-react";
 import { MetricCard, Select, Button } from "../components/index";
+import { t } from "../i18n/index";
 import {
   Activity,
   AlertTriangle,
@@ -69,11 +70,12 @@ export default function LogsView({
       <section className="panel action-panel">
         <div>
           <h2>
-            <ScrollText size={18} /> Logs
+            <ScrollText size={18} /> {t("Logs")}
           </h2>
           <p>
-            Project container log snapshots and live follow without leaving the
-            observability section.
+            {t(
+              "Project container log snapshots and live follow without leaving the observability section.",
+            )}
           </p>
         </div>
         <div className="progress-controls">
@@ -81,7 +83,7 @@ export default function LogsView({
             value={activeProjectID}
             onChange={(event) => setActiveProjectID(event.target.value)}
           >
-            <option value="">Choose project</option>
+            <option value="">{t("Choose project")}</option>
             {projects.map((project) => (
               <option key={project.id} value={project.id}>
                 {project.display_name || project.name}
@@ -89,17 +91,17 @@ export default function LogsView({
             ))}
           </Select>
           <Button onClick={() => refresh()} disabled={logFollow}>
-            <RefreshCw size={15} /> Snapshot
+            <RefreshCw size={15} /> {t("Snapshot")}
           </Button>
           {logFollow ? (
-            <Button onClick={onStopLogFollow}>Stop follow</Button>
+            <Button onClick={onStopLogFollow}>{t("Stop follow")}</Button>
           ) : (
             <Button
               onClick={() => onStartLogFollow(activeProjectID)}
               disabled={!activeProjectID}
               variant="primary"
             >
-              Follow live
+              {t("Follow live")}
             </Button>
           )}
         </div>
@@ -107,40 +109,42 @@ export default function LogsView({
       <section className="dashboard-kpis">
         <MetricCard
           icon={Boxes}
-          label="Project"
+          label={t("Project")}
           value={
             progress?.project?.display_name || progress?.project?.name || "-"
           }
-          detail={progress?.project?.namespace || "No project selected"}
+          detail={progress?.project?.namespace || t("No project selected")}
         />
         <MetricCard
           icon={Layers3}
-          label="Pods"
+          label={t("Pods")}
           value={(progress?.pods || []).length}
-          detail={`${(progress?.pods || []).filter((pod) => pod.status === "Running").length} running`}
+          detail={t("{count} running", {
+            count: (progress?.pods || []).filter((pod) => pod.status === "Running").length,
+          })}
         />
         <MetricCard
           icon={GitBranch}
-          label="Deployments"
+          label={t("Deployments")}
           value={(progress?.deployments || []).length}
           detail={
-            (progress?.deployments || [])[0]?.status || "No deployment events"
+            (progress?.deployments || [])[0]?.status || t("No deployment events")
           }
         />
       </section>
       <section className="panel log-panel observability-log-panel">
         <div className="log-header">
           <h2>
-            <Code2 size={18} /> Container logs
+            <Code2 size={18} /> {t("Container logs")}
           </h2>
           <div className="row-actions">
             <Button type="button" onClick={onOpenPods}>
-              <Layers3 size={15} /> Pod detail
+              <Layers3 size={15} /> {t("Pod detail")}
             </Button>
           </div>
         </div>
         {logStatus && <p className="log-status">{logStatus}</p>}
-        <pre>{logs || "Choose a project to load recent logs."}</pre>
+        <pre>{logs || t("Choose a project to load recent logs.")}</pre>
       </section>
     </div>
   );

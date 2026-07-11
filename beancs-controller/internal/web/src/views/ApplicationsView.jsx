@@ -1,5 +1,6 @@
 import React from "react";
 import { Layers3, Trash2 } from "lucide-react";
+import { t } from "../i18n/index";
 import { Button } from "../components/index";
 
 export default function ApplicationsView({ applications, onDeleteApplication }) {
@@ -8,9 +9,11 @@ export default function ApplicationsView({ applications, onDeleteApplication }) 
       <section className="panel">
         <div className="section-head">
           <h2>
-            <Layers3 size={16} /> Applications
+            <Layers3 size={16} /> {t("Applications")}
           </h2>
-          <span className="muted">{(applications || []).length} total</span>
+          <span className="muted">
+            {t("{count} total", { count: (applications || []).length })}
+          </span>
         </div>
         <div className="application-grid">
           {(applications || []).map((application) => (
@@ -23,16 +26,24 @@ export default function ApplicationsView({ applications, onDeleteApplication }) 
                 <Button
                   type="button"
                   onClick={() => onDeleteApplication(application)}
-                  title="Delete application"
+                  title={t("Delete application")}
                   variant="danger"
                 >
-                  <Trash2 size={15} /> Delete
+                  <Trash2 size={15} /> {t("Delete")}
                 </Button>
               </div>
               <span className="status-chip">{application.status || "-"}</span>
               <div className="signal-list">
-                <span>{(application.projects || []).length} projects</span>
-                <span>{(application.dependencies || []).length} dependencies</span>
+                <span>
+                  {t("{count} projects", {
+                    count: (application.projects || []).length,
+                  })}
+                </span>
+                <span>
+                  {t("{count} dependencies", {
+                    count: (application.dependencies || []).length,
+                  })}
+                </span>
               </div>
               {(application.dependencies || []).length > 0 && (
                 <div className="dependency-summary-list">
@@ -49,7 +60,7 @@ export default function ApplicationsView({ applications, onDeleteApplication }) 
             </div>
           ))}
           {(applications || []).length === 0 && (
-            <div className="empty">No applications yet.</div>
+            <div className="empty">{t("No applications yet.")}</div>
           )}
         </div>
       </section>

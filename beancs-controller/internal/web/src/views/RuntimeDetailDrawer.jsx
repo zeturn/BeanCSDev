@@ -57,6 +57,7 @@ import { ContainerLogViewer, ServiceForm } from "../components/index";
 import NodeDetailView from "./NodeDetailView";
 import NamespaceDetailView from "./NamespaceDetailView";
 import { Drawer, Button, Textarea } from "../components/index";
+import { t } from "../i18n/index";
 export default function RuntimeDetailDrawer({
   detail,
   logs,
@@ -96,8 +97,8 @@ export default function RuntimeDetailDrawer({
       title={title}
       subtitle={
         detail.loading
-          ? "Loading live details..."
-          : detail.error || "Live Kubernetes resource detail"
+          ? t("Loading live details...")
+          : detail.error || t("Live Kubernetes resource detail")
       }
       onClose={onClose}
     >
@@ -115,9 +116,9 @@ export default function RuntimeDetailDrawer({
             onClose();
           }}
         >
-          <label>Labels</label>
+          <label>{t("Labels")}</label>
           <Textarea name="labels" defaultValue={formatKeyValues(row.labels)} />
-          <Button variant="primary">Save labels</Button>
+          <Button variant="primary">{t("Save labels")}</Button>
         </form>
       ) : detail.kind === "pod" ? (
         <>
@@ -164,8 +165,8 @@ export default function RuntimeDetailDrawer({
       ) : (
         <div className="table network-table runtime-detail-table">
           <div className="tr head">
-            <span>Key</span>
-            <span>Value</span>
+            <span>{t("Key")}</span>
+            <span>{t("Value")}</span>
           </div>
           {Object.entries(row).map(([k, v]) => (
             <div className="tr" key={k}>

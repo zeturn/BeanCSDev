@@ -6,6 +6,7 @@ import {
   truncateMiddle,
 } from "../utils/index";
 import { MetricCard, Modal, Button } from "../components/index";
+import { t } from "../i18n/index";
 import {
   Activity,
   AlertTriangle,
@@ -76,7 +77,7 @@ export default function ProjectTrackingModal({
               project.github_repo ||
               tracking?.current_image ||
               project.image_reference ||
-              "Deployment tracking"}
+              t("Deployment tracking")}
           </p>
         </div>
         <Button variant="icon" type="button" onClick={onClose} title="Close">
@@ -86,14 +87,14 @@ export default function ProjectTrackingModal({
       <div className="tracking-summary-grid">
         <MetricCard
           icon={Rocket}
-          label="Current"
+          label={t("Current")}
           value={tracking?.current_version || current?.version || "-"}
           detail={tracking?.current_image || current?.image_ref || "-"}
           tone={current?.status === "failed" ? "warning" : "good"}
         />
         <MetricCard
           icon={Activity}
-          label="Latest"
+          label={t("Latest")}
           value={tracking?.latest_status || current?.status || "-"}
           detail={
             tracking?.latest_deployment
@@ -103,18 +104,21 @@ export default function ProjectTrackingModal({
         />
         <MetricCard
           icon={Box}
-          label="History"
+          label={t("History")}
           value={tracking?.summary?.total ?? history.length}
-          detail={`${tracking?.summary?.failed || 0} failed, ${tracking?.summary?.deploying || 0} deploying`}
+          detail={t("{failed} failed, {deploying} deploying", {
+            failed: tracking?.summary?.failed || 0,
+            deploying: tracking?.summary?.deploying || 0,
+          })}
         />
       </div>
       <div className="modal-actions tracking-actions">
         <Button type="button" onClick={onRefresh} disabled={loading}>
-          <RefreshCw size={15} /> Refresh
+          <RefreshCw size={15} /> {t("Refresh")}
         </Button>
       </div>
       <div className="tracking-history">
-        {loading && <div className="empty">Loading release history...</div>}
+        {loading && <div className="empty">{t("Loading release history...")}</div>}
         {!loading &&
           history.map((item) => (
             <div className="tracking-row" key={item.id}>
@@ -122,11 +126,11 @@ export default function ProjectTrackingModal({
                 className={`deploy-state ${normalizeDeploymentStatus(item.status)}`}
               >
                 <i />
-                <b>{item.version || item.tag || `Deployment ${item.id}`}</b>
+                <b>{item.version || item.tag || t("Deployment {id}", { id: item.id })}</b>
                 <small>
-                  {item.status || "pending"}
+                  {t(item.status || "pending")}
                   {item.process_status
-                    ? ` · process ${item.process_status}`
+                    ? ` · ${t("process {status}", { status: item.process_status })}`
                     : ""}
                 </small>
               </span>
@@ -135,20 +139,20 @@ export default function ProjectTrackingModal({
                 <small>
                   {item.commit_sha
                     ? truncateMiddle(item.commit_sha, 18)
-                    : "No commit recorded"}
+                    : t("No commit recorded")}
                 </small>
               </span>
               <span>
                 <b>{formatDeploymentDate(item.created_at)}</b>
-                <small>{item.triggered_by || "system"}</small>
+                <small>{t(item.triggered_by || "system")}</small>
               </span>
               <span>
                 {item.workflow_url ? (
                   <a href={item.workflow_url} target="_blank" rel="noreferrer">
-                    Workflow
+                    {t("Workflow")}
                   </a>
                 ) : (
-                  <small>No workflow link</small>
+                  <small>{t("No workflow link")}</small>
                 )}
                 {item.failure_reason && (
                   <small className="error-inline">{item.failure_reason}</small>
@@ -158,7 +162,7 @@ export default function ProjectTrackingModal({
           ))}
         {!loading && history.length === 0 && (
           <div className="empty">
-            No release history recorded for this project.
+            {t("No release history recorded for this project.")}
           </div>
         )}
       </div>

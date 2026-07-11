@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as LucideIcons from "lucide-react";
+import { t } from "../i18n/index";
 import { formatTime } from "../utils/index";
 import { EventTimeline, MetricCard, Button } from "../components/index";
 import {
@@ -55,7 +56,7 @@ export default function EventsView({ dashboard, refresh }) {
   if (!dashboard) {
     return (
       <section className="panel">
-        <div className="empty">Loading events...</div>
+        <div className="empty">{t("Loading events...")}</div>
       </section>
     );
   }
@@ -70,46 +71,51 @@ export default function EventsView({ dashboard, refresh }) {
       <section className="panel action-panel">
         <div>
           <h2>
-            <ListRestart size={18} /> Events
+            <ListRestart size={18} /> {t("Events")}
           </h2>
           <p>
-            Recent warning events from the Kubernetes event stream, grouped by
-            object, reason, and last seen time.
+            {t(
+              "Recent warning events from the Kubernetes event stream, grouped by object, reason, and last seen time.",
+            )}
           </p>
         </div>
         <Button onClick={refresh}>
-          <RefreshCw size={15} /> Refresh
+          <RefreshCw size={15} /> {t("Refresh")}
         </Button>
       </section>
       <section className="dashboard-kpis">
         <MetricCard
           icon={ListRestart}
-          label="Warning events"
+          label={t("Warning events")}
           value={events.length}
-          detail={`${Object.keys(byReason).length} reasons`}
+          detail={t("{count} reasons", {
+            count: Object.keys(byReason).length,
+          })}
           tone={events.length > 0 ? "warning" : "good"}
         />
         <MetricCard
           icon={AlertTriangle}
-          label="Event count"
+          label={t("Event count")}
           value={events.reduce(
             (sum, event) => sum + Number(event.count || 1),
             0,
           )}
-          detail="Summed Kubernetes count values"
+          detail={t("Summed Kubernetes count values")}
         />
         <MetricCard
           icon={Activity}
-          label="Cluster"
+          label={t("Cluster")}
           value={dashboard.status || "-"}
-          detail={`Checked ${formatTime(dashboard.checked_at)}`}
+          detail={t("Checked {time}", {
+            time: formatTime(dashboard.checked_at),
+          })}
           tone={dashboard.healthy ? "good" : "warning"}
         />
       </section>
       <section className="dashboard-grid">
         <div className="panel">
           <h2>
-            <Database size={18} /> Reasons
+            <Database size={18} /> {t("Reasons")}
           </h2>
           <div className="mini-table">
             {Object.entries(byReason).map(([reason, count]) => (
@@ -120,14 +126,14 @@ export default function EventsView({ dashboard, refresh }) {
             ))}
             {Object.keys(byReason).length === 0 && (
               <div className="empty">
-                No warning reasons in the latest feed.
+                {t("No warning reasons in the latest feed.")}
               </div>
             )}
           </div>
         </div>
         <div className="panel">
           <h2>
-            <ScrollText size={18} /> Event stream
+            <ScrollText size={18} /> {t("Event stream")}
           </h2>
           <EventTimeline events={events} />
         </div>

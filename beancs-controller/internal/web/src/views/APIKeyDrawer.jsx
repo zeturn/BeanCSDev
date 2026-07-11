@@ -61,6 +61,7 @@ import {
 import * as Utils from "../utils";
 import * as API from "../api";
 import * as Components from "../components";
+import { t } from "../i18n/index";
 export default function APIKeyDrawer({ presets, scopes, onClose, onCreate }) {
   const defaultPreset = presets[0]?.id || "";
   return (
@@ -69,26 +70,26 @@ export default function APIKeyDrawer({ presets, scopes, onClose, onCreate }) {
       className="api-key-drawer"
       title={
         <h2>
-          <KeyRound size={18} /> Create API key
+          <KeyRound size={18} /> {t("Create API key")}
         </h2>
       }
       subtitle={
-        <p>Choose a preset or select exact scopes for local automation.</p>
+        <p>{t("Choose a preset or select exact scopes for local automation.")}</p>
       }
     >
       <form className="drawer-form api-key-form" onSubmit={onCreate}>
         <label>
-          Key name
+          {t("Key name")}
           <Input name="name" placeholder="local beanctl" required autoFocus />
         </label>
         <label>
-          Expires at
+          {t("Expires at")}
           <Input name="expires_at" type="datetime-local" />
         </label>
         <label>
-          Permission preset
+          {t("Permission preset")}
           <Select name="preset" defaultValue={defaultPreset}>
-            <option value="">Custom scopes</option>
+            <option value="">{t("Custom scopes")}</option>
             {presets.map((preset) => (
               <option key={preset.id} value={preset.id}>
                 {preset.label}
@@ -111,15 +112,15 @@ export default function APIKeyDrawer({ presets, scopes, onClose, onCreate }) {
             </label>
           ))}
           {scopes.length === 0 && (
-            <div className="empty">No scope options loaded.</div>
+            <div className="empty">{t("No scope options loaded.")}</div>
           )}
         </div>
         <div className="drawer-actions">
           <Button type="button" onClick={onClose}>
-            Cancel
+            {t("Cancel")}
           </Button>
           <Button variant="primary" type="submit">
-            <KeyRound size={15} /> Create key
+            <KeyRound size={15} /> {t("Create key")}
           </Button>
         </div>
       </form>

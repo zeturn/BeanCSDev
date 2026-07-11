@@ -52,6 +52,7 @@ import {
 import * as Utils from "../utils";
 import * as API from "../api";
 import { Drawer, Input, Button } from "../components";
+import { t } from "../i18n/index";
 export default function CloudflareAccountDrawer({ onClose, onCreate }) {
   return (
     <Drawer
@@ -63,14 +64,15 @@ export default function CloudflareAccountDrawer({ onClose, onCreate }) {
       }
       subtitle={
         <p>
-          Use an API token with zone read access so BeanCS can cache available
-          domains.
+          {t(
+            "Use an API token with zone read access so BeanCS can cache available domains.",
+          )}
         </p>
       }
     >
       <form className="drawer-form" onSubmit={onCreate}>
         <label>
-          Account name
+          {t("Account name")}
           <Input
             name="name"
             placeholder="Production Cloudflare"
@@ -79,28 +81,28 @@ export default function CloudflareAccountDrawer({ onClose, onCreate }) {
           />
         </label>
         <label>
-          Account ID
+          {t("Account ID")}
           <Input
             name="account_id"
-            placeholder="Optional, limits zone discovery to this account"
+            placeholder={t("Optional, limits zone discovery to this account")}
           />
         </label>
         <label>
-          API token
+          {t("API token")}
           <Input
             name="api_token"
             type="password"
-            placeholder="Cloudflare API token"
+            placeholder={t("Cloudflare API token")}
             required
             autoComplete="new-password"
           />
         </label>
         <div className="drawer-actions">
           <Button type="button" onClick={onClose}>
-            Cancel
+            {t("Cancel")}
           </Button>
           <Button variant="primary" type="submit">
-            <KeyRound size={15} /> Create link
+            <KeyRound size={15} /> {t("Create link")}
           </Button>
         </div>
       </form>

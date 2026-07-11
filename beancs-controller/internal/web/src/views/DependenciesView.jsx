@@ -10,6 +10,7 @@ import {
   Select,
 } from "../components/index";
 import { dependencyDefaultConfig } from "../utils/index";
+import { t } from "../i18n/index";
 
 const defaultPorts = {
   mysql: "3306",
@@ -98,7 +99,7 @@ export default function DependenciesView({
     <div className="dependencies-page">
       <div className="dependencies-toolbar">
         <Button type="button" variant="primary" onClick={() => setCreateOpen(true)}>
-          <Database size={15} /> Create dependency
+          <Database size={15} /> {t("Create dependency")}
         </Button>
       </div>
 
@@ -112,7 +113,7 @@ export default function DependenciesView({
           />
         ))}
         {(dependencies || []).length === 0 && (
-          <div className="empty">No reusable dependencies registered.</div>
+          <div className="empty">{t("No reusable dependencies registered.")}</div>
         )}
         <PaginationBar
           page={safePage}
@@ -124,8 +125,10 @@ export default function DependenciesView({
       </section>
       {createOpen && (
         <Modal
-          title="Create dependency"
-          subtitle="把创建流程放在弹窗里，避免列表页过载。"
+          title={t("Create dependency")}
+          subtitle={t(
+            "Create the flow in a dialog to avoid overloading the list page.",
+          )}
           className="wide-modal"
           onClose={() => setCreateOpen(false)}
         >
@@ -136,14 +139,14 @@ export default function DependenciesView({
               if (ok) setCreateOpen(false);
             }}
           >
-            <label>Location</label>
+            <label>{t("Location")}</label>
             <Select
               name="location"
               value={mode}
               onChange={(event) => setMode(event.target.value)}
             >
-              <option value="cluster">BeanCS cluster</option>
-              <option value="external">External service</option>
+              <option value="cluster">{t("BeanCS cluster")}</option>
+              <option value="external">{t("External service")}</option>
             </Select>
             <input
               type="hidden"
@@ -155,11 +158,11 @@ export default function DependenciesView({
               name="config_json"
               value={JSON.stringify(config || {})}
             />
-            <label>Name</label>
+            <label>{t("Name")}</label>
             <Input name="name" required placeholder="mysql-prod" />
-            <label>Display name</label>
-            <Input name="display_name" placeholder="Production MySQL" />
-            <label>Type</label>
+            <label>{t("Display name")}</label>
+            <Input name="display_name" placeholder={t("Production MySQL")} />
+            <label>{t("Type")}</label>
             <Select
               name="type"
               value={activeType}
@@ -176,7 +179,7 @@ export default function DependenciesView({
             </Select>
             {mode === "cluster" && (
               <>
-                <label>Deploy method</label>
+                <label>{t("Deploy method")}</label>
                 <Select
                   name="deploy_method"
                   value={deployMethod}
@@ -184,15 +187,15 @@ export default function DependenciesView({
                 >
                   {deployMethods.map((method) => (
                     <option key={method} value={method}>
-                      {method}
+                      {t(method)}
                     </option>
                   ))}
                 </Select>
-                <label>Version</label>
+                <label>{t("Version")}</label>
                 <Input name="version" placeholder="default" />
-                <label>GitOps credential</label>
+                <label>{t("GitOps credential")}</label>
                 <Select name="github_credential_id">
-                  <option value="">Create record only</option>
+                  <option value="">{t("Create record only")}</option>
                   {(githubCredentials || []).map((credential) => (
                     <option key={credential.id} value={credential.id}>
                       {credential.name}
@@ -205,9 +208,9 @@ export default function DependenciesView({
             {mode === "external" && (
               <>
                 <input type="hidden" name="deploy_method" value="external" />
-                <label>Host</label>
+                <label>{t("Host")}</label>
                 <Input name="host" required placeholder="10.0.0.20" />
-                <label>Port</label>
+                <label>{t("Port")}</label>
                 <Input
                   name="port"
                   defaultValue={defaultPorts[activeType] || ""}
@@ -215,7 +218,7 @@ export default function DependenciesView({
                 />
                 {activeType === "rabbitmq" && (
                   <>
-                    <label>Management port</label>
+                    <label>{t("Management port")}</label>
                     <Input
                       name="management_port"
                       defaultValue="15672"
@@ -225,14 +228,14 @@ export default function DependenciesView({
                 )}
               </>
             )}
-            <label>App object</label>
+            <label>{t("App object")}</label>
             <Input name="application_name" placeholder={`dep-${activeType}`} />
-            <label>Namespace</label>
+            <label>{t("Namespace")}</label>
             <Input name="namespace" placeholder={`dep-${activeType}`} />
             {mode === "cluster" && (
               <>
                 <div />
-                <Checkbox name="shared" defaultChecked label="Reusable by other apps" />
+                <Checkbox name="shared" defaultChecked label={t("Reusable by other apps")} />
                 <DependencyConfigEditor
                   definition={activeDefinition}
                   value={config || {}}
@@ -248,19 +251,19 @@ export default function DependenciesView({
                   checked={controlledSupported && controlled}
                   disabled={!controlledSupported}
                   onChange={(event) => setControlled(event.target.checked)}
-                  label="BeanCS can create credentials"
+                  label={t("BeanCS can create credentials")}
                 />
                 {!controlledSupported && (
                   <>
                     <div />
-                    <p className="muted">Credentials for this type must be entered manually.</p>
+                    <p className="muted">{t("Credentials for this type must be entered manually.")}</p>
                   </>
                 )}
                 {controlledSupported && controlled && (
                   <>
-                    <label>Admin username</label>
+                    <label>{t("Admin username")}</label>
                     <Input name="admin_username" required placeholder="root" />
-                    <label>Admin password</label>
+                    <label>{t("Admin password")}</label>
                     <Input name="admin_password" type="password" required />
                   </>
                 )}
@@ -269,10 +272,10 @@ export default function DependenciesView({
             <div />
             <div className="modal-actions">
               <Button type="button" onClick={() => setCreateOpen(false)}>
-                Cancel
+                {t("Cancel")}
               </Button>
               <Button type="submit" variant="primary">
-                <Database size={15} /> Add dependency
+                <Database size={15} /> {t("Add dependency")}
               </Button>
             </div>
           </form>
@@ -310,9 +313,9 @@ function DependencyEntity({ dependency, typeLabel, onCreateCredential }) {
           </p>
         </div>
         <div className="dependency-badges">
-          <span>{dependency.external ? "external" : "managed"}</span>
-          <span>{dependency.controlled ? "controlled" : "uncontrolled"}</span>
-          <span>{dependency.status || "ready"}</span>
+          <span>{t(dependency.external ? "external" : "managed")}</span>
+          <span>{t(dependency.controlled ? "controlled" : "uncontrolled")}</span>
+          <span>{t(dependency.status || "ready")}</span>
         </div>
       </div>
       <div className="dependency-credential-list">
@@ -321,11 +324,11 @@ function DependencyEntity({ dependency, typeLabel, onCreateCredential }) {
             <KeyRound size={15} />
             <span>{credential.name}</span>
             <small>{credential.config?.username || "-"}</small>
-            <small>{credential.status || "ready"}</small>
+            <small>{t(credential.status || "ready")}</small>
           </div>
         ))}
         {credentials.length === 0 && (
-          <div className="empty compact">No credentials yet.</div>
+          <div className="empty compact">{t("No credentials yet.")}</div>
         )}
         <PaginationBar
           page={safePage}
@@ -337,13 +340,13 @@ function DependencyEntity({ dependency, typeLabel, onCreateCredential }) {
       </div>
       <div className="row-actions">
         <Button type="button" onClick={() => setCredentialOpen(true)}>
-          <ShieldCheck size={15} /> Add credential
+          <ShieldCheck size={15} /> {t("Add credential")}
         </Button>
       </div>
       {credentialOpen && (
         <Modal
-          title={`Add credential for ${dependency.name}`}
-          subtitle="创建与查看分离，减少页面拥挤。"
+          title={t("Add credential for {name}", { name: dependency.name })}
+          subtitle={t("Creation and viewing are separated to reduce crowding.")}
           onClose={() => setCredentialOpen(false)}
         >
           <form
@@ -353,27 +356,27 @@ function DependencyEntity({ dependency, typeLabel, onCreateCredential }) {
               if (ok) setCredentialOpen(false);
             }}
           >
-            <label>Credential name</label>
+            <label>{t("Credential name")}</label>
             <Input name="name" required placeholder="app" />
             {showDatabase && (
               <>
-                <label>Database</label>
+                <label>{t("Database")}</label>
                 <Input name="database" required placeholder="app" />
               </>
             )}
-            <label>Username</label>
+            <label>{t("Username")}</label>
             <Input name="username" required placeholder="app" />
-            <label>Password</label>
+            <label>{t("Password")}</label>
             <Input name="password" type="password" required />
-            <label>Description</label>
-            <Input name="description" placeholder="Used by California Beans" />
+            <label>{t("Description")}</label>
+            <Input name="description" placeholder={t("Used by California Beans")} />
             <div />
             <div className="modal-actions">
               <Button type="button" onClick={() => setCredentialOpen(false)}>
-                Cancel
+                {t("Cancel")}
               </Button>
               <Button type="submit">
-                <ShieldCheck size={15} /> Add credential
+                <ShieldCheck size={15} /> {t("Add credential")}
               </Button>
             </div>
           </form>

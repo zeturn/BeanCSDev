@@ -10,6 +10,7 @@ import {
   Input,
   Checkbox,
 } from "../components/index";
+import { t } from "../i18n/index";
 import {
   Activity,
   AlertTriangle,
@@ -97,45 +98,48 @@ export default function ContainerRegistriesView({
       <section className="panel action-panel">
         <div>
           <h2>
-            <Package size={18} /> 镜像源
+            <Package size={18} /> {t("Image registries")}
           </h2>
           <p>
-            基于 Docker Registry HTTP API V2 列出标签；Docker Hub 会使用
-            registry-1.docker.io；私有仓库请填写凭据。
+            {t(
+              "Lists tags via the Docker Registry HTTP API V2; Docker Hub uses registry-1.docker.io. Provide credentials for private registries.",
+            )}
           </p>
         </div>
         <Button type="button" onClick={onRefresh}>
-          <RefreshCw size={15} /> 刷新
+          <RefreshCw size={15} /> {t("Refresh")}
         </Button>
       </section>
 
       <section className="panel action-panel">
         <div>
           <h2>
-            <Database size={18} /> 管理镜像源与镜像跟踪
+            <Database size={18} /> {t("Manage registries and image tracking")}
           </h2>
-          <p className="muted">创建入口已分离到弹窗，列表更轻量。</p>
+          <p className="muted">
+            {t("Creation entry separated into dialogs; the list stays light.")}
+          </p>
         </div>
         <div className="row-actions">
           <Button type="button" variant="primary" onClick={() => setRegistryCreateOpen(true)}>
-            <Plus size={15} /> 添加镜像源
+            <Plus size={15} /> {t("Add registry")}
           </Button>
           <Button type="button" onClick={() => setImageCreateOpen(true)}>
-            <Plus size={15} /> 添加镜像跟踪
+            <Plus size={15} /> {t("Add image tracking")}
           </Button>
         </div>
       </section>
 
       <section className="panel">
         <h2>
-          <Database size={18} /> 已保存的镜像源
+          <Database size={18} /> {t("Saved registries")}
         </h2>
         <div className="table compact-table registry-table">
           <div className="tr head">
-            <span>名称</span>
-            <span>类型</span>
-            <span>API 根</span>
-            <span>鉴权</span>
+            <span>{t("Name")}</span>
+            <span>{t("Type")}</span>
+            <span>{t("API root")}</span>
+            <span>{t("Auth")}</span>
             <span />
           </div>
           {pagedRegistries.map((r) => (
@@ -143,20 +147,23 @@ export default function ContainerRegistriesView({
               <ExpandableCell className="strong" value={r.name} max={30} />
               <ExpandableCell value={r.kind} max={24} />
               <ExpandableCell className="mono" value={r.api_base} max={42} />
-              <ExpandableCell value={r.has_auth ? "已配置" : "匿名"} max={24} />
+              <ExpandableCell
+                value={r.has_auth ? t("Configured") : t("Anonymous")}
+                max={24}
+              />
               <span className="row-actions">
                 <Button
                   type="button"
                   onClick={() => onDeleteRegistry(r)}
                   variant="danger"
                 >
-                  <Trash2 size={15} /> 删除
+                  <Trash2 size={15} /> {t("Delete")}
                 </Button>
               </span>
             </div>
           ))}
           {(registries || []).length === 0 && (
-            <div className="empty">尚未添加镜像源。</div>
+            <div className="empty">{t("No registries added yet.")}</div>
           )}
         </div>
         <PaginationBar
@@ -171,7 +178,7 @@ export default function ContainerRegistriesView({
       <section className="panel">
         <div className="panel-heading-inline">
           <h2>
-            <Boxes size={18} /> 镜像与标签
+            <Boxes size={18} /> {t("Images and tags")}
           </h2>
           <Button
             type="button"
@@ -179,14 +186,18 @@ export default function ContainerRegistriesView({
             disabled={!(images || []).length}
             variant="ghost"
           >
-            <RefreshCw size={15} /> 同步全部远程标签
+            <RefreshCw size={15} /> {t("Sync all remote tags")}
           </Button>
         </div>
         <p className="muted">
-          仓库路径需与 Registry API 一致（例如 Docker Hub 官方 nginx：
-          <span className="mono">library/nginx</span>；GHCR：
+          {t(
+            "Repository paths must match the Registry API (e.g. Docker Hub official nginx:",
+          )}{" "}
+          <span className="mono">library/nginx</span>; GHCR:{" "}
           <span className="mono">owner/repo</span>
-          ）。保存后会立即拉取标签；页面每 2 分钟刷新本地缓存列表。
+          {t(
+            "). Tags are fetched immediately after saving; the local cache refreshes every 2 minutes.",
+          )}
         </p>
         {pagedImages.map((im) => (
           <div className="registry-image-card" key={im.id}>
@@ -194,42 +205,42 @@ export default function ContainerRegistriesView({
               <div>
                 <div className="mono strong">{im.repository}</div>
                 <small className="muted">
-                  来源：{im.registry?.name || `registry #${im.registry_id}`} ·
-                  更新 {formatTime(im.refreshed_at)}
+                  {t("Source")}: {im.registry?.name || `registry #${im.registry_id}`} ·{" "}
+                  {t("updated")} {formatTime(im.refreshed_at)}
                 </small>
               </div>
               <div className="row-actions">
                 <Button type="button" onClick={() => onRefreshImage(im.id)}>
-                  <RefreshCw size={15} /> 同步标签
+                  <RefreshCw size={15} /> {t("Sync tags")}
                 </Button>
                 <Button
                   type="button"
                   onClick={() => onDeleteImage(im)}
                   variant="danger"
                 >
-                  <Trash2 size={15} /> 移除
+                  <Trash2 size={15} /> {t("Remove")}
                 </Button>
               </div>
             </div>
             <div className="tag-chip-grid">
-              {(im.tags || []).slice(0, 200).map((t) => (
-                <span className="tag-chip" key={t}>
-                  {t}
+              {(im.tags || []).slice(0, 200).map((tg) => (
+                <span className="tag-chip" key={tg}>
+                  {tg}
                 </span>
               ))}
               {(im.tags || []).length > 200 && (
                 <span className="muted">
-                  … 共 {(im.tags || []).length} 个标签，仅显示前 200 个
+                  … {t("{count} tags total, showing first 200", { count: (im.tags || []).length })}
                 </span>
               )}
               {(im.tags || []).length === 0 && (
-                <span className="muted">暂无标签或未同步成功。</span>
+                <span className="muted">{t("No tags yet or sync failed.")}</span>
               )}
             </div>
           </div>
         ))}
         {(images || []).length === 0 && (
-          <div className="empty">尚未添加镜像仓库跟踪。</div>
+          <div className="empty">{t("No image registry tracking added yet.")}</div>
         )}
         <PaginationBar
           page={imagePage}
@@ -241,8 +252,8 @@ export default function ContainerRegistriesView({
       </section>
       {registryCreateOpen && (
         <Modal
-          title="添加镜像源"
-          subtitle="创建表单迁移到弹窗，减少主页面长度。"
+          title={t("Add registry")}
+          subtitle={t("Create form moved into a dialog to shorten the main page.")}
           onClose={() => setRegistryCreateOpen(false)}
         >
           <form
@@ -253,7 +264,7 @@ export default function ContainerRegistriesView({
             }}
           >
             <label>
-              类型
+              {t("Type")}
               <Select
                 name="kind"
                 value={previewKind}
@@ -267,14 +278,14 @@ export default function ContainerRegistriesView({
               </Select>
             </label>
             <label>
-              显示名称（可选）
+              {t("Display name (optional)")}
               <Input
                 name="name"
-                placeholder={`例如 ${presetByKind[previewKind]?.label || ""}`}
+                placeholder={`${t("e.g.")} ${presetByKind[previewKind]?.label || ""}`}
               />
             </label>
             <label className="span-2">
-              镜像源地址
+              {t("Registry address")}
               <Input
                 name="host"
                 required
@@ -285,35 +296,35 @@ export default function ContainerRegistriesView({
               />
             </label>
             <label>
-              用户名（可选）
+              {t("Username (optional)")}
               <Input
                 name="username"
                 autoComplete="off"
-                placeholder="私有仓库 / PAT 用户名"
+                placeholder={t("Private registry / PAT username")}
               />
             </label>
             <label>
-              密码或 Token（可选）
+              {t("Password or token (optional)")}
               <Input
                 name="password"
                 type="password"
                 autoComplete="new-password"
-                placeholder="不会明文存储"
+                placeholder={t("Not stored in plaintext")}
               />
             </label>
             <label className="checkbox-row span-2">
               <Checkbox name="insecure_tls" type="checkbox" />
-              跳过 TLS 校验（仅可信内网）
+              {t("Skip TLS verification (trusted internal network only)")}
             </label>
             {presetByKind[previewKind]?.hint && (
               <p className="muted span-2">{presetByKind[previewKind].hint}</p>
             )}
             <div className="modal-actions span-2">
               <Button type="button" onClick={() => setRegistryCreateOpen(false)}>
-                取消
+                {t("Cancel")}
               </Button>
               <Button type="submit" variant="primary">
-                <Plus size={15} /> 保存镜像源
+                <Plus size={15} /> {t("Save registry")}
               </Button>
             </div>
           </form>
@@ -321,8 +332,8 @@ export default function ContainerRegistriesView({
       )}
       {imageCreateOpen && (
         <Modal
-          title="添加镜像跟踪"
-          subtitle="将创建与查看分离，降低单页信息密度。"
+          title={t("Add image tracking")}
+          subtitle={t("Separate creation from viewing to reduce single-page density.")}
           onClose={() => setImageCreateOpen(false)}
         >
           <form
@@ -333,9 +344,9 @@ export default function ContainerRegistriesView({
             }}
           >
             <label>
-              镜像源
+              {t("Registry")}
               <Select name="registry_id" required>
-                <option value="">选择...</option>
+                <option value="">{t("Choose...")}</option>
                 {(registries || []).map((r) => (
                   <option key={r.id} value={r.id}>
                     {r.name} ({r.kind})
@@ -344,15 +355,15 @@ export default function ContainerRegistriesView({
               </Select>
             </label>
             <label className="span-2">
-              仓库路径（repository）
+              {t("Repository path")}
               <Input name="repository" required placeholder="namespace/name" />
             </label>
             <div className="modal-actions span-2">
               <Button type="button" onClick={() => setImageCreateOpen(false)}>
-                取消
+                {t("Cancel")}
               </Button>
               <Button type="submit" variant="primary">
-                <Plus size={15} /> 添加并同步标签
+                <Plus size={15} /> {t("Add and sync tags")}
               </Button>
             </div>
           </form>

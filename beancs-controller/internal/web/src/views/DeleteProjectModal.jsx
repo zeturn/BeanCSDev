@@ -53,6 +53,7 @@ import * as Utils from "../utils";
 import * as API from "../api";
 import * as Components from "../components";
 import { Modal, Button } from "../components/index";
+import { t } from "../i18n/index";
 export default function DeleteProjectModal({
   project,
   busy,
@@ -61,21 +62,23 @@ export default function DeleteProjectModal({
 }) {
   return (
     <Modal
-      title={`Delete ${project.name}`}
-      subtitle="This removes the project record, namespace, DNS records, and managed OAuth app where applicable."
+      title={t("Delete {name}", { name: project.name })}
+      subtitle={t(
+        "This removes the project record, namespace, DNS records, and managed OAuth app where applicable.",
+      )}
       onClose={onClose}
     >
       <div className="delete-summary">
         <span>
-          Namespace <b>{project.namespace}</b>
+          {t("Namespace")} <b>{project.namespace}</b>
         </span>
         <span>
-          Route <b>{project.domain || project.exposure_mode}</b>
+          {t("Route")} <b>{project.domain || project.exposure_mode}</b>
         </span>
       </div>
       <div className="modal-actions">
         <Button type="button" onClick={onClose} disabled={busy}>
-          Cancel
+          {t("Cancel")}
         </Button>
         <Button
           className="filled"
@@ -84,7 +87,7 @@ export default function DeleteProjectModal({
           disabled={busy}
           variant="danger"
         >
-          <Trash2 size={15} /> Delete
+          <Trash2 size={15} /> {t("Delete")}
         </Button>
       </div>
     </Modal>

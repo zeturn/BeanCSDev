@@ -15,6 +15,7 @@ import {
   Input,
 } from "../components/index";
 import ProgressListView from "./ProgressListView";
+import { t } from "../i18n/index";
 import {
   Activity,
   AlertTriangle,
@@ -132,27 +133,27 @@ export default function ProgressView({
   const detailTabs = [
     {
       id: "run",
-      label: "Run details",
+      label: t("Run details"),
       icon: Activity,
     },
     {
       id: "install",
-      label: "Install log",
+      label: t("Install log"),
       icon: ScrollText,
     },
     {
       id: "deployments",
-      label: "Deployment records",
+      label: t("Deployment records"),
       icon: Rocket,
     },
     {
       id: "events",
-      label: "Kubernetes events",
+      label: t("Kubernetes events"),
       icon: AlertTriangle,
     },
     {
       id: "runtime",
-      label: "Runtime logs",
+      label: t("Runtime logs"),
       icon: FileText,
     },
   ];
@@ -189,16 +190,16 @@ export default function ProgressView({
             {selectedProcess?.title ||
               headerProject?.display_name ||
               headerProject?.name ||
-              "Deployment process"}
+              t("Deployment process")}
           </h2>
           <p>
             {headerProject?.namespace ||
               currentProjectName ||
-              "Choose a process"}
+              t("Choose a process")}
             {selectedProcess?.updated_at
-              ? ` · updated ${formatTime(selectedProcess.updated_at)}`
+              ? ` · ${t("updated {time}", { time: formatTime(selectedProcess.updated_at) })}`
               : progress?.checked_at
-                ? ` · checked ${formatTime(progress.checked_at)}`
+                ? ` · ${t("checked {time}", { time: formatTime(progress.checked_at) })}`
                 : ""}
           </p>
         </div>
@@ -213,7 +214,7 @@ export default function ProgressView({
               if (next?.project_id) setActiveProjectID(String(next.project_id));
             }}
           >
-            <option value="">Choose process</option>
+            <option value="">{t("Choose process")}</option>
             {(processes || []).map((process) => (
               <option key={process.id} value={process.id}>
                 #{process.id} {process.project?.name || process.title}
@@ -232,9 +233,9 @@ export default function ProgressView({
             }
             onClick={() => setActiveJob("summary")}
           >
-            <LayoutDashboard size={15} /> Summary
+            <LayoutDashboard size={15} /> {t("Summary")}
           </Button>
-          <div className="process-nav-heading">All jobs</div>
+          <div className="process-nav-heading">{t("All jobs")}</div>
           {jobs.map((job) => (
             <Button
               key={job.id}
@@ -251,7 +252,7 @@ export default function ProgressView({
               <small>{job.detail}</small>
             </Button>
           ))}
-          <div className="process-nav-heading">Run details</div>
+          <div className="process-nav-heading">{t("Run details")}</div>
           {detailTabs.map(({ id, label, icon: Icon }) => (
             <Button
               key={id}
@@ -272,33 +273,36 @@ export default function ProgressView({
               <div className="dashboard-kpis">
                 <MetricCard
                   icon={Boxes}
-                  label="Project"
+                  label={t("Project")}
                   value={progress?.project?.name || "-"}
                   detail={
                     progress?.project?.domain ||
                     progress?.project?.exposure_mode ||
-                    "No route"
+                    t("No route")
                   }
                 />
                 <MetricCard
                   icon={Server}
-                  label="Runtime"
+                  label={t("Runtime")}
                   value={`${readyReplicas}/${desiredReplicas}`}
-                  detail={`${readyPods}/${pods.length} pods ready`}
+                  detail={t("{ready}/{total} pods ready", {
+                    ready: readyPods,
+                    total: pods.length,
+                  })}
                 />
                 <MetricCard
                   icon={GitBranch}
-                  label="Deployments"
+                  label={t("Deployments")}
                   value={deployments.length}
-                  detail={deployments[0]?.status || "No events"}
+                  detail={deployments[0]?.status || t("No events")}
                 />
                 <MetricCard
                   icon={AlertTriangle}
-                  label="Warnings"
+                  label={t("Warnings")}
                   value={
                     events.filter((event) => event.type === "Warning").length
                   }
-                  detail={`${events.length} Kubernetes events`}
+                  detail={t("{count} Kubernetes events", { count: events.length })}
                   tone={
                     events.some((event) => event.type === "Warning")
                       ? "warning"
@@ -314,8 +318,8 @@ export default function ProgressView({
             <>
               <div className="process-job-header">
                 <div>
-                  <h2>{selectedDetailTab?.label || "Run details"}</h2>
-                  <p>Process evidence and runtime signals for this run.</p>
+                  <h2>{selectedDetailTab?.label || t("Run details")}</h2>
+                  <p>{t("Process evidence and runtime signals for this run.")}</p>
                 </div>
                 <div className="process-log-tools">
                   {(detailTabID === "runtime" ||
@@ -327,7 +331,7 @@ export default function ProgressView({
                       <Input
                         value={logQuery}
                         onChange={(event) => setLogQuery(event.target.value)}
-                        placeholder="Search details"
+                        placeholder={t("Search details")}
                       />
                     </div>
                   )}
@@ -356,8 +360,8 @@ export default function ProgressView({
             <>
               <div className="process-job-header">
                 <div>
-                  <h2>{selectedJob?.label || "Job"}</h2>
-                  <p>{selectedJob?.description || "Deployment job details"}</p>
+                  <h2>{selectedJob?.label || t("Job")}</h2>
+                  <p>{selectedJob?.description || t("Deployment job details")}</p>
                 </div>
                 <div className="process-log-tools">
                   <div className="process-search">
@@ -365,7 +369,7 @@ export default function ProgressView({
                     <Input
                       value={logQuery}
                       onChange={(event) => setLogQuery(event.target.value)}
-                      placeholder="Search logs"
+                      placeholder={t("Search logs")}
                     />
                   </div>
                   <Button type="button" title="Settings">
@@ -391,7 +395,7 @@ export default function ProgressView({
                           type="button"
                           className="process-step-toggle"
                           aria-label={
-                            isExpanded ? "Collapse step" : "Expand step"
+                            isExpanded ? t("Collapse step") : t("Expand step")
                           }
                           onClick={() => toggleStep(stepKey)}
                         >
@@ -438,8 +442,8 @@ export default function ProgressView({
                           )}
                           <pre>
                             {step.kind === "logs"
-                              ? visibleLogs || "No application logs yet."
-                              : step.log || "No log output for this step."}
+                              ? visibleLogs || t("No application logs yet.")
+                              : step.log || t("No log output for this step.")}
                           </pre>
                         </div>
                       )}

@@ -10,6 +10,7 @@ import {
   Select,
   Checkbox,
 } from "../components/index";
+import { t } from "../i18n/index";
 import {
   Activity,
   AlertTriangle,
@@ -77,50 +78,53 @@ export default function NamespaceDetailView({
   const isolation = row.isolation || {};
   return (
     <div className="namespace-detail">
-      {detail.loading && <p className="muted">Loading namespace detail...</p>}
+      {detail.loading && <p className="muted">{t("Loading namespace detail...")}</p>}
       {detail.error && <p className="error-inline">{detail.error}</p>}
       <div className="dashboard-kpis">
         <MetricCard
           icon={Boxes}
-          label="Pods"
+          label={t("Pods")}
           value={stats.pods || 0}
-          detail={`${stats.running_pods || 0} running · ${stats.abnormal_pods || 0} abnormal`}
+          detail={t("{running} running · {abnormal} abnormal", {
+            running: stats.running_pods || 0,
+            abnormal: stats.abnormal_pods || 0,
+          })}
         />
         <MetricCard
           icon={Database}
-          label="Services"
+          label={t("Services")}
           value={stats.services || 0}
-          detail={`${stats.deployments || 0} deployments`}
+          detail={t("{count} deployments", { count: stats.deployments || 0 })}
         />
         <MetricCard
           icon={Network}
-          label="Ingresses"
+          label={t("Ingresses")}
           value={stats.ingresses || 0}
-          detail={`${stats.network_policies || 0} policies`}
+          detail={t("{count} policies", { count: stats.network_policies || 0 })}
         />
         <MetricCard
           icon={KeyRound}
-          label="Secrets"
+          label={t("Secrets")}
           value={stats.secrets || 0}
-          detail={`${stats.config_maps || 0} configmaps`}
+          detail={t("{count} configmaps", { count: stats.config_maps || 0 })}
         />
         <MetricCard
           icon={Shield}
-          label="Isolation"
-          value={isolation.enabled ? "On" : "Off"}
-          detail={isolation.policy_name || "No default isolation"}
+          label={t("Isolation")}
+          value={isolation.enabled ? t("On") : t("Off")}
+          detail={isolation.policy_name || t("No default isolation")}
           tone={isolation.enabled ? "good" : "warning"}
         />
         <MetricCard
           icon={ListRestart}
-          label="Checked"
+          label={t("Checked")}
           value={formatTime(row.checked_at)}
           detail={summary.status || "-"}
         />
       </div>
 
       <section className="node-section">
-        <h3>Namespace labels</h3>
+        <h3>{t("Namespace labels")}</h3>
         <form
           className="form-grid node-edit-form"
           onSubmit={(event) => {
@@ -132,12 +136,12 @@ export default function NamespaceDetailView({
             name="labels"
             defaultValue={formatKeyValues(summary.labels)}
           />
-          <Button variant="primary">Save labels</Button>
+          <Button variant="primary">{t("Save labels")}</Button>
         </form>
       </section>
 
       <section className="node-section">
-        <h3>ResourceQuota</h3>
+        <h3>{t("ResourceQuota")}</h3>
         <form
           className="form-grid quota-form"
           onSubmit={(event) => onSaveResourceQuota(namespace, event)}
@@ -153,11 +157,11 @@ export default function NamespaceDetailView({
             placeholder="requests.cpu=4,requests.memory=8Gi,limits.cpu=8,pods=40"
             required
           />
-          <Button variant="primary">Save quota</Button>
+          <Button variant="primary">{t("Save quota")}</Button>
         </form>
         <SimpleTable
           rows={row.resource_quotas || []}
-          columns={["name", "hard", "used"]}
+          columns={[t("name"), t("hard"), t("used")]}
           actions={(quota) => (
             <Button
               onClick={() => onDeleteResourceQuota(namespace, quota.name)}
@@ -171,7 +175,7 @@ export default function NamespaceDetailView({
       </section>
 
       <section className="node-section">
-        <h3>LimitRange</h3>
+        <h3>{t("LimitRange")}</h3>
         <form
           className="form-grid limit-form"
           onSubmit={(event) => onSaveLimitRange(namespace, event)}
@@ -197,11 +201,11 @@ export default function NamespaceDetailView({
           />
           <Input name="min" placeholder="min: cpu=50m,memory=64Mi" />
           <Input name="max" placeholder="max: cpu=2,memory=2Gi" />
-          <Button variant="primary">Save limits</Button>
+          <Button variant="primary">{t("Save limits")}</Button>
         </form>
         <SimpleTable
           rows={row.limit_ranges || []}
-          columns={["name", "types"]}
+          columns={[t("name"), t("types")]}
           actions={(limit) => (
             <Button
               onClick={() => onDeleteLimitRange(namespace, limit.name)}
@@ -215,7 +219,7 @@ export default function NamespaceDetailView({
       </section>
 
       <section className="node-section">
-        <h3>Namespace permissions</h3>
+        <h3>{t("Namespace permissions")}</h3>
         <form
           className="form-grid permission-form"
           onSubmit={(event) => onSavePermission(namespace, event)}
@@ -247,11 +251,11 @@ export default function NamespaceDetailView({
             name="api_groups"
             placeholder="api groups: ,apps,networking.k8s.io"
           />
-          <Button variant="primary">Save permission</Button>
+          <Button variant="primary">{t("Save permission")}</Button>
         </form>
         <SimpleTable
           rows={row.role_bindings || []}
-          columns={["name", "role_ref", "subjects"]}
+          columns={[t("name"), t("role_ref"), t("subjects")]}
           actions={(binding) => (
             <Button
               onClick={() => onDeletePermission(namespace, binding.name)}
@@ -265,7 +269,7 @@ export default function NamespaceDetailView({
       </section>
 
       <section className="node-section">
-        <h3>Namespace isolation</h3>
+        <h3>{t("Namespace isolation")}</h3>
         <form
           className="form-grid isolation-form"
           onSubmit={(event) => onSaveIsolation(namespace, event)}
@@ -276,7 +280,7 @@ export default function NamespaceDetailView({
               type="checkbox"
               defaultChecked={Boolean(isolation.enabled)}
             />{" "}
-            Enable default deny isolation
+            {t("Enable default deny isolation")}
           </label>
           <label className="check-row">
             <Checkbox
@@ -284,7 +288,7 @@ export default function NamespaceDetailView({
               type="checkbox"
               defaultChecked={Boolean(isolation.allow_same_namespace)}
             />{" "}
-            Allow same namespace traffic
+            {t("Allow same namespace traffic")}
           </label>
           <label className="check-row">
             <Checkbox
@@ -292,9 +296,9 @@ export default function NamespaceDetailView({
               type="checkbox"
               defaultChecked={Boolean(isolation.allow_dns)}
             />{" "}
-            Allow DNS egress
+            {t("Allow DNS egress")}
           </label>
-          <Button variant="primary">Save isolation</Button>
+          <Button variant="primary">{t("Save isolation")}</Button>
         </form>
       </section>
     </div>
