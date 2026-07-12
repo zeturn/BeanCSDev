@@ -28,9 +28,11 @@ import {
   ChevronIcon,
   Button,
   Input,
+  Modal,
   Select,
   Checkbox,
 } from "../components/index";
+import DependencyCreateForm from "./DependencyCreateForm";
 import {
   Activity,
   AlertTriangle,
@@ -233,6 +235,7 @@ export default function DeployView({
   reusableDependencies,
   createTrackedImageFromDeploy,
   deployBasaltPass,
+  onDeployDependency,
   onConnectGitHub,
   reposLoading,
 }) {
@@ -241,6 +244,7 @@ export default function DeployView({
   const [checkingInstall, setCheckingInstall] = useState(false);
   const [repoSearch, setRepoSearch] = useState("");
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [dependencyCreateOpen, setDependencyCreateOpen] = useState(false);
   const selectedCloudflareDomain = (domains || []).find(
     (domain) =>
       String(domain.credential_id) === String(form.cloudflare_credential_id) &&
@@ -511,6 +515,11 @@ export default function DeployView({
   };
   return (
     <div className="deploy-wizard">
+      <div className="deploy-wizard-actions">
+        <Button type="button" onClick={() => setDependencyCreateOpen(true)}>
+          <Database size={15} /> {t("Deploy dependency")}
+        </Button>
+      </div>
       <section className="panel wizard-progress-panel">
         <div className="wizard-progress-head">
           <span>{step.label}</span>
@@ -2487,6 +2496,23 @@ export default function DeployView({
           </div>
         )}
       </form>
+      {dependencyCreateOpen && (
+        <Modal
+          title={t("Deploy dependency")}
+          subtitle={t("Create and deploy a managed dependency from this workflow.")}
+          className="wide-modal"
+          onClose={() => setDependencyCreateOpen(false)}
+        >
+          <DependencyCreateForm
+            definitions={dependencyDefinitions}
+            githubCredentials={credentials.github}
+            onSubmit={onDeployDependency}
+            onCancel={() => setDependencyCreateOpen(false)}
+            requireGitOpsCredential
+            submitLabel="Deploy dependency"
+          />
+        </Modal>
+      )}
     </div>
   );
 }

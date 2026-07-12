@@ -890,6 +890,11 @@ function App() {
       return false;
     }
   }
+  async function deployDependency(event) {
+    const created = await createDependency(event);
+    if (created) setNotice(t("Dependency deployment submitted."));
+    return created;
+  }
   async function createDependencyCredential(dependencyID, event) {
     event.preventDefault();
     setError("");
@@ -2827,6 +2832,7 @@ function App() {
                 reusableDependencies={reusableDependencies}
                 createTrackedImageFromDeploy={createTrackedImageFromDeploy}
                 deployBasaltPass={deployBasaltPass}
+                onDeployDependency={deployDependency}
                 onConnectGitHub={connectGitHubApp}
                 reposLoading={reposLoading}
               />
