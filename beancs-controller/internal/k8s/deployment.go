@@ -297,6 +297,12 @@ func (m *Manager) reconcileProjectVolumes(ctx context.Context, namespace, projec
 				return nil, nil, err
 			}
 			volumes = append(volumes, corev1.Volume{Name: name, VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: claimName}}})
+		case "existingpvc":
+			claimName := strings.TrimSpace(spec.ClaimName)
+			if claimName == "" {
+				return nil, nil, fmt.Errorf("existing PVC volume %s requires claimName", name)
+			}
+			volumes = append(volumes, corev1.Volume{Name: name, VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: claimName}}})
 		default:
 			return nil, nil, fmt.Errorf("unsupported volume type %q for volume %s", spec.Type, name)
 		}

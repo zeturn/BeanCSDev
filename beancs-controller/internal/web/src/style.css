@@ -1208,6 +1208,52 @@ textarea {
   gap: 10px;
 }
 
+.project-volumes {
+  display: grid;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.project-volumes-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.project-volumes-head h3 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font-size: 14px;
+}
+
+.project-volume-list {
+  display: grid;
+  gap: 8px;
+}
+
+.project-volume-row {
+  display: grid;
+  grid-template-columns: minmax(96px, 1fr) minmax(120px, 1.1fr) minmax(130px, 1.25fr) minmax(78px, 0.7fr) minmax(110px, 1fr) minmax(128px, 1.1fr) 34px;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid var(--bc-border);
+  border-radius: 7px;
+  background: #f8fafc;
+}
+
+.project-volume-row > button {
+  justify-self: end;
+}
+
+@media (max-width: 900px) {
+  .project-volume-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) 34px;
+  }
+}
+
 .section-head {
   display: flex;
   align-items: center;
@@ -1663,6 +1709,73 @@ button.domain-tile {
 
 .network-page {
   gap: 16px;
+}
+
+.storage-page {
+  gap: 16px;
+}
+
+.storage-overview {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+}
+
+.storage-tabs-panel {
+  padding: 0;
+  overflow: hidden;
+}
+
+.storage-tabs {
+  display: flex;
+  gap: 0;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--bc-border);
+}
+
+.storage-tab {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #64748b;
+  min-height: 44px;
+  white-space: nowrap;
+}
+
+.storage-tab.active {
+  color: var(--bc-text);
+  background: #f8fafc;
+  box-shadow: inset 0 -2px 0 var(--bc-primary);
+}
+
+.storage-tab b {
+  color: inherit;
+  font-size: 11px;
+}
+
+.storage-tab-panel {
+  padding: 16px;
+}
+
+.storage-tab-panel h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.storage-claims-table .tr {
+  grid-template-columns: repeat(10, minmax(112px, 1fr));
+  min-width: 1120px;
+}
+
+.storage-volumes-table .tr {
+  grid-template-columns: repeat(8, minmax(120px, 1fr));
+  min-width: 960px;
+}
+
+.storage-classes-table .tr {
+  grid-template-columns: repeat(7, minmax(128px, 1fr));
+  min-width: 900px;
 }
 
 .network-overview {

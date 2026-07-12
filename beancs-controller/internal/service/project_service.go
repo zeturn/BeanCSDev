@@ -24,6 +24,8 @@ import (
 	"github.com/zeturn/beancs-controller/internal/model"
 	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
+	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 var portNamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,13}[a-z0-9])?$`)
@@ -253,6 +255,17 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID, te
 	normalizeProjectRequest(&req)
 	if err := validateProjectPorts(req.Name, req.ExposureMode, req.Ports); err != nil {
 		return nil, err
+	}
+	if len(req.Volumes) > 0 {
+		volumes, err := projectVolumesFromConfig(req.Volumes)
+		if err != nil {
+			return nil, err
+		}
+		normalized, err := normalizeProjectVolumes(req.Name, volumes)
+		if err != nil {
+			return nil, err
+		}
+		req.Volumes = model.JSONMap{"items": normalized}
 	}
 	req.ExposureMode = aggregateExposureMode(req.Ports)
 	primaryPort := model.ProjectPort{Port: req.Port}
@@ -524,7 +537,7 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID, te
 	}
 	if project.ImageReference != "" && project.BuildSource != model.BuildSourceGitHub {
 		resources := model.ResourcePresets[project.ResourcePreset]
-		if err := s.k8s.ApplyDeploymentPorts(ctx, project.Namespace, project.Name, project.ImageReference, project.Ports, int32(project.Replicas), resources.CPURequest, resources.CPULimit, resources.MemRequest, resources.MemLimit); err != nil {
+		if err := s.k8s.ApplyProjectDeployment(ctx, *project, project.ImageReference, resources); err != nil {
 			rollback()
 			return nil, err
 		}
@@ -647,6 +660,165 @@ func (s *ProjectService) UpdateProject(ctx context.Context, project *model.Proje
 		}
 	}
 	return project, nil
+}
+
+func (s *ProjectService) UpdateProjectVolumes(ctx context.Context, project *model.Project, volumes []model.ProjectVolume) (*model.Project, error) {
+	if project == nil || project.ID == 0 {
+		return nil, fmt.Errorf("project is required")
+	}
+	normalized, err := normalizeProjectVolumes(project.Name, volumes)
+	if err != nil {
+		return nil, err
+	}
+	updated := model.JSONMap{"items": normalized}
+	if err := s.db.WithContext(ctx).Model(project).Update("volumes", updated).Error; err != nil {
+		return nil, err
+	}
+	project.Volumes = updated
+
+	if err := s.commitProjectVolumeManifests(ctx, project); err != nil {
+		return nil, err
+	}
+	if s.k8s == nil || strings.TrimSpace(project.ImageReference) == "" {
+		return project, nil
+	}
+	resources, ok := model.ResourcePresets[project.ResourcePreset]
+	if !ok {
+		resources = model.ResourcePresets["small"]
+	}
+	if err := s.k8s.ApplyProjectDeployment(ctx, *project, project.ImageReference, resources); err != nil {
+		return nil, err
+	}
+	return project, nil
+}
+
+func (s *ProjectService) commitProjectVolumeManifests(ctx context.Context, project *model.Project) error {
+	if s.gitops == nil || s.credentials == nil || project.GitHubCredentialID == 0 {
+		return nil
+	}
+	var credential model.GitHubCredential
+	if err := s.db.WithContext(ctx).First(&credential, project.GitHubCredentialID).Error; err != nil {
+		return err
+	}
+	if strings.TrimSpace(credential.GitOpsRepo) == "" {
+		return nil
+	}
+	token, err := s.credentials.GitHubToken(ctx, credential)
+	if err != nil {
+		return err
+	}
+	_, err = s.gitops.CommitProjectManifests(ctx, token, credential, project)
+	return err
+}
+
+func normalizeProjectVolumes(projectName string, volumes []model.ProjectVolume) ([]model.ProjectVolume, error) {
+	normalized := make([]model.ProjectVolume, 0, len(volumes))
+	names := map[string]bool{}
+	mountPaths := map[string]bool{}
+	maxNameLength := 63 - len(projectName) - 1
+	for _, volume := range volumes {
+		volume.Name = strings.TrimSpace(volume.Name)
+		volume.MountPath = strings.TrimSpace(volume.MountPath)
+		volume.Type = strings.ToLower(strings.TrimSpace(volume.Type))
+		if volume.Name == "" || len(validation.IsDNS1123Label(volume.Name)) > 0 {
+			return nil, fmt.Errorf("volume name %q must be a DNS-1123 label", volume.Name)
+		}
+		if len(volume.Name) > maxNameLength {
+			return nil, fmt.Errorf("volume name %q is too long for project %q", volume.Name, projectName)
+		}
+		if names[volume.Name] {
+			return nil, fmt.Errorf("volume name %q is duplicated", volume.Name)
+		}
+		if volume.MountPath == "" || !strings.HasPrefix(volume.MountPath, "/") || strings.ContainsAny(volume.MountPath, "\r\n") {
+			return nil, fmt.Errorf("volume %q mountPath must be an absolute path", volume.Name)
+		}
+		if mountPaths[volume.MountPath] {
+			return nil, fmt.Errorf("mountPath %q is duplicated", volume.MountPath)
+		}
+		names[volume.Name] = true
+		mountPaths[volume.MountPath] = true
+
+		switch volume.Type {
+		case "emptydir":
+			volume.Type = "emptyDir"
+			volume.Size = ""
+			volume.StorageClassName = ""
+			volume.AccessModes = nil
+		case "pvc":
+			volume.Size = strings.TrimSpace(volume.Size)
+			if volume.Size == "" {
+				return nil, fmt.Errorf("pvc volume %q requires size", volume.Name)
+			}
+			quantity, err := resource.ParseQuantity(volume.Size)
+			if err != nil || quantity.Sign() <= 0 {
+				return nil, fmt.Errorf("pvc volume %q has invalid size %q", volume.Name, volume.Size)
+			}
+			volume.Size = quantity.String()
+			volume.StorageClassName = strings.TrimSpace(volume.StorageClassName)
+			if volume.StorageClassName != "" && len(validation.IsDNS1123Subdomain(volume.StorageClassName)) > 0 {
+				return nil, fmt.Errorf("pvc volume %q has invalid storageClassName", volume.Name)
+			}
+			modes, err := normalizeVolumeAccessModes(volume.AccessModes)
+			if err != nil {
+				return nil, fmt.Errorf("pvc volume %q: %w", volume.Name, err)
+			}
+			volume.AccessModes = modes
+			volume.ClaimName = ""
+		case "existingpvc":
+			volume.Type = "existingPVC"
+			volume.ClaimName = strings.TrimSpace(volume.ClaimName)
+			if volume.ClaimName == "" || len(validation.IsDNS1123Label(volume.ClaimName)) > 0 {
+				return nil, fmt.Errorf("existing PVC volume %q requires a DNS-1123 claimName", volume.Name)
+			}
+			volume.Size = ""
+			volume.StorageClassName = ""
+			volume.AccessModes = nil
+		default:
+			return nil, fmt.Errorf("volume %q type must be pvc, existingPVC or emptyDir", volume.Name)
+		}
+		normalized = append(normalized, volume)
+	}
+	return normalized, nil
+}
+
+func projectVolumesFromConfig(config model.JSONMap) ([]model.ProjectVolume, error) {
+	raw, err := json.Marshal(config["items"])
+	if err != nil {
+		return nil, err
+	}
+	var volumes []model.ProjectVolume
+	if err := json.Unmarshal(raw, &volumes); err != nil {
+		return nil, fmt.Errorf("volumes.items must be a list of volume definitions")
+	}
+	return volumes, nil
+}
+
+func normalizeVolumeAccessModes(modes []string) ([]string, error) {
+	if len(modes) == 0 {
+		return []string{"ReadWriteOnce"}, nil
+	}
+	allowed := map[string]bool{
+		"ReadWriteOnce":    true,
+		"ReadOnlyMany":     true,
+		"ReadWriteMany":    true,
+		"ReadWriteOncePod": true,
+	}
+	seen := map[string]bool{}
+	normalized := make([]string, 0, len(modes))
+	for _, mode := range modes {
+		mode = strings.TrimSpace(mode)
+		if !allowed[mode] {
+			return nil, fmt.Errorf("unsupported access mode %q", mode)
+		}
+		if !seen[mode] {
+			seen[mode] = true
+			normalized = append(normalized, mode)
+		}
+	}
+	if len(normalized) == 0 {
+		return nil, fmt.Errorf("at least one access mode is required")
+	}
+	return normalized, nil
 }
 
 func (s *ProjectService) DeleteProject(ctx context.Context, project *model.Project) error {

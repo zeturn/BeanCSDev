@@ -15,6 +15,7 @@ type ProjectVolume struct {
 	Name             string   `json:"name"`
 	Type             string   `json:"type"`
 	MountPath        string   `json:"mountPath"`
+	ClaimName        string   `json:"claimName,omitempty"`
 	Size             string   `json:"size,omitempty"`
 	StorageClassName string   `json:"storageClassName,omitempty"`
 	AccessModes      []string `json:"accessModes,omitempty"`

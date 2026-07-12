@@ -109,6 +109,11 @@ const emptyRuntime = {
   services: [],
   ingresses: [],
 };
+const emptyStorage = {
+  persistent_volume_claims: [],
+  persistent_volumes: [],
+  storage_classes: [],
+};
 const navOverview = {
   id: "dashboard",
   label: "Overview",
@@ -305,6 +310,7 @@ import GitHubView from "./views/GitHubView";
 import CloudflareView from "./views/CloudflareView";
 import DomainsView from "./views/DomainsView";
 import NetworkingView from "./views/NetworkingView";
+import StorageView from "./views/StorageView";
 import RuntimeDetailDrawer from "./views/RuntimeDetailDrawer";
 import NodeDetailView from "./views/NodeDetailView";
 import NamespaceDetailView from "./views/NamespaceDetailView";
@@ -325,6 +331,7 @@ function App() {
   const [runtime, setRuntime] = useState(emptyRuntime);
   const [dashboard, setDashboard] = useState(null);
   const [network, setNetwork] = useState(null);
+  const [storage, setStorage] = useState(emptyStorage);
   const [projects, setProjects] = useState([]);
   const [applications, setApplications] = useState([]);
   const [dependencyDefinitions, setDependencyDefinitions] = useState([]);
@@ -388,6 +395,7 @@ function App() {
   const workspaceLoadingRef = useRef(false);
   const dashboardLoadingRef = useRef(false);
   const networkLoadingRef = useRef(false);
+  const storageLoadingRef = useRef(false);
   const progressLoadingRef = useRef(false);
   const nodeDetailLoadingRef = useRef(false);
   const registriesLoadingRef = useRef(false);
@@ -444,6 +452,14 @@ function App() {
     loadNetwork();
     const timer = setInterval(() => {
       if (!document.hidden) loadNetwork();
+    }, 30000);
+    return () => clearInterval(timer);
+  }, [token, view]);
+  useEffect(() => {
+    if (!token || view !== "storage") return;
+    loadStorage();
+    const timer = setInterval(() => {
+      if (!document.hidden) loadStorage();
     }, 30000);
     return () => clearInterval(timer);
   }, [token, view]);
@@ -665,6 +681,18 @@ function App() {
       setError(err.message);
     } finally {
       networkLoadingRef.current = false;
+    }
+  }
+  async function loadStorage() {
+    if (storageLoadingRef.current) return;
+    storageLoadingRef.current = true;
+    try {
+      const data = await api.get("/runtime/storage/overview");
+      setStorage(data.data || emptyStorage);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      storageLoadingRef.current = false;
     }
   }
   async function startLogin() {
@@ -2400,7 +2428,15 @@ function App() {
     const data = await api.get(`/projects/${project.id}/env`);
     return data.data || {};
   }
-  async function updateProject(event, envData) {
+  async function loadProjectVolumes(project) {
+    const data = await api.get(`/projects/${project.id}/volumes`);
+    return data.data?.items || [];
+  }
+  async function loadAvailablePVCs(project) {
+    const data = await api.get(`/projects/${project.id}/available-pvcs`);
+    return data.data || [];
+  }
+  async function updateProject(event, envData, volumes) {
     event.preventDefault();
     const body = Object.fromEntries(
       new FormData(event.currentTarget).entries(),
@@ -2408,6 +2444,7 @@ function App() {
     body.replicas = Number(body.replicas || 1);
     body.auto_deploy = body.auto_deploy === "on";
     await api.patch(`/projects/${editingProject.id}`, body);
+    await api.put(`/projects/${editingProject.id}/volumes`, { items: volumes });
     if (envData) {
       await api.put(`/projects/${editingProject.id}/env`, envData);
       setNotice(t("{name} updated and restarted.", { name: editingProject.name }));
@@ -2801,10 +2838,7 @@ function App() {
               />
             )}
             {view === "storage" && (
-              <ComingSoonView
-                title="Storage"
-                description="PersistentVolumeClaims, PersistentVolumes, and StorageClasses will be manageable here in a future release."
-              />
+              <StorageView storage={storage} refresh={loadStorage} />
             )}
             {view === "secrets" && (
               <ComingSoonView
@@ -2922,6 +2956,8 @@ function App() {
           onClose={() => setEditingProject(null)}
           onSubmit={updateProject}
           onLoadEnv={loadProjectEnv}
+          onLoadVolumes={loadProjectVolumes}
+          onLoadAvailablePVCs={loadAvailablePVCs}
         />
       )}
       {deletingProject && (

@@ -84,6 +84,10 @@ type UpdateProjectRequest struct {
 	AutoDeploy     *bool   `json:"auto_deploy" validate:"omitempty"`
 }
 
+type ProjectVolumesRequest struct {
+	Items []model.ProjectVolume `json:"items" validate:"max=16"`
+}
+
 type ScaleProjectRequest struct {
 	Replicas int `json:"replicas" validate:"required,min=0,max=20"`
 }

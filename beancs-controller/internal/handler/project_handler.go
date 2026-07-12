@@ -33,6 +33,9 @@ func (h *ProjectHandler) Register(r fiber.Router) {
 	r.Get("/projects/:id", middleware.RequireAPIScope(service.ScopeProjectsRead), middleware.ProjectAccess(h.db), h.get)
 	r.Patch("/projects/:id", middleware.RequireAPIScope(service.ScopeProjectsWrite), middleware.ProjectAccess(h.db), h.update)
 	r.Delete("/projects/:id", middleware.RequireAPIScope(service.ScopeProjectsDelete), middleware.ProjectOwner(h.db), h.delete)
+	r.Get("/projects/:id/volumes", middleware.RequireAPIScope(service.ScopeProjectsRead), middleware.ProjectAccess(h.db), h.getVolumes)
+	r.Get("/projects/:id/available-pvcs", middleware.RequireAPIScope(service.ScopeProjectsRead), middleware.ProjectAccess(h.db), h.availablePVCs)
+	r.Put("/projects/:id/volumes", middleware.RequireAPIScope(service.ScopeProjectsWrite), middleware.ProjectOwner(h.db), h.setVolumes)
 	r.Get("/projects/:id/env", middleware.RequireAPIScope(service.ScopeProjectsRead), middleware.ProjectAccess(h.db), h.getEnv)
 	r.Put("/projects/:id/env", middleware.RequireAPIScope(service.ScopeProjectsWrite), middleware.ProjectOwner(h.db), h.setEnv)
 	r.Patch("/projects/:id/env", middleware.RequireAPIScope(service.ScopeProjectsWrite), middleware.ProjectOwner(h.db), h.patchEnv)
@@ -107,6 +110,37 @@ func (h *ProjectHandler) delete(c *fiber.Ctx) error {
 		return fail(c, 400, err)
 	}
 	return c.SendStatus(204)
+}
+
+func (h *ProjectHandler) getVolumes(c *fiber.Ctx) error {
+	return c.JSON(fiber.Map{"data": fiber.Map{"items": projectFromCtx(c).VolumeConfig()}})
+}
+
+func (h *ProjectHandler) availablePVCs(c *fiber.Ctx) error {
+	project := projectFromCtx(c)
+	overview, err := h.k8s.StorageOverview(c.UserContext())
+	if err != nil {
+		return fail(c, 400, err)
+	}
+	claims := make([]k8s.PersistentVolumeClaimSummary, 0)
+	for _, claim := range overview.PersistentVolumeClaims {
+		if claim.Namespace == project.Namespace {
+			claims = append(claims, claim)
+		}
+	}
+	return c.JSON(fiber.Map{"data": claims})
+}
+
+func (h *ProjectHandler) setVolumes(c *fiber.Ctx) error {
+	var req dto.ProjectVolumesRequest
+	if err := h.parseAndValidate(c, &req); err != nil {
+		return err
+	}
+	project, err := h.service.UpdateProjectVolumes(c.UserContext(), projectFromCtx(c), req.Items)
+	if err != nil {
+		return fail(c, 400, err)
+	}
+	return c.JSON(fiber.Map{"data": fiber.Map{"items": project.VolumeConfig()}})
 }
 
 func (h *ProjectHandler) getEnv(c *fiber.Ctx) error {

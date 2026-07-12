@@ -28,6 +28,7 @@ func TestRenderManifestsIncludesHealthCheckAndPVC(t *testing.T) {
 		Volumes: model.JSONMap{
 			"items": []map[string]any{
 				{"name": "data", "type": "pvc", "mountPath": "/data", "size": "10Gi", "storageClassName": "longhorn"},
+				{"name": "archive", "type": "existingPVC", "mountPath": "/archive", "claimName": "shared-archive"},
 			},
 		},
 	}
@@ -40,6 +41,8 @@ func TestRenderManifestsIncludesHealthCheckAndPVC(t *testing.T) {
 	assertContains(t, deployment, "volumeMounts:")
 	assertContains(t, deployment, "mountPath: /data")
 	assertContains(t, deployment, "claimName: araneae-control-data")
+	assertContains(t, deployment, "mountPath: /archive")
+	assertContains(t, deployment, "claimName: shared-archive")
 
 	kustomization := files[path.Join("apps", project.Name, "base", "kustomization.yaml")]
 	assertContains(t, kustomization, "- pvc-data.yaml")
@@ -48,6 +51,9 @@ func TestRenderManifestsIncludesHealthCheckAndPVC(t *testing.T) {
 	assertContains(t, pvc, "kind: PersistentVolumeClaim")
 	assertContains(t, pvc, "storage: 10Gi")
 	assertContains(t, pvc, `storageClassName: "longhorn"`)
+	if _, ok := files[path.Join("apps", project.Name, "base", "pvc-archive.yaml")]; ok {
+		t.Fatal("existing PVC should not generate a PVC manifest")
+	}
 }
 
 func TestRenderManifestsIncludesTCPHealthCheck(t *testing.T) {

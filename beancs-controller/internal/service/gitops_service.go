@@ -1080,6 +1080,8 @@ func renderPodVolumesBlock(volumes []model.ProjectVolume, projectName string) st
 			b.WriteString("          emptyDir: {}\n")
 		case strings.EqualFold(volume.Type, "pvc"):
 			fmt.Fprintf(&b, "          persistentVolumeClaim:\n            claimName: %s\n", projectVolumeClaimName(projectName, volume.Name))
+		case strings.EqualFold(volume.Type, "existingPVC"):
+			fmt.Fprintf(&b, "          persistentVolumeClaim:\n            claimName: %s\n", volume.ClaimName)
 		}
 	}
 	return b.String()

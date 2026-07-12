@@ -895,6 +895,7 @@ export function SimpleTable({
   actions,
   compact = false,
   pageSize = 12,
+  className = "",
 }) {
   const safeRows = rows || [];
   const [page, setPage] = useState(1);
@@ -906,7 +907,13 @@ export function SimpleTable({
   }, [safeRows.length, pageSize]);
   return (
     <>
-      <div className={compact ? "table compact-table" : "table network-table"}>
+      <div
+        className={
+          compact
+            ? `table compact-table ${className}`
+            : `table network-table ${className}`
+        }
+      >
         <div className="tr head">
           {columns.map((column) => (
             <span key={column}>{column.replaceAll("_", " ")}</span>
