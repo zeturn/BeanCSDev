@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -11,6 +12,14 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
+
+type ArgoCDApplicationStatus struct {
+	SyncStatus string
+	Health     string
+	Revision   string
+	Phase      string
+	Message    string
+}
 
 func (m *Manager) ApplyArgoCDApplication(ctx context.Context, projectName, repoURL, path, namespace string) error {
 	if err := m.ensure(); err != nil {
@@ -47,6 +56,71 @@ func (m *Manager) ApplyArgoCDApplication(ctx context.Context, projectName, repoU
 	app.SetResourceVersion(current.GetResourceVersion())
 	_, err = resource.Update(ctx, app, metav1.UpdateOptions{})
 	return err
+}
+
+func (m *Manager) GetArgoCDApplicationStatus(ctx context.Context, namespace, name string) (ArgoCDApplicationStatus, error) {
+	if err := m.ensure(); err != nil {
+		return ArgoCDApplicationStatus{}, err
+	}
+	if strings.TrimSpace(namespace) == "" {
+		namespace = "argocd"
+	}
+	gvr := schema.GroupVersionResource{Group: "argoproj.io", Version: "v1alpha1", Resource: "applications"}
+	resource := m.Dynamic.Resource(gvr).Namespace(namespace)
+	current, err := resource.Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return ArgoCDApplicationStatus{}, err
+	}
+	syncStatus, _, _ := unstructured.NestedString(current.Object, "status", "sync", "status")
+	revision, _, _ := unstructured.NestedString(current.Object, "status", "sync", "revision")
+	health, _, _ := unstructured.NestedString(current.Object, "status", "health", "status")
+	phase, _, _ := unstructured.NestedString(current.Object, "status", "operationState", "phase")
+	message, _, _ := unstructured.NestedString(current.Object, "status", "operationState", "message")
+	return ArgoCDApplicationStatus{
+		SyncStatus: strings.TrimSpace(syncStatus),
+		Health:     strings.TrimSpace(health),
+		Revision:   strings.TrimSpace(revision),
+		Phase:      strings.TrimSpace(phase),
+		Message:    strings.TrimSpace(message),
+	}, nil
+}
+
+func (m *Manager) WaitForArgoCDApplication(ctx context.Context, name string, expectedRevision string, timeout time.Duration) error {
+	if err := m.ensure(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("argocd application name is required")
+	}
+	if strings.TrimSpace(expectedRevision) == "" {
+		return fmt.Errorf("expected argocd revision is required")
+	}
+	if timeout <= 0 {
+		timeout = 5 * time.Minute
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		status, err := m.GetArgoCDApplicationStatus(ctx, "argocd", name)
+		if err != nil {
+			return err
+		}
+		if strings.EqualFold(status.Phase, "Failed") || strings.EqualFold(status.Phase, "Error") {
+			return fmt.Errorf("argocd application %s failed: phase=%s message=%s", name, status.Phase, status.Message)
+		}
+		if strings.EqualFold(status.SyncStatus, "Synced") &&
+			strings.EqualFold(status.Health, "Healthy") &&
+			revisionMatches(status.Revision, expectedRevision) {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("argocd application %s sync timeout: expected_revision=%s actual_revision=%s sync_status=%s health=%s phase=%s message=%s", name, expectedRevision, status.Revision, status.SyncStatus, status.Health, status.Phase, status.Message)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(3 * time.Second):
+		}
+	}
 }
 
 func (m *Manager) ApplyArgoCDRepository(ctx context.Context, name, repoURL string, data map[string]string) error {
@@ -106,4 +180,12 @@ func (m *Manager) DeleteArgoCDApplication(ctx context.Context, projectName strin
 		return nil // already gone
 	}
 	return err
+}
+
+func revisionMatches(actual, expected string) bool {
+	actual = strings.TrimSpace(actual)
+	expected = strings.TrimSpace(expected)
+	return actual == expected ||
+		strings.HasPrefix(actual, expected) ||
+		strings.HasPrefix(expected, actual)
 }

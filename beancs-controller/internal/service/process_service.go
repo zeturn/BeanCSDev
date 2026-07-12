@@ -195,17 +195,18 @@ func (s *ProcessService) failJob(ctx context.Context, job *model.ProcessJob, fai
 }
 
 type processRun struct {
-	svc        *ProcessService
-	ctx        context.Context
-	processID  uint
-	project    *model.Project
-	deployment *model.Deployment
-	token      string
-	cred       model.GitHubCredential
-	owner      string
-	repo       string
-	image      string
-	runID      int64
+	svc            *ProcessService
+	ctx            context.Context
+	processID      uint
+	project        *model.Project
+	deployment     *model.Deployment
+	token          string
+	cred           model.GitHubCredential
+	owner          string
+	repo           string
+	image          string
+	runID          int64
+	gitOpsRevision string
 }
 
 func (r *processRun) run() error {
@@ -504,6 +505,11 @@ func (r *processRun) argocd() error {
 	if err := r.prepareGitHub(job); err != nil {
 		return r.svc.failJob(r.ctx, job, err.Error())
 	}
+	if !UsesGitOps(r.project, r.cred) {
+		r.svc.appendJobLog(r.ctx, job, "GitOps repo not configured; deployment will use direct Kubernetes apply path")
+		_ = r.svc.db.WithContext(r.ctx).Model(r.deployment).Updates(map[string]any{"status": "deploying", "image_ref": r.image, "failure_reason": ""}).Error
+		return r.svc.finishJob(r.ctx, job, model.ProcessStatusSucceeded, "")
+	}
 	r.project.ImageReference = r.image
 	if err := r.svc.db.WithContext(r.ctx).Model(r.project).Update("image_reference", r.image).Error; err != nil {
 		return r.svc.failJob(r.ctx, job, err.Error())
@@ -512,10 +518,12 @@ func (r *processRun) argocd() error {
 		return r.svc.failJob(r.ctx, job, err.Error())
 	}
 	if r.svc.gitops != nil {
-		if err := r.svc.gitops.CommitProjectManifests(r.ctx, r.token, r.cred, r.project); err != nil {
+		revision, err := r.svc.gitops.CommitProjectManifests(r.ctx, r.token, r.cred, r.project)
+		if err != nil {
 			return r.svc.failJob(r.ctx, job, err.Error())
 		}
-		r.svc.appendJobLog(r.ctx, job, "GitOps manifests committed")
+		r.gitOpsRevision = revision
+		r.svc.appendJobLog(r.ctx, job, "GitOps manifests committed revision="+revision)
 	}
 	if r.svc.k8s != nil && r.cred.GitOpsRepo != "" {
 		var cfg *config.Config
@@ -577,18 +585,55 @@ func (r *processRun) rollout() error {
 	if err != nil {
 		return err
 	}
-	resources := model.ResourcePresets[r.project.ResourcePreset]
+	if UsesGitOps(r.project, r.cred) {
+		if err := r.rolloutWithArgoCD(job); err != nil {
+			return r.svc.failJob(r.ctx, job, err.Error())
+		}
+	} else {
+		if err := r.rolloutDirectly(job); err != nil {
+			return r.svc.failJob(r.ctx, job, err.Error())
+		}
+	}
+	_ = r.svc.db.WithContext(r.ctx).Model(r.deployment).Updates(map[string]any{"status": "deploying", "image_ref": r.image, "failure_reason": ""}).Error
+	return r.svc.finishJob(r.ctx, job, model.ProcessStatusSucceeded, "")
+}
+
+func (r *processRun) rolloutWithArgoCD(job *model.ProcessJob) error {
+	if r.svc.k8s == nil {
+		return fmt.Errorf("kubernetes manager is not configured")
+	}
+	if strings.TrimSpace(r.gitOpsRevision) == "" {
+		return fmt.Errorf("gitops revision is empty")
+	}
+	if err := r.svc.k8s.WaitForArgoCDApplication(r.ctx, r.project.Name, r.gitOpsRevision, 5*time.Minute); err != nil {
+		return err
+	}
+	r.svc.appendJobLog(r.ctx, job, fmt.Sprintf("Argo CD synced revision=%s", r.gitOpsRevision))
+	if err := r.svc.k8s.WaitForDeploymentRollout(r.ctx, r.project.Namespace, r.project.Name, 5*time.Minute); err != nil {
+		return err
+	}
+	r.svc.appendJobLog(r.ctx, job, fmt.Sprintf("deployment rollout completed %s/%s", r.project.Namespace, r.project.Name))
+	return nil
+}
+
+func (r *processRun) rolloutDirectly(job *model.ProcessJob) error {
+	if r.svc.k8s == nil {
+		return nil
+	}
+	resources := resolveResourcePreset(r.project.ResourcePreset)
+	if err := r.svc.k8s.ApplyProjectDeployment(r.ctx, *r.project, r.image, resources); err != nil {
+		return err
+	}
+	r.svc.appendJobLog(r.ctx, job, fmt.Sprintf("deployment applied %s/%s image=%s", r.project.Namespace, r.project.Name, r.image))
+	return nil
+}
+
+func resolveResourcePreset(name string) model.ResourceSpec {
+	resources := model.ResourcePresets[name]
 	if resources.CPURequest == "" {
 		resources = model.ResourcePresets["small"]
 	}
-	if r.svc.k8s != nil {
-		if err := r.svc.k8s.ApplyProjectDeployment(r.ctx, *r.project, r.image, resources); err != nil {
-			return r.svc.failJob(r.ctx, job, err.Error())
-		}
-		r.svc.appendJobLog(r.ctx, job, fmt.Sprintf("deployment applied %s/%s image=%s", r.project.Namespace, r.project.Name, r.image))
-	}
-	_ = r.svc.db.WithContext(r.ctx).Model(r.deployment).Updates(map[string]any{"status": "running", "image_ref": r.image, "failure_reason": ""}).Error
-	return r.svc.finishJob(r.ctx, job, model.ProcessStatusSucceeded, "")
+	return resources
 }
 
 func (r *processRun) connectivity() error {

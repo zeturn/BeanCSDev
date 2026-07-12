@@ -67,27 +67,26 @@ func (s *GitOpsService) resolveGitOpsCredential(ctx context.Context, cred model.
 	return cred
 }
 
-func (s *GitOpsService) CommitProjectManifests(ctx context.Context, token string, cred model.GitHubCredential, project *model.Project) error {
+func (s *GitOpsService) CommitProjectManifests(ctx context.Context, token string, cred model.GitHubCredential, project *model.Project) (string, error) {
 	if token == "" || cred.GitOpsRepo == "" {
-		return nil
+		return "", nil
 	}
 	owner, repo, ok := resolveGitOpsRepo(cred)
 	if !ok {
-		return fmt.Errorf("gitops repo must be owner/repo when org is empty")
+		return "", fmt.Errorf("gitops repo must be owner/repo when org is empty")
 	}
 	token, err := s.resolveGitOpsToken(ctx, token, cred)
 	if err != nil {
-		return err
+		return "", err
 	}
 	client := github.NewClient(nil).WithAuthToken(token)
 	files := s.RenderManifests(project)
-	msg := fmt.Sprintf("beancs: add %s manifests", project.Name)
-	for p, content := range files {
-		if err := putFile(ctx, client, owner, repo, p, content, msg); err != nil {
-			return err
-		}
+	imageTag := extractImageTag(project.ImageReference)
+	if strings.TrimSpace(imageTag) == "" {
+		imageTag = "latest"
 	}
-	return nil
+	msg := fmt.Sprintf("deploy(%s): update image to %s", project.Name, imageTag)
+	return commitFilesAtomically(ctx, client, owner, repo, files, msg)
 }
 
 func (s *GitOpsService) CommitDependencyManifests(ctx context.Context, token string, cred model.GitHubCredential, app model.Application, dep model.ManagedDependency) error {
@@ -149,7 +148,8 @@ func (s *GitOpsService) UpdateImageTag(ctx context.Context, token string, cred m
 	if err != nil {
 		if resp != nil && resp.Response != nil && resp.Response.StatusCode == 404 {
 			// Overlay doesn't exist yet — fall back to full manifest commit
-			return s.CommitProjectManifests(ctx, token, cred, project)
+			_, err := s.CommitProjectManifests(ctx, token, cred, project)
+			return err
 		}
 		return fmt.Errorf("read gitops overlay: %w", err)
 	}
@@ -171,7 +171,8 @@ func (s *GitOpsService) UpdateImageTag(ctx context.Context, token string, cred m
 	// Replace newTag value
 	if !newTagPattern.MatchString(updated) {
 		// No newTag line found — fall back to full manifest commit
-		return s.CommitProjectManifests(ctx, token, cred, project)
+		_, err := s.CommitProjectManifests(ctx, token, cred, project)
+		return err
 	}
 	updated = newTagPattern.ReplaceAllString(updated, "${1}"+newTag)
 
@@ -942,6 +943,67 @@ func renderPVCStorageClassName(volume model.ProjectVolume) string {
 
 func projectVolumeClaimName(projectName, volumeName string) string {
 	return projectName + "-" + volumeName
+}
+
+func commitFilesAtomically(ctx context.Context, client *github.Client, owner, repo string, files map[string]string, message string) (string, error) {
+	repository, _, err := client.Repositories.Get(ctx, owner, repo)
+	if err != nil {
+		return "", fmt.Errorf("read gitops repository: %w", err)
+	}
+	branch := strings.TrimSpace(repository.GetDefaultBranch())
+	if branch == "" {
+		branch = "main"
+	}
+	refName := "refs/heads/" + branch
+	ref, _, err := client.Git.GetRef(ctx, owner, repo, refName)
+	if err != nil {
+		return "", fmt.Errorf("read gitops branch %s: %w", branch, err)
+	}
+	headSHA := ref.GetObject().GetSHA()
+	if strings.TrimSpace(headSHA) == "" {
+		return "", fmt.Errorf("gitops branch %s has empty head sha", branch)
+	}
+	baseCommit, _, err := client.Git.GetCommit(ctx, owner, repo, headSHA)
+	if err != nil {
+		return "", fmt.Errorf("read gitops head commit: %w", err)
+	}
+	baseTreeSHA := baseCommit.GetTree().GetSHA()
+	entries := make([]*github.TreeEntry, 0, len(files))
+	for p, content := range files {
+		filePath := strings.TrimSpace(p)
+		if filePath == "" {
+			continue
+		}
+		entries = append(entries, &github.TreeEntry{
+			Path:    github.String(filePath),
+			Type:    github.String("blob"),
+			Mode:    github.String("100644"),
+			Content: github.String(content),
+		})
+	}
+	tree, _, err := client.Git.CreateTree(ctx, owner, repo, baseTreeSHA, entries)
+	if err != nil {
+		return "", fmt.Errorf("create gitops tree: %w", err)
+	}
+	commit := &github.Commit{
+		Message: github.String(strings.TrimSpace(message)),
+		Tree:    tree,
+		Parents: []*github.Commit{{SHA: github.String(headSHA)}},
+	}
+	newCommit, _, err := client.Git.CreateCommit(ctx, owner, repo, commit, nil)
+	if err != nil {
+		return "", fmt.Errorf("create gitops commit: %w", err)
+	}
+	updatedRef := &github.Reference{
+		Ref: github.String(refName),
+		Object: &github.GitObject{
+			SHA: newCommit.SHA,
+		},
+	}
+	if _, _, err := client.Git.UpdateRef(ctx, owner, repo, updatedRef, false); err != nil {
+		return "", fmt.Errorf("update gitops branch ref: %w", err)
+	}
+	return newCommit.GetSHA(), nil
 }
 
 func putFile(ctx context.Context, client *github.Client, owner, repo, p, content, msg string) error {

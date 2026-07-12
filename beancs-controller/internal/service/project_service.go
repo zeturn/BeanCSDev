@@ -568,7 +568,7 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID, te
 	})
 
 	if project.BuildSource != model.BuildSourceGitHub {
-		if err := s.gitops.CommitProjectManifests(ctx, ghToken, ghCred, project); err != nil {
+		if _, err := s.gitops.CommitProjectManifests(ctx, ghToken, ghCred, project); err != nil {
 			rollback()
 			return nil, err
 		}
