@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { BrowserRouter, useLocation, useNavigate } from "react-router-dom";
 import {
   filterNavItems,
   filterNavSections,
@@ -114,6 +115,62 @@ const emptyStorage = {
   persistent_volumes: [],
   storage_classes: [],
 };
+const viewPaths = {
+  dashboard: "/",
+  applications: "/workloads/applications",
+  projects: "/workloads/projects",
+  deploy: "/workloads/deploy",
+  dependencies: "/workloads/dependencies",
+  progress: "/workloads/progress",
+  deployments: "/workloads/deployments",
+  pods: "/workloads/pods",
+  services: "/workloads/services",
+  ingresses: "/workloads/ingresses",
+  workloadImage: "/workloads/images",
+  nodes: "/infrastructure/nodes",
+  namespaces: "/infrastructure/namespaces",
+  networking: "/infrastructure/networking",
+  storage: "/infrastructure/storage",
+  github: "/integrations/github",
+  cloudflare: "/integrations/cloudflare",
+  domains: "/integrations/domains",
+  registries: "/integrations/registries",
+  apiKeys: "/security/api-keys",
+  secrets: "/security/secrets",
+  accessControl: "/security/access-control",
+  alerts: "/observability/alerts",
+  events: "/observability/events",
+  logs: "/observability/logs",
+  metrics: "/observability/metrics",
+  settings: "/settings",
+};
+const viewsByPath = Object.fromEntries(
+  Object.entries(viewPaths).map(([view, path]) => [path, view]),
+);
+
+function pathForView(view) {
+  return viewPaths[view] || viewPaths.dashboard;
+}
+
+function viewForPath(pathname) {
+  const normalized =
+    pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
+  return viewsByPath[normalized] || "dashboard";
+}
+
+function isKnownViewPath(pathname) {
+  const normalized =
+    pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
+  return Boolean(viewsByPath[normalized]);
+}
+
+function progressPath(projectID = "", processID = "") {
+  const params = new URLSearchParams();
+  if (projectID) params.set("project", String(projectID));
+  if (processID) params.set("process", String(processID));
+  const query = params.toString();
+  return `${pathForView("progress")}${query ? `?${query}` : ""}`;
+}
 const navOverview = {
   id: "dashboard",
   label: "Overview",
@@ -317,13 +374,15 @@ import NamespaceDetailView from "./views/NamespaceDetailView";
 import ProjectModal from "./views/ProjectModal";
 function App() {
   const { t } = useI18n();
+  const navigate = useNavigate();
+  const routeLocation = useLocation();
   const [config, setConfig] = useState(null);
   const [token, setToken] = useState(localStorage.getItem(tokenKey) || "");
   const [loginPhase, setLoginPhase] = useState(() =>
     hasOAuthCallback() ? "completing" : "idle",
   );
   const [basaltProfile, setBasaltProfile] = useState(null);
-  const [view, setView] = useState("dashboard");
+  const view = viewForPath(routeLocation.pathname);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -412,6 +471,30 @@ function App() {
     () => filterNavItems([navOverview], sidebarQuery),
     [sidebarQuery],
   );
+
+  useEffect(() => {
+    if (!["progress", "logs"].includes(view)) return;
+    const params = new URLSearchParams(routeLocation.search);
+    const projectID = params.get("project") || "";
+    const processID = params.get("process") || "";
+    if (projectID !== activeProgressProjectID) {
+      setActiveProgressProjectID(projectID);
+      setProjectProgress(null);
+    }
+    if (processID !== activeProcessID) setActiveProcessID(processID);
+  }, [view, routeLocation.search]);
+
+  useEffect(() => {
+    const query = new URLSearchParams(routeLocation.search);
+    if (
+      !token ||
+      isKnownViewPath(routeLocation.pathname) ||
+      query.has("code") ||
+      query.get("github_app") === "connected"
+    )
+      return;
+    navigate(pathForView("dashboard"), { replace: true });
+  }, [token, routeLocation.pathname, routeLocation.search, navigate]);
 
   useEffect(() => {
     if (!userMenuOpen) return undefined;
@@ -546,12 +629,11 @@ function App() {
         setLoginPhase("authenticated");
         localStorage.setItem(tokenKey, accessToken);
         setToken(accessToken);
-        history.replaceState({}, "", location.pathname);
+        navigate(pathForView("dashboard"), { replace: true });
       } else if (location.search.includes("github_app=connected")) {
         setLoginPhase("idle");
-        setView("github");
+        navigate(pathForView("github"), { replace: true });
         setNotice(t("GitHub App connected."));
-        history.replaceState({}, "", location.pathname);
       } else {
         setLoginPhase("idle");
       }
@@ -729,6 +811,15 @@ function App() {
     setApplications([]);
     setDependencyDefinitions([]);
     setReusableDependencies([]);
+    navigate(pathForView("dashboard"), { replace: true });
+  }
+  function openProgress(projectID = "", processID = "", replace = false) {
+    const nextProjectID = String(projectID || "");
+    const nextProcessID = String(processID || "");
+    setActiveProgressProjectID(nextProjectID);
+    setActiveProcessID(nextProcessID);
+    setProjectProgress(null);
+    navigate(progressPath(nextProjectID, nextProcessID), { replace });
   }
   async function createDependency(event) {
     event.preventDefault();
@@ -1870,7 +1961,7 @@ function App() {
         },
       ],
     });
-    setView("progress");
+    openProgress();
     try {
       const created = await api.post("/projects", {
         ...payload,
@@ -1887,6 +1978,7 @@ function App() {
         setActiveProcessID(String(deploymentResult.process.id));
       setNotice(t("Project created. Deployment process queued."));
       setActiveProgressProjectID(String(created.id));
+      openProgress(created.id, deploymentResult.process?.id, true);
       setInstallProgress((current) =>
         current
           ? {
@@ -2060,7 +2152,7 @@ function App() {
       setDeployForm(defaultDeployForm());
       await loadWorkspace();
       await loadProcesses();
-      setView("progress");
+      openProgress("", result.process?.id);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -2117,7 +2209,7 @@ function App() {
         },
       ],
     });
-    setView("progress");
+    openProgress();
     try {
       const created = await api.post("/applications/monorepo", payload);
       const projects = created.projects || created.data?.projects || [];
@@ -2134,7 +2226,7 @@ function App() {
           },
         ),
       );
-      if (firstProject?.id) setActiveProgressProjectID(String(firstProject.id));
+      if (firstProject?.id) openProgress(firstProject.id);
       setInstallProgress((current) =>
         current
           ? {
@@ -2238,7 +2330,7 @@ function App() {
         },
       ],
     });
-    setView("progress");
+    openProgress();
     try {
       const created = await api.post("/applications/from-repo-config", payload);
       const app = created.application || {};
@@ -2251,7 +2343,7 @@ function App() {
           path: payload.config_path,
         }),
       );
-      if (firstProject?.id) setActiveProgressProjectID(String(firstProject.id));
+      if (firstProject?.id) openProgress(firstProject.id);
       setInstallProgress((current) =>
         current
           ? {
@@ -2509,9 +2601,7 @@ function App() {
         commit_sha: project.github_branch || "",
       });
       setNotice(t("{name} build started.", { name: project.name }));
-      setActiveProgressProjectID(String(project.id));
-      if (result.process?.id) setActiveProcessID(String(result.process.id));
-      setView("progress");
+      openProgress(project.id, result.process?.id);
       await loadProcesses();
       await loadProjectProgress(String(project.id));
     } catch (err) {
@@ -2540,7 +2630,7 @@ function App() {
       stopProjectLogFollow();
     }
     setSidebarOpen(false);
-    setView(item.id);
+    navigate(pathForView(item.id));
   }
   if (!token) {
     const loginBusy = loginPhase !== "idle";
@@ -2779,8 +2869,7 @@ function App() {
                 onBuild={buildProject}
                 onTracking={openProjectTracking}
                 onProgress={(project) => {
-                  setActiveProgressProjectID(String(project.id));
-                  setView("progress");
+                  openProgress(project.id);
                 }}
               />
             )}
@@ -2797,9 +2886,7 @@ function App() {
                 runtimeDeployments={runtime.deployments || []}
                 refresh={loadWorkspace}
                 onOpenProcess={(process) => {
-                  setActiveProcessID(String(process.id));
-                  setActiveProgressProjectID(String(process.project_id || ""));
-                  setView("progress");
+                  openProgress(process.project_id, process.id);
                 }}
               />
             )}
@@ -2832,7 +2919,7 @@ function App() {
               <WorkloadImageView
                 images={containerImages}
                 onRefresh={loadRegistriesPage}
-                onOpenRegistry={() => setView("registries")}
+                onOpenRegistry={() => navigate(pathForView("registries"))}
                 onRefreshImage={refreshTrackedImage}
                 onDeleteImage={deleteTrackedImage}
               />
@@ -2864,7 +2951,7 @@ function App() {
                 logStatus={projectLogStatus}
                 onStartLogFollow={startProjectLogFollow}
                 onStopLogFollow={stopProjectLogFollow}
-                onOpenPods={() => setView("pods")}
+                onOpenPods={() => navigate(pathForView("pods"))}
               />
             )}
             {view === "metrics" && (
@@ -3034,6 +3121,8 @@ function App() {
 }
 createRoot(document.getElementById("root")).render(
   <I18nProvider>
-    <App />
+    <BrowserRouter>
+      <App />
+    </BrowserRouter>
   </I18nProvider>,
 );
