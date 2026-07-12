@@ -40,6 +40,15 @@ func TestWaitForArgoCDApplicationSucceedsOnExpectedRevision(t *testing.T) {
 	}
 }
 
+func TestWaitForArgoCDApplicationSyncAllowsProgressingHealth(t *testing.T) {
+	manager := testArgoCDManager(t, "Synced", "Progressing", "abcdef123456", "Succeeded", "")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := manager.WaitForArgoCDApplicationSync(ctx, "demo", "abcdef12", 100*time.Millisecond); err != nil {
+		t.Fatalf("expected sync wait to ignore application health, got %v", err)
+	}
+}
+
 func TestWaitForArgoCDApplicationFailsOnOperationPhase(t *testing.T) {
 	manager := testArgoCDManager(t, "OutOfSync", "Progressing", "abcdef123456", "Failed", "sync failed")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)

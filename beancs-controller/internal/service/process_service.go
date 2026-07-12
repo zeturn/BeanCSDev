@@ -642,8 +642,14 @@ func (r *processRun) rolloutWithArgoCD(job *model.ProcessJob) error {
 	if err != nil {
 		return err
 	}
-	if err := r.svc.k8s.WaitForArgoCDApplication(r.ctx, appName, r.gitOpsRevision, 5*time.Minute); err != nil {
-		return err
+	if r.isWebhookRollout() && appName != r.project.Name {
+		if err := r.svc.k8s.WaitForArgoCDApplicationSync(r.ctx, appName, r.gitOpsRevision, 5*time.Minute); err != nil {
+			return err
+		}
+	} else {
+		if err := r.svc.k8s.WaitForArgoCDApplication(r.ctx, appName, r.gitOpsRevision, 5*time.Minute); err != nil {
+			return err
+		}
 	}
 	r.svc.appendJobLog(r.ctx, job, fmt.Sprintf("Argo CD synced revision=%s", r.gitOpsRevision))
 	if err := r.svc.k8s.WaitForDeploymentRollout(r.ctx, r.project.Namespace, r.project.Name, 5*time.Minute); err != nil {

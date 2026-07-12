@@ -86,6 +86,14 @@ func (m *Manager) GetArgoCDApplicationStatus(ctx context.Context, namespace, nam
 }
 
 func (m *Manager) WaitForArgoCDApplication(ctx context.Context, name string, expectedRevision string, timeout time.Duration) error {
+	return m.waitForArgoCDApplication(ctx, name, expectedRevision, timeout, true)
+}
+
+func (m *Manager) WaitForArgoCDApplicationSync(ctx context.Context, name string, expectedRevision string, timeout time.Duration) error {
+	return m.waitForArgoCDApplication(ctx, name, expectedRevision, timeout, false)
+}
+
+func (m *Manager) waitForArgoCDApplication(ctx context.Context, name string, expectedRevision string, timeout time.Duration, requireHealthy bool) error {
 	if err := m.ensure(); err != nil {
 		return err
 	}
@@ -108,7 +116,7 @@ func (m *Manager) WaitForArgoCDApplication(ctx context.Context, name string, exp
 			return fmt.Errorf("argocd application %s failed: phase=%s message=%s", name, status.Phase, status.Message)
 		}
 		if strings.EqualFold(status.SyncStatus, "Synced") &&
-			strings.EqualFold(status.Health, "Healthy") &&
+			(!requireHealthy || strings.EqualFold(status.Health, "Healthy")) &&
 			revisionMatches(status.Revision, expectedRevision) {
 			return nil
 		}
