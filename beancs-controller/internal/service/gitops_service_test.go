@@ -74,6 +74,31 @@ func TestRenderManifestsIncludesTCPHealthCheck(t *testing.T) {
 	}
 }
 
+func TestUpdateKustomizeImageEntryUpdatesOnlyMatchingImage(t *testing.T) {
+	content := `resources:
+  - ../../base
+images:
+  - name: registry.beancs.hollowdata.com/hollowdata/apicred-backend
+    newName: registry.beancs.hollowdata.com/hollowdata/apicred-backend
+    newTag: beancs-73fe1fa
+  - name: registry.beancs.hollowdata.com/hollowdata/apicred-frontend
+    newName: registry.beancs.hollowdata.com/hollowdata/apicred-frontend
+    newTag: beancs-73fe1fa
+`
+	project := &model.Project{
+		Name:                   "apicred-backend",
+		RegistryImageReference: "registry.beancs.hollowdata.com/hollowdata/apicred-backend",
+	}
+
+	updated, changed := updateKustomizeImageEntry(content, project, "registry.beancs.hollowdata.com/hollowdata/apicred-backend:v2026.07.12-5")
+
+	if !changed {
+		t.Fatal("expected kustomization to change")
+	}
+	assertContains(t, updated, "registry.beancs.hollowdata.com/hollowdata/apicred-backend\n    newName: registry.beancs.hollowdata.com/hollowdata/apicred-backend\n    newTag: v2026.07.12-5")
+	assertContains(t, updated, "registry.beancs.hollowdata.com/hollowdata/apicred-frontend\n    newName: registry.beancs.hollowdata.com/hollowdata/apicred-frontend\n    newTag: beancs-73fe1fa")
+}
+
 func TestRenderDependencyManifestsUsesExistingSecret(t *testing.T) {
 	service := NewGitOpsService(nil, nil)
 	registry, err := NewDependencyDefinitionRegistry()

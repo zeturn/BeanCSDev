@@ -134,7 +134,7 @@ func (s *ProcessService) runDeploymentProcess(ctx context.Context, processID uin
 		s.failProcess(ctx, processID, err)
 		return
 	}
-	r := &processRun{svc: s, ctx: ctx, processID: processID, project: &project, deployment: &deployment}
+	r := &processRun{svc: s, ctx: ctx, processID: processID, process: &process, project: &project, deployment: &deployment}
 	if err := r.run(); err != nil {
 		s.failProcess(ctx, processID, err)
 		return
@@ -198,6 +198,7 @@ type processRun struct {
 	svc            *ProcessService
 	ctx            context.Context
 	processID      uint
+	process        *model.Process
 	project        *model.Project
 	deployment     *model.Deployment
 	token          string
@@ -518,7 +519,13 @@ func (r *processRun) argocd() error {
 		return r.svc.failJob(r.ctx, job, err.Error())
 	}
 	if r.svc.gitops != nil {
-		revision, err := r.svc.gitops.CommitProjectManifests(r.ctx, r.token, r.cred, r.project)
+		var revision string
+		var err error
+		if r.isWebhookRollout() {
+			revision, err = r.svc.gitops.UpdateImageTag(r.ctx, r.token, r.cred, r.project, r.image)
+		} else {
+			revision, err = r.svc.gitops.CommitProjectManifests(r.ctx, r.token, r.cred, r.project)
+		}
 		if err != nil {
 			return r.svc.failJob(r.ctx, job, err.Error())
 		}
@@ -530,11 +537,15 @@ func (r *processRun) argocd() error {
 		if r.svc.build != nil {
 			cfg = r.svc.build.cfg
 		}
-		if err := ensureArgoCDGitOpsRepository(r.ctx, r.svc.k8s, r.svc.gitops, r.svc.credentials, cfg, r.token, r.cred, r.project.Name); err != nil {
+		appName, appPath, appNamespace, err := r.gitOpsApplicationTarget()
+		if err != nil {
+			return r.svc.failJob(r.ctx, job, err.Error())
+		}
+		if err := ensureArgoCDGitOpsRepository(r.ctx, r.svc.k8s, r.svc.gitops, r.svc.credentials, cfg, r.token, r.cred, appName); err != nil {
 			return r.svc.failJob(r.ctx, job, err.Error())
 		}
 		r.svc.appendJobLog(r.ctx, job, "Argo CD GitOps repository credentials reconciled")
-		if err := r.svc.k8s.ApplyArgoCDApplication(r.ctx, r.project.Name, gitOpsRepoURL(r.cred), fmt.Sprintf("apps/%s/overlays/dev", r.project.Name), r.project.Namespace); err != nil {
+		if err := r.svc.k8s.ApplyArgoCDApplication(r.ctx, appName, gitOpsRepoURL(r.cred), appPath, appNamespace); err != nil {
 			return r.svc.failJob(r.ctx, job, err.Error())
 		}
 		r.svc.appendJobLog(r.ctx, job, "Argo CD application reconciled")
@@ -580,6 +591,28 @@ func (r *processRun) syncApplicationDependencies(job *model.ProcessJob) error {
 	return nil
 }
 
+func (r *processRun) isWebhookRollout() bool {
+	return r != nil && r.process != nil && r.process.TriggeredBy == "webhook"
+}
+
+func (r *processRun) gitOpsApplicationTarget() (string, string, string, error) {
+	appName := r.project.Name
+	namespace := r.project.Namespace
+	if r.isWebhookRollout() && r.project.ApplicationID != nil && *r.project.ApplicationID != 0 {
+		var app model.Application
+		if err := r.svc.db.WithContext(r.ctx).First(&app, *r.project.ApplicationID).Error; err != nil {
+			return "", "", "", err
+		}
+		if strings.TrimSpace(app.Name) != "" {
+			appName = app.Name
+		}
+		if strings.TrimSpace(app.Namespace) != "" {
+			namespace = app.Namespace
+		}
+	}
+	return appName, fmt.Sprintf("apps/%s/overlays/dev", appName), namespace, nil
+}
+
 func (r *processRun) rollout() error {
 	job, err := r.svc.startJob(r.ctx, r.processID, "rollout")
 	if err != nil {
@@ -605,7 +638,11 @@ func (r *processRun) rolloutWithArgoCD(job *model.ProcessJob) error {
 	if strings.TrimSpace(r.gitOpsRevision) == "" {
 		return fmt.Errorf("gitops revision is empty")
 	}
-	if err := r.svc.k8s.WaitForArgoCDApplication(r.ctx, r.project.Name, r.gitOpsRevision, 5*time.Minute); err != nil {
+	appName, _, _, err := r.gitOpsApplicationTarget()
+	if err != nil {
+		return err
+	}
+	if err := r.svc.k8s.WaitForArgoCDApplication(r.ctx, appName, r.gitOpsRevision, 5*time.Minute); err != nil {
 		return err
 	}
 	r.svc.appendJobLog(r.ctx, job, fmt.Sprintf("Argo CD synced revision=%s", r.gitOpsRevision))
