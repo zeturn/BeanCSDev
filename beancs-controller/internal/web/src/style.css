@@ -3331,7 +3331,7 @@ button:hover {
 .sidebar-user {
   position: static;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
   margin: auto 4px 0;
@@ -3340,6 +3340,66 @@ button:hover {
   border-radius: 0;
   background: transparent;
   color: var(--bc-text);
+}
+
+.sidebar-user-menu-anchor {
+  position: relative;
+}
+
+.sidebar-user-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 30;
+  min-width: 188px;
+  padding: 8px;
+  border: 1px solid var(--bc-border);
+  border-radius: 12px;
+  background: var(--bc-surface);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.12);
+  display: grid;
+  gap: 4px;
+}
+
+.sidebar-user-menu-section {
+  display: grid;
+  gap: 8px;
+  padding: 6px 8px 8px;
+}
+
+.sidebar-user-menu-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--bc-muted);
+}
+
+.sidebar-user-menu .lang-switcher {
+  width: 100%;
+}
+
+.sidebar-user-menu .lang-switcher button {
+  flex: 1;
+}
+
+.sidebar-user-menu-item {
+  width: 100%;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--bc-text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.sidebar-user-menu-item:hover {
+  background: var(--bc-active);
 }
 
 .user-avatar,

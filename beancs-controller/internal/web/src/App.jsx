@@ -366,6 +366,8 @@ function App() {
   const [trackingLoading, setTrackingLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarQuery, setSidebarQuery] = useState("");
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef(null);
   const [activeProgressProjectID, setActiveProgressProjectID] = useState("");
   const [activeProcessID, setActiveProcessID] = useState("");
   const [processRecords, setProcessRecords] = useState([]);
@@ -402,6 +404,23 @@ function App() {
     () => filterNavItems([navOverview], sidebarQuery),
     [sidebarQuery],
   );
+
+  useEffect(() => {
+    if (!userMenuOpen) return undefined;
+    function handlePointerDown(event) {
+      if (userMenuRef.current?.contains(event.target)) return;
+      setUserMenuOpen(false);
+    }
+    function handleKeyDown(event) {
+      if (event.key === "Escape") setUserMenuOpen(false);
+    }
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [userMenuOpen]);
   useEffect(() => {
     boot();
   }, []);
@@ -2568,7 +2587,6 @@ function App() {
             )}
         </div>
         <div className="sidebar-user">
-          <LanguageSwitcher />
           <div className="user-avatar">
             {userProfile.avatar ? (
               <img
@@ -2583,21 +2601,38 @@ function App() {
             <b>{userProfile.name}</b>
             <span>{userProfile.detail}</span>
           </div>
-          <Button
-            type="button"
-            aria-label={t("More account actions")}
-            variant="icon"
-          >
-            <MoreHorizontal size={16} />
-          </Button>
-          <Button
-            type="button"
-            aria-label={t("Sign out")}
-            variant="icon"
-            onClick={logout}
-          >
-            <LogOut size={16} />
-          </Button>
+          <div className="sidebar-user-menu-anchor" ref={userMenuRef}>
+            <Button
+              type="button"
+              aria-label={t("More account actions")}
+              aria-expanded={userMenuOpen}
+              aria-haspopup="menu"
+              variant="icon"
+              onClick={() => setUserMenuOpen((open) => !open)}
+            >
+              <MoreHorizontal size={16} />
+            </Button>
+            {userMenuOpen && (
+              <div className="sidebar-user-menu" role="menu">
+                <div className="sidebar-user-menu-section" role="none">
+                  <span className="sidebar-user-menu-label">{t("Language")}</span>
+                  <LanguageSwitcher />
+                </div>
+                <button
+                  type="button"
+                  className="sidebar-user-menu-item"
+                  role="menuitem"
+                  onClick={() => {
+                    setUserMenuOpen(false);
+                    logout();
+                  }}
+                >
+                  <LogOut size={16} />
+                  {t("Sign out")}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </aside>
       <main className="workspace">

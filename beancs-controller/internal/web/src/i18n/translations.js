@@ -830,6 +830,7 @@ export const zh = {
 
   // ---- App shell / actions / confirm dialogs ----
   "More account actions": "更多账户操作",
+  Language: "语言",
   "Sign out": "退出登录",
   "Open navigation": "打开导航",
   "Delete this {kind} credential?": "删除该 {kind} 凭据？",
