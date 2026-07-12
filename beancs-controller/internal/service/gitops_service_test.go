@@ -90,13 +90,40 @@ images:
 		RegistryImageReference: "registry.beancs.hollowdata.com/hollowdata/apicred-backend",
 	}
 
-	updated, changed := updateKustomizeImageEntry(content, project, "registry.beancs.hollowdata.com/hollowdata/apicred-backend:v2026.07.12-5")
+	updated, matched, changed := updateKustomizeImageEntry(content, project, "registry.beancs.hollowdata.com/hollowdata/apicred-backend:v2026.07.12-5")
 
+	if !matched {
+		t.Fatal("expected backend image entry to match")
+	}
 	if !changed {
 		t.Fatal("expected kustomization to change")
 	}
 	assertContains(t, updated, "registry.beancs.hollowdata.com/hollowdata/apicred-backend\n    newName: registry.beancs.hollowdata.com/hollowdata/apicred-backend\n    newTag: v2026.07.12-5")
 	assertContains(t, updated, "registry.beancs.hollowdata.com/hollowdata/apicred-frontend\n    newName: registry.beancs.hollowdata.com/hollowdata/apicred-frontend\n    newTag: beancs-73fe1fa")
+}
+
+func TestUpdateKustomizeImageEntryReportsMatchWithoutChange(t *testing.T) {
+	content := `images:
+  - name: registry.beancs.hollowdata.com/hollowdata/apicred-frontend
+    newName: registry.beancs.hollowdata.com/hollowdata/apicred-frontend
+    newTag: v2026.07.12-5
+`
+	project := &model.Project{
+		Name:                   "apicred-frontend",
+		RegistryImageReference: "registry.beancs.hollowdata.com/hollowdata/apicred-frontend",
+	}
+
+	updated, matched, changed := updateKustomizeImageEntry(content, project, "registry.beancs.hollowdata.com/hollowdata/apicred-frontend:v2026.07.12-5")
+
+	if !matched {
+		t.Fatal("expected frontend image entry to match")
+	}
+	if changed {
+		t.Fatal("expected matching image entry to require no change")
+	}
+	if updated != content {
+		t.Fatal("expected content to stay unchanged")
+	}
 }
 
 func TestRenderDependencyManifestsUsesExistingSecret(t *testing.T) {

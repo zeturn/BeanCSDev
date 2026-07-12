@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"regexp"
@@ -147,20 +148,28 @@ func (s *GitOpsService) UpdateImageTag(ctx context.Context, token string, cred m
 	}
 	client := github.NewClient(nil).WithAuthToken(token)
 
-	if filePath, updated, sha, ok, err := s.updateApplicationImageOverlay(ctx, client, owner, repo, project, newImageRef); err != nil {
-		return "", err
-	} else if ok {
-		msg := fmt.Sprintf("beancs(%s): update image to %s", project.Name, newTag)
-		opts := &github.RepositoryContentFileOptions{
-			Message: github.String(msg),
-			Content: []byte(updated),
-			SHA:     sha,
-		}
-		resp, _, err := client.Repositories.UpdateFile(ctx, owner, repo, filePath, opts)
-		if err != nil {
+	for attempt := 0; attempt < 3; attempt++ {
+		if filePath, updated, sha, revision, ok, err := s.updateApplicationImageOverlay(ctx, client, owner, repo, project, newImageRef); err != nil {
 			return "", err
+		} else if ok {
+			if revision != "" {
+				return revision, nil
+			}
+			msg := fmt.Sprintf("beancs(%s): update image to %s", project.Name, newTag)
+			opts := &github.RepositoryContentFileOptions{
+				Message: github.String(msg),
+				Content: []byte(updated),
+				SHA:     sha,
+			}
+			resp, _, err := client.Repositories.UpdateFile(ctx, owner, repo, filePath, opts)
+			if err == nil {
+				return repositoryContentCommitSHA(resp), nil
+			}
+			if !isGitHubReferenceConflict(err) || attempt == 2 {
+				return "", err
+			}
+			continue
 		}
-		return repositoryContentCommitSHA(resp), nil
 	}
 
 	filePath := path.Join("apps", project.Name, "overlays", "dev", "kustomization.yaml")
@@ -219,48 +228,55 @@ func repositoryContentCommitSHA(resp *github.RepositoryContentResponse) string {
 	return ""
 }
 
-func (s *GitOpsService) updateApplicationImageOverlay(ctx context.Context, client *github.Client, owner, repo string, project *model.Project, newImageRef string) (string, string, *string, bool, error) {
+func (s *GitOpsService) updateApplicationImageOverlay(ctx context.Context, client *github.Client, owner, repo string, project *model.Project, newImageRef string) (string, string, *string, string, bool, error) {
 	if s == nil || s.db == nil || project == nil || project.ApplicationID == nil || *project.ApplicationID == 0 {
-		return "", "", nil, false, nil
+		return "", "", nil, "", false, nil
 	}
 	var app model.Application
 	if err := s.db.WithContext(ctx).First(&app, *project.ApplicationID).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			return "", "", nil, false, nil
+			return "", "", nil, "", false, nil
 		}
-		return "", "", nil, false, err
+		return "", "", nil, "", false, err
 	}
 	if strings.TrimSpace(app.Name) == "" || app.Name == project.Name {
-		return "", "", nil, false, nil
+		return "", "", nil, "", false, nil
 	}
 	filePath := path.Join("apps", app.Name, "overlays", "dev", "kustomization.yaml")
 	current, _, resp, err := client.Repositories.GetContents(ctx, owner, repo, filePath, nil)
 	if err != nil {
 		if resp != nil && resp.Response != nil && resp.Response.StatusCode == 404 {
-			return "", "", nil, false, nil
+			return "", "", nil, "", false, nil
 		}
-		return "", "", nil, false, fmt.Errorf("read gitops application overlay: %w", err)
+		return "", "", nil, "", false, fmt.Errorf("read gitops application overlay: %w", err)
 	}
 	content, err := current.GetContent()
 	if err != nil {
-		return "", "", nil, false, fmt.Errorf("decode gitops application overlay: %w", err)
+		return "", "", nil, "", false, fmt.Errorf("decode gitops application overlay: %w", err)
 	}
-	updated, changed := updateKustomizeImageEntry(content, project, newImageRef)
+	updated, matched, changed := updateKustomizeImageEntry(content, project, newImageRef)
+	if !matched {
+		return "", "", nil, "", false, nil
+	}
 	if !changed {
-		return "", "", nil, false, nil
+		revision, err := gitOpsHeadRevision(ctx, client, owner, repo)
+		if err != nil {
+			return "", "", nil, "", false, err
+		}
+		return "", "", nil, revision, true, nil
 	}
-	return filePath, updated, current.SHA, true, nil
+	return filePath, updated, current.SHA, "", true, nil
 }
 
-func updateKustomizeImageEntry(content string, project *model.Project, newImageRef string) (string, bool) {
+func updateKustomizeImageEntry(content string, project *model.Project, newImageRef string) (string, bool, bool) {
 	newName := extractImageName(newImageRef)
 	newTag := extractImageTag(newImageRef)
 	if newName == "" || newTag == "" {
-		return content, false
+		return content, false, false
 	}
 	targets := imageEntryTargets(project, newName)
 	if len(targets) == 0 {
-		return content, false
+		return content, false, false
 	}
 	lines := strings.Split(content, "\n")
 	entryStart := -1
@@ -284,7 +300,7 @@ func updateKustomizeImageEntry(content string, project *model.Project, newImageR
 		break
 	}
 	if entryStart == -1 {
-		return content, false
+		return content, false, false
 	}
 	changed := false
 	hasNewName := false
@@ -319,9 +335,9 @@ func updateKustomizeImageEntry(content string, project *model.Project, newImageR
 		changed = true
 	}
 	if !changed {
-		return content, false
+		return content, true, false
 	}
-	return strings.Join(lines, "\n"), true
+	return strings.Join(lines, "\n"), true, true
 }
 
 func imageEntryTargets(project *model.Project, newName string) map[string]bool {
@@ -335,6 +351,33 @@ func imageEntryTargets(project *model.Project, newName string) map[string]bool {
 		}
 	}
 	return targets
+}
+
+func gitOpsHeadRevision(ctx context.Context, client *github.Client, owner, repo string) (string, error) {
+	ghRepo, _, err := client.Repositories.Get(ctx, owner, repo)
+	if err != nil {
+		return "", err
+	}
+	branch := strings.TrimSpace(ghRepo.GetDefaultBranch())
+	if branch == "" {
+		branch = "main"
+	}
+	ref, _, err := client.Git.GetRef(ctx, owner, repo, "refs/heads/"+branch)
+	if err != nil {
+		return "", err
+	}
+	if ref != nil && ref.Object != nil {
+		return ref.Object.GetSHA(), nil
+	}
+	return "", nil
+}
+
+func isGitHubReferenceConflict(err error) bool {
+	var ghErr *github.ErrorResponse
+	if !errors.As(err, &ghErr) || ghErr.Response == nil {
+		return false
+	}
+	return ghErr.Response.StatusCode == 409 || ghErr.Response.StatusCode == 422
 }
 
 // DeleteProjectManifests removes the entire apps/<project>/ directory from the gitops repo.
