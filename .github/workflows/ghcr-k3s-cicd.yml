@@ -218,6 +218,7 @@ jobs:
             --from-literal=BP_BROWSER_AUTH_URL="${{ secrets.BP_BROWSER_AUTH_URL }}" \
             --from-literal=BP_BROWSER_CLIENT_ID="${{ secrets.BP_BROWSER_CLIENT_ID }}" \
             --from-literal=BP_BROWSER_CLIENT_SECRET="${{ secrets.BP_BROWSER_CLIENT_SECRET }}" \
+            --from-literal=BEANCS_ARGOCD_URL="${{ vars.BEANCS_ARGOCD_URL }}" \
             --from-literal=WEBHOOK_SECRET="${{ secrets.BEANCS_WEBHOOK_SECRET }}" \
             --from-literal=ENCRYPTION_KEY="${{ secrets.BEANCS_ENCRYPTION_KEY }}" \
             --from-literal=INGRESS_IP="${{ vars.INGRESS_IP }}" \

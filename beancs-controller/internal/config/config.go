@@ -21,6 +21,7 @@ type Config struct {
 	BPBrowserAuthURL   string `env:"BP_BROWSER_AUTH_URL"`
 	BPBrowserClientID  string `env:"BP_BROWSER_CLIENT_ID"`
 	BPBrowserSecret    string `env:"BP_BROWSER_CLIENT_SECRET"`
+	ArgoCDURL          string `env:"BEANCS_ARGOCD_URL"`
 
 	WebhookSecret string `env:"WEBHOOK_SECRET,required"`
 	EncryptionKey string `env:"ENCRYPTION_KEY,required"`
@@ -81,6 +82,7 @@ func Load() (*Config, error) {
 	if cfg.BPBrowserClientID == "" {
 		cfg.BPBrowserClientID = cfg.BPMgmtClientID
 	}
+	cfg.ArgoCDURL = publicURL(cfg.ArgoCDURL)
 	cfg.SelfWebhookHost = strings.TrimRight(strings.TrimSpace(cfg.SelfWebhookHost), "/")
 	return &cfg, nil
 }

@@ -178,6 +178,7 @@ func registerAPI(api fiber.Router, cfg *config.Config, db *gorm.DB, registry *ba
 		return c.JSON(fiber.Map{
 			"auth_url":                 cfg.BPBrowserAuthURL,
 			"client_id":                cfg.BPBrowserClientID,
+			"argocd_url":               cfg.ArgoCDURL,
 			"registry_host":            cfg.RegistryHost,
 			"basaltpass_image_project": "basaltpass",
 		})

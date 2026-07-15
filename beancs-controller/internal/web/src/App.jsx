@@ -61,6 +61,7 @@ import {
   Cpu,
   Database,
   Edit3,
+  ExternalLink,
   FileText,
   GitBranch,
   Github,
@@ -463,9 +464,29 @@ function App() {
     () => profileFromBasalt(basaltProfile, token),
     [basaltProfile, token],
   );
+  const configuredNavSections = useMemo(() => {
+    const argocdURL = String(config?.argocd_url || "").trim();
+    if (!argocdURL) return navSections;
+    return navSections.map((section) =>
+      section.id === "integrations"
+        ? {
+            ...section,
+            items: [
+              ...section.items,
+              {
+                id: "argocd",
+                label: "Argo CD",
+                icon: ExternalLink,
+                externalUrl: argocdURL,
+              },
+            ],
+          }
+        : section,
+    );
+  }, [config?.argocd_url]);
   const filteredNavSections = useMemo(
-    () => filterNavSections(navSections, sidebarQuery),
-    [sidebarQuery],
+    () => filterNavSections(configuredNavSections, sidebarQuery),
+    [configuredNavSections, sidebarQuery],
   );
   const filteredOverview = useMemo(
     () => filterNavItems([navOverview], sidebarQuery),
@@ -2628,6 +2649,11 @@ function App() {
     }
   }
   function selectNav(item) {
+    if (item.externalUrl) {
+      setSidebarOpen(false);
+      window.open(item.externalUrl, "_blank", "noopener,noreferrer");
+      return;
+    }
     if (item.id === "progress") {
       setActiveProgressProjectID("");
       setActiveProcessID("");
