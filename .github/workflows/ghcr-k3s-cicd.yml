@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 env:
-  REGISTRY_HOST: registry.beancs.hollowdata.com
+  REGISTRY_HOST: registry.beancs.com
   IMAGE_NAME: beancs-controller
   REGISTRY_PROJECT: hollowdata
   NAMESPACE: beancs-system
