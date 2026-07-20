@@ -599,6 +599,9 @@ export const zh = {
   "domain": "域名",
   "domains": "域名",
   "Account domains": "账户域名",
+  "Refresh domains": "刷新域名",
+  "Refreshing": "正在刷新",
+  "Cloudflare domains refreshed.": "Cloudflare 域名已刷新。",
   "cached zone": "已缓存区域",
   "Choose a Cloudflare account to view its domains.":
     "请选择 Cloudflare 账户以查看其域名。",

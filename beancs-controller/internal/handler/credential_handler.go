@@ -44,6 +44,7 @@ func (h *CredentialHandler) registerCloudflare(r fiber.Router) {
 	r.Post("/", middleware.RequireAPIScope(service.ScopeCredentialsWrite), h.createCloudflare)
 	r.Get("/", middleware.RequireAPIScope(service.ScopeCredentialsRead), h.listCloudflare)
 	r.Get("/domains", middleware.RequireAPIScope(service.ScopeCredentialsRead), h.listCloudflareDomains)
+	r.Post("/:id/domains/refresh", middleware.RequireAPIScope(service.ScopeCredentialsWrite), h.refreshCloudflareDomains)
 	r.Get("/:id/dns-records", middleware.RequireAPIScope(service.ScopeCredentialsRead), h.listCloudflareDNSRecords)
 	r.Post("/:id/dns-records", middleware.RequireAPIScope(service.ScopeCredentialsWrite), h.createCloudflareDNSRecord)
 	r.Put("/:id/dns-records/:record_id", middleware.RequireAPIScope(service.ScopeCredentialsWrite), h.updateCloudflareDNSRecord)
@@ -194,6 +195,21 @@ func (h *CredentialHandler) listCloudflareDomains(c *fiber.Ctx) error {
 	out, err := h.service.ListCloudflareDomains(c.UserContext(), middleware.UserID(c))
 	if err != nil {
 		return fail(c, 500, err)
+	}
+	return c.JSON(fiber.Map{"data": out})
+}
+
+func (h *CredentialHandler) refreshCloudflareDomains(c *fiber.Ctx) error {
+	id, err := idParam(c, "id")
+	if err != nil {
+		return fail(c, 400, err)
+	}
+	if err := h.service.RequireAccess(middleware.UserID(c), model.CredentialTypeCloudflare, id, true); err != nil {
+		return fail(c, 403, err)
+	}
+	out, err := h.service.RefreshCloudflareDomains(c.UserContext(), id)
+	if err != nil {
+		return fail(c, 400, err)
 	}
 	return c.JSON(fiber.Map{"data": out})
 }

@@ -934,6 +934,87 @@ func (s *CredentialService) ListCloudflareDomains(ctx context.Context, userID st
 	return out, nil
 }
 
+func (s *CredentialService) RefreshCloudflareDomains(ctx context.Context, id uint) ([]dto.CloudflareDomainResponse, error) {
+	cred, token, err := s.cloudflareCredentialToken(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	zones, err := s.cloudflareZones(ctx, token, cred.ZoneID, cred.AccountID)
+	if err != nil {
+		return nil, err
+	}
+	if len(zones) == 0 {
+		return nil, fmt.Errorf("no Cloudflare zones were returned for this token")
+	}
+	accountID := strings.TrimSpace(cred.AccountID)
+	for _, zone := range zones {
+		if accountID == "" {
+			accountID = strings.TrimSpace(zone.Account.ID)
+		}
+	}
+	caches := cloudflareDomainCaches(cred.ID, accountID, zones)
+	if len(caches) == 0 {
+		return nil, fmt.Errorf("no usable Cloudflare zones were returned for this token")
+	}
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if accountID != "" && cred.AccountID == "" {
+			if err := tx.Model(&model.CloudflareCredential{}).Where("id = ?", cred.ID).Update("account_id", accountID).Error; err != nil {
+				return err
+			}
+			cred.AccountID = accountID
+		}
+		for i := range caches {
+			if err := upsertCloudflareDomainCache(tx, &caches[i]); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return cloudflareDomainResponsesForCredential(ctx, s.db, cred), nil
+}
+
+func cloudflareDomainResponsesForCredential(ctx context.Context, db *gorm.DB, cred model.CloudflareCredential) []dto.CloudflareDomainResponse {
+	out := []dto.CloudflareDomainResponse{}
+	seen := map[string]bool{}
+	var cached []model.CloudflareDomainCache
+	_ = db.WithContext(ctx).Where("cloudflare_credential_id = ?", cred.ID).Order("domain asc").Find(&cached).Error
+	for _, domain := range cached {
+		if domain.Domain == "" || domain.ZoneID == "" {
+			continue
+		}
+		key := strings.ToLower(domain.AccountID + "|" + domain.ZoneID + "|" + domain.Domain)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, dto.CloudflareDomainResponse{
+			CredentialID: cred.ID,
+			Credential:   cred.Name,
+			ZoneID:       domain.ZoneID,
+			Domain:       domain.Domain,
+			AccountID:    domain.AccountID,
+			Status:       domain.Status,
+			Active:       cred.IsActive,
+		})
+	}
+	if cred.Domain != "" && cred.ZoneID != "" {
+		key := strings.ToLower(cred.AccountID + "|" + cred.ZoneID + "|" + cred.Domain)
+		if !seen[key] {
+			out = append(out, dto.CloudflareDomainResponse{
+				CredentialID: cred.ID,
+				Credential:   cred.Name,
+				ZoneID:       cred.ZoneID,
+				Domain:       cred.Domain,
+				AccountID:    cred.AccountID,
+				Active:       cred.IsActive,
+			})
+		}
+	}
+	return out
+}
+
 func (s *CredentialService) ListGitHub(ctx context.Context, userID string) ([]model.GitHubCredential, error) {
 	var out []model.GitHubCredential
 	err := s.db.WithContext(ctx).Joins("JOIN user_credentials uc ON uc.credential_id = git_hub_credentials.id AND uc.credential_type = ?", model.CredentialTypeGitHub).

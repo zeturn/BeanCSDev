@@ -70,11 +70,13 @@ export default function CloudflareView({
   setEditingRecord,
   onCreate,
   onDelete,
+  onRefreshDomains,
   onLoadDNS,
   onSaveDNS,
   onDeleteDNS,
 }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [refreshingDomains, setRefreshingDomains] = useState(false);
   const selected = credentials.find(
     (cred) => String(cred.id) === String(selectedID),
   );
@@ -98,6 +100,15 @@ export default function CloudflareView({
     setSelectedZoneID(String(domain.zone_id));
     setEditingRecord(null);
     onLoadDNS(domain.credential_id, domain.zone_id);
+  };
+  const refreshDomains = async () => {
+    if (!selected || !onRefreshDomains) return;
+    setRefreshingDomains(true);
+    try {
+      await onRefreshDomains(selected.id);
+    } finally {
+      setRefreshingDomains(false);
+    }
   };
   return (
     <div className="stack cloudflare-page">
@@ -173,12 +184,25 @@ export default function CloudflareView({
       </section>
 
       <section className="panel">
-        <h2>
-          <Globe2 size={18} />{" "}
-          {selected
-            ? t("{name} domains", { name: selected.name })
-            : t("Account domains")}
-        </h2>
+        <div className="account-header">
+          <h2>
+            <Globe2 size={18} />{" "}
+            {selected
+              ? t("{name} domains", { name: selected.name })
+              : t("Account domains")}
+          </h2>
+          <Button
+            type="button"
+            disabled={!selected || refreshingDomains}
+            onClick={refreshDomains}
+          >
+            <RefreshCw
+              size={15}
+              className={refreshingDomains ? "spin" : ""}
+            />{" "}
+            {refreshingDomains ? t("Refreshing") : t("Refresh domains")}
+          </Button>
+        </div>
         <div className="domain-grid">
           {accountDomains.map((domain) => (
             <Button

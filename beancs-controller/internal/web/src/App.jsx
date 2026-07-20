@@ -993,6 +993,23 @@ function App() {
       setError(err.message);
     }
   }
+  async function refreshCloudflareDomains(id) {
+    if (!id) return;
+    setError("");
+    try {
+      const data = await api.post(`/credentials/cloudflare/${id}/domains/refresh`, {});
+      const refreshed = data.data || [];
+      setDomains((current) => [
+        ...current.filter(
+          (domain) => String(domain.credential_id) !== String(id),
+        ),
+        ...refreshed,
+      ]);
+      setNotice(t("Cloudflare domains refreshed."));
+    } catch (err) {
+      setError(err.message);
+    }
+  }
   async function createAPIKey(event) {
     event.preventDefault();
     setError("");
@@ -3033,6 +3050,7 @@ function App() {
                 setEditingRecord={setEditingDNSRecord}
                 onCreate={createCredential}
                 onDelete={(id) => deleteCredential("cloudflare", id)}
+                onRefreshDomains={refreshCloudflareDomains}
                 onLoadDNS={loadDNSRecords}
                 onSaveDNS={saveDNSRecord}
                 onDeleteDNS={deleteDNSRecord}
