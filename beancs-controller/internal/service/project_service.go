@@ -372,7 +372,7 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID, te
 			rollback()
 			return nil, err
 		}
-		cfToken, err = s.credentials.DecryptCloudflareToken(cfCred)
+		cfToken, err = s.credentials.CloudflareToken(ctx, cfCred)
 		if err != nil {
 			rollback()
 			return nil, err
@@ -827,7 +827,7 @@ func (s *ProjectService) DeleteProject(ctx context.Context, project *model.Proje
 	var cfToken string
 	if project.CloudflareCredentialID != nil {
 		if err := s.db.WithContext(ctx).First(&cfCred, *project.CloudflareCredentialID).Error; err == nil {
-			cfToken, _ = s.credentials.DecryptCloudflareToken(cfCred)
+			cfToken, _ = s.credentials.CloudflareToken(ctx, cfCred)
 		}
 	}
 	var dnsRecords []model.DNSRecord

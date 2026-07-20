@@ -68,6 +68,7 @@ export default function CloudflareView({
   dnsRecords,
   editingRecord,
   setEditingRecord,
+  onConnectApp,
   onCreate,
   onDelete,
   onRefreshDomains,
@@ -77,6 +78,7 @@ export default function CloudflareView({
 }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [refreshingDomains, setRefreshingDomains] = useState(false);
+  const [connectingApp, setConnectingApp] = useState(false);
   const selected = credentials.find(
     (cred) => String(cred.id) === String(selectedID),
   );
@@ -110,6 +112,15 @@ export default function CloudflareView({
       setRefreshingDomains(false);
     }
   };
+  const connectApp = async () => {
+    if (!onConnectApp) return;
+    setConnectingApp(true);
+    try {
+      await onConnectApp();
+    } finally {
+      setConnectingApp(false);
+    }
+  };
   return (
     <div className="stack cloudflare-page">
       <section className="panel action-panel">
@@ -123,13 +134,26 @@ export default function CloudflareView({
             )}
           </p>
         </div>
-        <Button
-          type="button"
-          onClick={() => setDrawerOpen(true)}
-          variant="primary"
-        >
-          <Plus size={15} /> {t("Add account")}
-        </Button>
+        <div className="row-actions">
+          <Button
+            type="button"
+            onClick={connectApp}
+            variant="primary"
+            disabled={connectingApp}
+          >
+            <Cloud
+              size={15}
+              className={connectingApp ? "spin" : ""}
+            />{" "}
+            {connectingApp ? t("Connecting") : t("Connect Cloudflare")}
+          </Button>
+          <Button
+            type="button"
+            onClick={() => setDrawerOpen(true)}
+          >
+            <Plus size={15} /> {t("Add token")}
+          </Button>
+        </div>
       </section>
 
       <section className="panel">

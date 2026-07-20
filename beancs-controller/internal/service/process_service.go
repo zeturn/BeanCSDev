@@ -343,7 +343,7 @@ func (r *processRun) network() error {
 			if err := r.svc.db.WithContext(r.ctx).First(&cred, *r.project.CloudflareCredentialID).Error; err != nil {
 				return r.svc.failJob(r.ctx, job, err.Error())
 			}
-			token, err := r.svc.credentials.DecryptCloudflareToken(cred)
+			token, err := r.svc.credentials.CloudflareToken(r.ctx, cred)
 			if err != nil {
 				return r.svc.failJob(r.ctx, job, err.Error())
 			}
@@ -363,7 +363,7 @@ func (r *processRun) network() error {
 				if err := r.svc.db.WithContext(r.ctx).First(&cred, *r.project.CloudflareCredentialID).Error; err != nil {
 					return r.svc.failJob(r.ctx, job, err.Error())
 				}
-				token, err := r.svc.credentials.DecryptCloudflareToken(cred)
+				token, err := r.svc.credentials.CloudflareToken(r.ctx, cred)
 				if err != nil {
 					return r.svc.failJob(r.ctx, job, err.Error())
 				}

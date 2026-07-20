@@ -8,6 +8,10 @@ type CreateCloudflareCredentialRequest struct {
 	AccountID string `json:"account_id" validate:"omitempty,max=128"`
 }
 
+type StartCloudflareAppInstallRequest struct {
+	Name string `json:"name" validate:"omitempty,max=128"`
+}
+
 type CloudflareDomainResponse struct {
 	CredentialID uint   `json:"credential_id"`
 	Credential   string `json:"credential"`

@@ -19,6 +19,7 @@ This repository can deploy BeanCS from GitHub Actions to a k3s cluster.
 - `BP_BROWSER_CLIENT_SECRET`: BasaltPass browser OAuth client secret.
 - `BEANCS_WEBHOOK_SECRET`: webhook verification secret.
 - `BEANCS_ENCRYPTION_KEY`: 64 hex characters.
+- `BEANCS_CLOUDFLARE_OAUTH_CLIENT_SECRET`: Cloudflare OAuth app client secret for click-to-connect Cloudflare accounts.
 - `BEANCS_REGISTRY_USERNAME`: registry username used to push and pull the controller image.
 - `BEANCS_REGISTRY_TOKEN`: registry token used to push and pull the controller image.
 
@@ -36,12 +37,15 @@ Optional:
 - `BEANCS_CERT_MANAGER_PRIVATE_KEY_SECRET_SUFFIX`: ACME account private key Secret suffix, defaults to `account-key`.
 - `BEANCS_API_RATE_LIMIT_PER_MINUTE`: authenticated API requests allowed per token/IP per minute, defaults to `600`.
 - `BEANCS_WEBHOOK_RATE_LIMIT_PER_MINUTE`: webhook requests allowed per minute, defaults to `300`.
+- `BEANCS_CLOUDFLARE_OAUTH_SCOPES`: Cloudflare OAuth scopes requested by the app, defaults to `zone.read dns.write`.
+- `BEANCS_CLOUDFLARE_OAUTH_REDIRECT_URL`: Cloudflare OAuth redirect URL, defaults to `https://beancs.com/api/v1/credentials/cloudflare/app/callback`.
 
 ## Required GitHub Variables
 
 - `INGRESS_IP`: public Traefik ingress IP.
 - `BEANCS_PUBLIC_HOST`: public BeanCS dashboard host.
 - `BEANCS_WEBHOOK_HOST`: public webhook host.
+- `BEANCS_CLOUDFLARE_OAUTH_CLIENT_ID`: Cloudflare OAuth app client ID.
 - `BEANCS_TAILSCALE_HOST`: Tailscale-only host, defaults to `beancs-controller` in the workflow.
 
 ## Release

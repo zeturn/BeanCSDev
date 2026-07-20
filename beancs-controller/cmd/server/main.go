@@ -204,6 +204,7 @@ func registerAPI(api fiber.Router, cfg *config.Config, db *gorm.DB, registry *ba
 	})
 	credentialHandler := handler.NewCredentialHandler(db, credentialSvc, registry, cfg, v)
 	credentialHandler.RegisterGitHubAppCallback(api.Group("/credentials/github"))
+	credentialHandler.RegisterCloudflareAppCallback(api.Group("/credentials/cloudflare"))
 	secured := api.Group("/", authLimiter, middleware.Auth(registry, apiKeySvc), middleware.Audit(db))
 	credentialHandler.Register(secured)
 	handler.NewAPIKeyHandler(apiKeySvc, v).Register(secured)

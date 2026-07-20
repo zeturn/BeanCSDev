@@ -511,7 +511,8 @@ function App() {
       !token ||
       isKnownViewPath(routeLocation.pathname) ||
       query.has("code") ||
-      query.get("github_app") === "connected"
+      query.get("github_app") === "connected" ||
+      query.has("cloudflare_app")
     )
       return;
     navigate(pathForView("dashboard"), { replace: true });
@@ -655,6 +656,15 @@ function App() {
         setLoginPhase("idle");
         navigate(pathForView("github"), { replace: true });
         setNotice(t("GitHub App connected."));
+      } else if (location.search.includes("cloudflare_app=connected")) {
+        setLoginPhase("idle");
+        navigate(pathForView("cloudflare"), { replace: true });
+        setNotice(t("Cloudflare account connected."));
+      } else if (location.search.includes("cloudflare_app=error")) {
+        const params = new URLSearchParams(location.search);
+        setLoginPhase("idle");
+        navigate(pathForView("cloudflare"), { replace: true });
+        setError(params.get("message") || t("Cloudflare authorization failed."));
       } else {
         setLoginPhase("idle");
       }
@@ -955,6 +965,12 @@ function App() {
     if (gitopsRepo) body.gitops_repo = gitopsRepo.trim();
     const data = await api.post("/credentials/github/app/start", body);
     location.href = data.install_url;
+  }
+  async function connectCloudflareApp(event) {
+    event?.preventDefault();
+    setError("");
+    const data = await api.post("/credentials/cloudflare/app/start", {});
+    location.href = data.auth_url;
   }
   async function updateGitHubCredential(id, updates) {
     try {
@@ -3048,6 +3064,7 @@ function App() {
                 dnsRecords={dnsRecords}
                 editingRecord={editingDNSRecord}
                 setEditingRecord={setEditingDNSRecord}
+                onConnectApp={connectCloudflareApp}
                 onCreate={createCredential}
                 onDelete={(id) => deleteCredential("cloudflare", id)}
                 onRefreshDomains={refreshCloudflareDomains}

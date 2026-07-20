@@ -19,7 +19,7 @@ const pages = [
   { name: 'GitHub', view: 'GitHubView', props: ['credentials', 'onConnect', 'onUpdate', 'onRepos', 'onDelete', 'reposByCredential', 'repoFilters', 'setRepoFilters'] },
   { name: 'Domains', view: 'DomainsView', props: ['domains'] },
   { name: 'Networking', view: 'NetworkingView', props: ['network', 'refresh', 'onSaveService', 'onDeleteService', 'onSaveIngress', 'onDeleteIngress', 'onSaveNetworkPolicy', 'onDeleteNetworkPolicy', 'onDetail'] },
-  { name: 'Cloudflare', view: 'CloudflareView', props: ['credentials', 'domains', 'selectedID', 'selectedZoneID', 'setSelectedID', 'setSelectedZoneID', 'dnsRecords', 'editingRecord', 'setEditingRecord', 'onCreate', 'onDelete', 'onLoadDNS', 'onSaveDNS', 'onDeleteDNS'] }
+  { name: 'Cloudflare', view: 'CloudflareView', props: ['credentials', 'domains', 'selectedID', 'selectedZoneID', 'setSelectedID', 'setSelectedZoneID', 'dnsRecords', 'editingRecord', 'setEditingRecord', 'onConnectApp', 'onCreate', 'onDelete', 'onRefreshDomains', 'onLoadDNS', 'onSaveDNS', 'onDeleteDNS'] }
 ];
 
 if (!fs.existsSync('src/pages')) {

@@ -41,6 +41,7 @@ func (h *CredentialHandler) Register(r fiber.Router) {
 }
 
 func (h *CredentialHandler) registerCloudflare(r fiber.Router) {
+	r.Post("/app/start", middleware.RequireAPIScope(service.ScopeCredentialsWrite), h.startCloudflareAppInstall)
 	r.Post("/", middleware.RequireAPIScope(service.ScopeCredentialsWrite), h.createCloudflare)
 	r.Get("/", middleware.RequireAPIScope(service.ScopeCredentialsRead), h.listCloudflare)
 	r.Get("/domains", middleware.RequireAPIScope(service.ScopeCredentialsRead), h.listCloudflareDomains)
@@ -72,6 +73,10 @@ func (h *CredentialHandler) registerGitHub(r fiber.Router) {
 
 func (h *CredentialHandler) RegisterGitHubAppCallback(r fiber.Router) {
 	r.Get("/app/callback", h.githubAppCallback)
+}
+
+func (h *CredentialHandler) RegisterCloudflareAppCallback(r fiber.Router) {
+	r.Get("/app/callback", h.cloudflareAppCallback)
 }
 
 func (h *CredentialHandler) registerBasaltPass(r fiber.Router) {
@@ -116,6 +121,37 @@ type githubAppState struct {
 	ExpiresAt  time.Time `json:"expires_at"`
 }
 
+type cloudflareAppState struct {
+	UserID    string    `json:"user_id"`
+	Name      string    `json:"name,omitempty"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+func (h *CredentialHandler) startCloudflareAppInstall(c *fiber.Ctx) error {
+	if h.cfg == nil || strings.TrimSpace(h.cfg.CloudflareOAuthClientID) == "" || strings.TrimSpace(h.cfg.CloudflareOAuthClientSecret) == "" {
+		return fail(c, 400, fmt.Errorf("Cloudflare OAuth app is not configured"))
+	}
+	var req dto.StartCloudflareAppInstallRequest
+	if err := h.parseAndValidate(c, &req); err != nil {
+		return err
+	}
+	state, err := h.signCloudflareAppState(cloudflareAppState{
+		UserID:    middleware.UserID(c),
+		Name:      strings.TrimSpace(req.Name),
+		ExpiresAt: time.Now().Add(15 * time.Minute),
+	})
+	if err != nil {
+		return fail(c, 500, err)
+	}
+	q := url.Values{}
+	q.Set("response_type", "code")
+	q.Set("client_id", strings.TrimSpace(h.cfg.CloudflareOAuthClientID))
+	q.Set("redirect_uri", strings.TrimSpace(h.cfg.CloudflareOAuthRedirectURL))
+	q.Set("scope", strings.TrimSpace(h.cfg.CloudflareOAuthScopes))
+	q.Set("state", state)
+	return c.JSON(fiber.Map{"auth_url": "https://dash.cloudflare.com/oauth2/auth?" + q.Encode()})
+}
+
 func (h *CredentialHandler) startGitHubAppInstall(c *fiber.Ctx) error {
 	if h.cfg == nil || h.cfg.GitHubAppID == 0 || h.cfg.GitHubAppSlug == "" || strings.TrimSpace(h.cfg.GitHubAppPrivateKey) == "" {
 		return fail(c, 400, fmt.Errorf("GitHub App is not configured"))
@@ -155,6 +191,24 @@ func (h *CredentialHandler) githubAppCallback(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).SendString(err.Error())
 	}
 	return c.Redirect("/?github_app=connected", fiber.StatusFound)
+}
+
+func (h *CredentialHandler) cloudflareAppCallback(c *fiber.Ctx) error {
+	if rawErr := strings.TrimSpace(c.Query("error")); rawErr != "" {
+		return c.Redirect("/?cloudflare_app=error&message="+url.QueryEscape(rawErr), fiber.StatusFound)
+	}
+	code := strings.TrimSpace(c.Query("code"))
+	if code == "" {
+		return c.Status(fiber.StatusBadRequest).SendString("Cloudflare authorization code was missing.")
+	}
+	state, err := h.verifyCloudflareAppState(c.Query("state"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).SendString("Cloudflare state was invalid or expired.")
+	}
+	if _, err := h.service.CreateCloudflareOAuth(c.UserContext(), state.UserID, state.Name, code); err != nil {
+		return c.Status(fiber.StatusBadRequest).SendString(err.Error())
+	}
+	return c.Redirect("/?cloudflare_app=connected", fiber.StatusFound)
 }
 
 func (h *CredentialHandler) createBasaltPass(c *fiber.Ctx) error {
@@ -523,6 +577,39 @@ func (h *CredentialHandler) verifyGitHubAppState(raw string) (*githubAppState, e
 		return nil, err
 	}
 	var state githubAppState
+	if err := json.Unmarshal(body, &state); err != nil {
+		return nil, err
+	}
+	if state.UserID == "" || time.Now().After(state.ExpiresAt) {
+		return nil, fmt.Errorf("invalid state payload")
+	}
+	return &state, nil
+}
+
+func (h *CredentialHandler) signCloudflareAppState(state cloudflareAppState) (string, error) {
+	body, err := json.Marshal(state)
+	if err != nil {
+		return "", err
+	}
+	payload := base64.RawURLEncoding.EncodeToString(body)
+	sig := hmacSHA256(payload, h.cfg.WebhookSecret)
+	return payload + "." + sig, nil
+}
+
+func (h *CredentialHandler) verifyCloudflareAppState(raw string) (*cloudflareAppState, error) {
+	parts := strings.Split(raw, ".")
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("invalid state")
+	}
+	expected := hmacSHA256(parts[0], h.cfg.WebhookSecret)
+	if !hmac.Equal([]byte(parts[1]), []byte(expected)) {
+		return nil, fmt.Errorf("invalid state signature")
+	}
+	body, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return nil, err
+	}
+	var state cloudflareAppState
 	if err := json.Unmarshal(body, &state); err != nil {
 		return nil, err
 	}

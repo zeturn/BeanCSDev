@@ -58,6 +58,11 @@ type Config struct {
 	GitHubAppSlug       string `env:"BEANCS_GITHUB_APP_SLUG"`
 	GitHubAppPrivateKey string `env:"BEANCS_GITHUB_APP_PRIVATE_KEY"`
 
+	CloudflareOAuthClientID     string `env:"BEANCS_CLOUDFLARE_OAUTH_CLIENT_ID"`
+	CloudflareOAuthClientSecret string `env:"BEANCS_CLOUDFLARE_OAUTH_CLIENT_SECRET"`
+	CloudflareOAuthScopes       string `env:"BEANCS_CLOUDFLARE_OAUTH_SCOPES" envDefault:"zone.read dns.write"`
+	CloudflareOAuthRedirectURL  string `env:"BEANCS_CLOUDFLARE_OAUTH_REDIRECT_URL" envDefault:"https://beancs.com/api/v1/credentials/cloudflare/app/callback"`
+
 	RegistryHost         string `env:"BEANCS_REGISTRY_HOST" envDefault:"registry.beancs.hollowdata.com"`
 	RegistryUsername     string `env:"BEANCS_REGISTRY_USERNAME"`
 	RegistryToken        string `env:"BEANCS_REGISTRY_TOKEN"`
