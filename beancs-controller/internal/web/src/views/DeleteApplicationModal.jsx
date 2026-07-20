@@ -53,6 +53,7 @@ import * as Utils from "../utils";
 import * as API from "../api";
 import * as Components from "../components";
 import { Modal, Button } from "../components/index";
+import { t } from "../i18n/index";
 export default function DeleteApplicationModal({
   application,
   busy,
@@ -61,24 +62,28 @@ export default function DeleteApplicationModal({
 }) {
   return (
     <Modal
-      title={`Delete ${application.display_name || application.name}`}
-      subtitle="This removes the application record and any managed component/dependency records that are still attached to it."
+      title={t("Delete {name}", {
+        name: application.display_name || application.name,
+      })}
+      subtitle={t(
+        "This removes the application record and any managed component/dependency records that are still attached to it.",
+      )}
       onClose={onClose}
     >
       <div className="delete-summary">
         <span>
-          Projects <b>{(application.projects || []).length}</b>
+          {t("Projects")} <b>{(application.projects || []).length}</b>
         </span>
         <span>
-          Dependencies <b>{(application.dependencies || []).length}</b>
+          {t("Dependencies")} <b>{(application.dependencies || []).length}</b>
         </span>
         <span>
-          Status <b>{application.status || "-"}</b>
+          {t("Status")} <b>{application.status || "-"}</b>
         </span>
       </div>
       <div className="modal-actions">
         <Button type="button" onClick={onClose} disabled={busy}>
-          Cancel
+          {t("Cancel")}
         </Button>
         <Button
           className="filled"
@@ -87,7 +92,7 @@ export default function DeleteApplicationModal({
           disabled={busy}
           variant="danger"
         >
-          <Trash2 size={15} /> Delete
+          <Trash2 size={15} /> {t("Delete")}
         </Button>
       </div>
     </Modal>

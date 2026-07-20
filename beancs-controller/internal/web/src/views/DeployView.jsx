@@ -17,6 +17,7 @@ import {
   imageTagFromReference,
   slugify,
 } from "../utils/index";
+import { t } from "../i18n/index";
 import {
   RepoListSkeleton,
   ApplicationSpecPlanSummary,
@@ -27,9 +28,11 @@ import {
   ChevronIcon,
   Button,
   Input,
+  Modal,
   Select,
   Checkbox,
 } from "../components/index";
+import DependencyCreateForm from "./DependencyCreateForm";
 import {
   Activity,
   AlertTriangle,
@@ -82,129 +85,131 @@ import {
 const deploySteps = [
   {
     id: "method",
-    label: "Target",
-    title: "Choose deployment target",
+    label: t("Target"),
+    title: t("Choose deployment target"),
   },
   {
     id: "source",
-    label: "Source",
-    title: "Choose deployment source details",
+    label: t("Source"),
+    title: t("Choose deployment source details"),
   },
   {
     id: "update",
-    label: "Update",
-    title: "Choose update mode",
+    label: t("Update"),
+    title: t("Choose update mode"),
   },
   {
     id: "check",
-    label: "Check",
-    title: "Check installability",
+    label: t("Check"),
+    title: t("Check installability"),
   },
   {
     id: "params",
-    label: "Params",
-    title: "Configure parameters",
+    label: t("Params"),
+    title: t("Configure parameters"),
   },
   {
     id: "dependencies",
-    label: "Dependencies",
-    title: "Configure dependencies",
+    label: t("Dependencies"),
+    title: t("Configure dependencies"),
   },
   {
     id: "namespace",
-    label: "Namespace",
-    title: "Choose namespace",
+    label: t("Namespace"),
+    title: t("Choose namespace"),
   },
   {
     id: "ingress",
-    label: "Ingress",
-    title: "Choose ingress mode",
+    label: t("Ingress"),
+    title: t("Choose ingress mode"),
   },
   {
     id: "domain",
-    label: "Domain",
-    title: "Choose domain",
+    label: t("Domain"),
+    title: t("Choose domain"),
   },
   {
     id: "env",
-    label: "Env",
-    title: "Add runtime variables",
+    label: t("Env"),
+    title: t("Add runtime variables"),
   },
   {
     id: "confirm",
-    label: "Confirm",
-    title: "Confirm and build",
+    label: t("Confirm"),
+    title: t("Confirm and build"),
   },
 ];
 const basaltPassDeploySteps = [
   {
     id: "method",
-    label: "Target",
-    title: "Choose deployment target",
+    label: t("Target"),
+    title: t("Choose deployment target"),
   },
   {
     id: "source",
-    label: "Repository",
-    title: "Choose BasaltPass repository",
+    label: t("Repository"),
+    title: t("Choose BasaltPass repository"),
   },
   {
     id: "params",
-    label: "Runtime",
-    title: "Configure BasaltPass runtime",
+    label: t("Runtime"),
+    title: t("Configure BasaltPass runtime"),
   },
   {
     id: "dependencies",
-    label: "Tenant",
-    title: "Create tenant and credentials",
+    label: t("Tenant"),
+    title: t("Create tenant and credentials"),
   },
   {
     id: "confirm",
-    label: "Confirm",
-    title: "Confirm BasaltPass deployment",
+    label: t("Confirm"),
+    title: t("Confirm BasaltPass deployment"),
   },
 ];
 const deployTargetOptions = [
   {
     id: "project",
-    label: "Application",
+    label: t("Application"),
     icon: Rocket,
-    description: "Deploy an application service or monorepo workload.",
+    description: t("Deploy an application service or monorepo workload."),
   },
   {
     id: "basaltpass",
-    label: "BasaltPass",
+    label: t("BasaltPass"),
     icon: ShieldCheck,
-    description: "Deploy a BasaltPass platform and store the new tenant.",
+    description: t("Deploy a BasaltPass platform and store the new tenant."),
   },
 ];
 const deploySourceOptions = [
   {
     id: "gitops",
-    label: "GitOps repository",
+    label: t("GitOps repository"),
     icon: GitBranch,
-    description:
+    description: t(
       "Use a GitHub repository as source and publish runtime images to BeanCS Harbor.",
+    ),
   },
   {
     id: "registry",
-    label: "Container registry",
+    label: t("Container registry"),
     icon: Package,
-    description: "Deploy an existing or newly tracked container image object.",
+    description: t("Deploy an existing or newly tracked container image object."),
   },
 ];
 const updateModeOptions = [
   {
     id: "argocd",
-    label: "Argo CD",
+    label: t("Argo CD"),
     icon: GitBranch,
-    description:
+    description: t(
       "Create GitOps manifests, register an Argo CD app, and let GitHub Actions build the first Harbor image.",
+    ),
   },
   {
     id: "passive",
-    label: "Passive update",
+    label: t("Passive update"),
     icon: RefreshCw,
-    description: "Create the project without automatic GitHub push deployment.",
+    description: t("Create the project without automatic GitHub push deployment."),
   },
 ];
 export default function DeployView({
@@ -230,6 +235,7 @@ export default function DeployView({
   reusableDependencies,
   createTrackedImageFromDeploy,
   deployBasaltPass,
+  onDeployDependency,
   onConnectGitHub,
   reposLoading,
 }) {
@@ -238,6 +244,7 @@ export default function DeployView({
   const [checkingInstall, setCheckingInstall] = useState(false);
   const [repoSearch, setRepoSearch] = useState("");
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [dependencyCreateOpen, setDependencyCreateOpen] = useState(false);
   const selectedCloudflareDomain = (domains || []).find(
     (domain) =>
       String(domain.credential_id) === String(form.cloudflare_credential_id) &&
@@ -508,6 +515,11 @@ export default function DeployView({
   };
   return (
     <div className="deploy-wizard">
+      <div className="deploy-wizard-actions">
+        <Button type="button" onClick={() => setDependencyCreateOpen(true)}>
+          <Database size={15} /> {t("Deploy dependency")}
+        </Button>
+      </div>
       <section className="panel wizard-progress-panel">
         <div className="wizard-progress-head">
           <span>{step.label}</span>
@@ -569,7 +581,7 @@ export default function DeployView({
           <div className="form-grid">
             {!isBasaltPassDeploy && (
               <>
-                <label>Deployment source</label>
+                <label>{t("Deployment source")}</label>
                 <div className="method-grid two-up">
                   {deploySourceOptions.map((method) => {
                     const Icon = method.icon;
@@ -597,24 +609,24 @@ export default function DeployView({
               <>
                 {!isBasaltPassDeploy && (
                   <>
-                    <label>Repository type</label>
+                    <label>{t("Repository type")}</label>
                     <div className="segmented-control">
                       <Button
                         type="button"
                         className={form.repo_type === "github" ? "active" : ""}
                         onClick={() => setRepoType("github")}
                       >
-                        <Github size={15} /> GitHub
+                        <Github size={15} /> {t("GitHub")}
                       </Button>
                       <Button
                         type="button"
                         className={form.repo_type === "git-url" ? "active" : ""}
                         onClick={() => setRepoType("git-url")}
                       >
-                        <GitBranch size={15} /> Git link
+                        <GitBranch size={15} /> {t("Git link")}
                       </Button>
                     </div>
-                    <label>Repository layout</label>
+                    <label>{t("Repository layout")}</label>
                     <div className="segmented-control">
                       <Button
                         type="button"
@@ -623,7 +635,7 @@ export default function DeployView({
                         }
                         onClick={() => setApplicationType("single")}
                       >
-                        <Box size={15} /> Single service
+                        <Box size={15} /> {t("Single service")}
                       </Button>
                       <Button
                         type="button"
@@ -632,7 +644,7 @@ export default function DeployView({
                         }
                         onClick={() => setApplicationType("monorepo")}
                       >
-                        <Layers3 size={15} /> Monorepo
+                        <Layers3 size={15} /> {t("Monorepo")}
                       </Button>
                     </div>
                   </>
@@ -695,7 +707,7 @@ export default function DeployView({
                                 }}
                               >
                                 <Plus size={16} />
-                                <span>Add GitHub Account</span>
+                                <span>{t("Add GitHub Account")}</span>
                               </Button>
                               <Button
                                 type="button"
@@ -705,7 +717,7 @@ export default function DeployView({
                                 }}
                               >
                                 <ListRestart size={16} />
-                                <span>Switch Git Provider</span>
+                                <span>{t("Switch Git Provider")}</span>
                               </Button>
                             </div>
                           )}
@@ -746,7 +758,7 @@ export default function DeployView({
                                   <small>· {branch}</small>
                                   {isSelected && (
                                     <b className="selected-repo-pill">
-                                      <CheckCircle2 size={14} /> Selected
+                                      <CheckCircle2 size={14} /> {t("Selected")}
                                     </b>
                                   )}
                                 </div>
@@ -756,7 +768,7 @@ export default function DeployView({
                                     selectRepository(repo, repoName, branch);
                                   }}
                                 >
-                                  {isSelected ? "Selected" : "Import"}
+                                  {isSelected ? t("Selected") : t("Import")}
                                 </Button>
                               </div>
                             );
@@ -764,15 +776,15 @@ export default function DeployView({
                         {!reposLoading && visibleRepos.length === 0 && (
                           <div className="empty">
                             {selectedCredential
-                              ? "No repositories match this search."
-                              : "Choose a GitHub account to load repositories."}
+                              ? t("No repositories match this search.")
+                              : t("Choose a GitHub account to load repositories.")}
                           </div>
                         )}
                       </div>
                       {form.github_repo && (
                         <div className="selected-repo-summary">
                           <CheckCircle2 size={16} />
-                          <span>Selected repository</span>
+                          <span>{t("Selected repository")}</span>
                           <b>
                             {form.github_repo} @ {form.github_branch || "main"}
                           </b>
@@ -784,7 +796,7 @@ export default function DeployView({
                 {form.repo_type === "git-url" && (
                   <>
                     <Field
-                      label="Git URL"
+                      label={t("Git URL")}
                       value={form.git_url}
                       onChange={(v) =>
                         updateSourceForm({
@@ -795,8 +807,9 @@ export default function DeployView({
                       required
                     />
                     <p className="warning-note">
-                      当前部署模式展示不支持直接的 git 链接。请改用已连接的
-                      GitHub 仓库继续部署。
+                      {t(
+                        "The current deployment flow does not support a direct git link. Use a connected GitHub repo instead.",
+                      )}
                     </p>
                   </>
                 )}
@@ -804,7 +817,7 @@ export default function DeployView({
             )}
             {form.deploy_source === "registry" && (
               <>
-                <label>Image object</label>
+                <label>{t("Image object")}</label>
                 <div className="segmented-control">
                   <Button
                     type="button"
@@ -817,7 +830,7 @@ export default function DeployView({
                       })
                     }
                   >
-                    <Package size={15} /> Existing
+                    <Package size={15} /> {t("Existing")}
                   </Button>
                   <Button
                     type="button"
@@ -831,7 +844,7 @@ export default function DeployView({
                       })
                     }
                   >
-                    <Plus size={15} /> New object
+                    <Plus size={15} /> {t("New object")}
                   </Button>
                 </div>
                 {form.image_choice === "existing" && (
@@ -860,21 +873,24 @@ export default function DeployView({
                           </span>
                           <small>
                             {(image.tags || []).length
-                              ? `${(image.tags || []).length} tags cached`
-                              : "No cached tags"}
+                              ? t("{count} tags cached", {
+                                  count: (image.tags || []).length,
+                                })
+                              : t("No cached tags")}
                           </small>
                         </Button>
                       ))}
                       {containerImages.length === 0 && (
                         <div className="empty">
-                          No image objects yet. Create one below or open Image
-                          Registry.
+                          {t(
+                            "No image objects yet. Create one below or open Image Registry.",
+                          )}
                         </div>
                       )}
                     </div>
                     {form.selected_image_id && (
                       <>
-                        <label>Tag</label>
+                        <label>{t("Tag")}</label>
                         <Select
                           value={imageTagFromReference(form.image_reference)}
                           onChange={(event) => {
@@ -901,8 +917,8 @@ export default function DeployView({
                         </Select>
                       </>
                     )}
-                    <Field
-                      label="Image reference"
+                        <Field
+                          label={t("Image reference")}
                       value={form.image_reference}
                       onChange={(v) =>
                         updateSourceForm({
@@ -917,7 +933,7 @@ export default function DeployView({
                 )}
                 {form.image_choice === "new" && (
                   <>
-                    <label>Registry</label>
+                    <label>{t("Registry")}</label>
                     <Select
                       value={form.new_image_registry_id}
                       onChange={(event) =>
@@ -928,7 +944,7 @@ export default function DeployView({
                       }
                       required
                     >
-                      <option value="">Choose registry</option>
+                      <option value="">{t("Choose registry")}</option>
                       {containerRegistries.map((registry) => (
                         <option key={registry.id} value={registry.id}>
                           {registry.name} ({registry.kind})
@@ -936,7 +952,7 @@ export default function DeployView({
                       ))}
                     </Select>
                     <Field
-                      label="Repository path"
+                      label={t("Repository path")}
                       value={form.new_image_repository}
                       onChange={(v) =>
                         updateSourceForm({
@@ -957,10 +973,12 @@ export default function DeployView({
                       onClick={createImage}
                       variant="primary"
                     >
-                      <Plus size={15} /> Create image object
+                      <Plus size={15} /> {t("Create image object")}
                     </Button>
                     <p className="muted">
-                      保存对象后会回到对象选择，并使用该镜像进行被动更新部署。
+                      {t(
+                        "After saving the object you return to selection and use this image for a passive update deployment.",
+                      )}
                     </p>
                   </>
                 )}
@@ -997,10 +1015,11 @@ export default function DeployView({
                 onClick={() => setUpdateMode("passive")}
               >
                 <RefreshCw size={22} />
-                <b>Passive update</b>
+                <b>{t("Passive update")}</b>
                 <span>
-                  Registry deployments only support passive updates in the
-                  current flow.
+                  {t(
+                    "Registry deployments only support passive updates in the current flow.",
+                  )}
                 </span>
               </Button>
             )}
@@ -1008,11 +1027,13 @@ export default function DeployView({
         )}
         {step.id === "check" && (
           <div className="readiness-card">
-            {!analysis && (
+                {!analysis && (
               <p className="muted">
                 {checkingInstall
-                  ? "Checking installability..."
-                  : "BeanCS will verify repository signals or image/source inputs before continuing."}
+                  ? t("Checking installability...")
+                  : t(
+                      "BeanCS will verify repository signals or image/source inputs before continuing.",
+                    )}
               </p>
             )}
             {analysis && form.application_type === "monorepo" && (
@@ -1023,17 +1044,23 @@ export default function DeployView({
                   }
                 >
                   {analysis.source === "beancs_spec"
-                    ? `.beancs spec found: ${analysis.config_path}`
+                    ? t(".beancs spec found: {path}", {
+                        path: analysis.config_path,
+                      })
                     : analysis.is_monorepo
-                      ? `${analysis.components?.length || 0} components detected`
-                      : "No components detected"}
+                      ? t("{count} components detected", {
+                          count: analysis.components?.length || 0,
+                        })
+                      : t("No components detected")}
                 </div>
                 {analysis.source === "beancs_spec" && (
                   <ApplicationSpecPlanSummary analysis={analysis} />
                 )}
                 <div className="signal-list">
                   {analysis.package_manager && (
-                    <span>Package manager: {analysis.package_manager}</span>
+                    <span>
+                      {t("Package manager:")} {analysis.package_manager}
+                    </span>
                   )}
                   {(analysis.signals || []).map((signal) => (
                     <span key={signal}>{signal}</span>
@@ -1052,20 +1079,24 @@ export default function DeployView({
                   className={analysis.deployable ? "status good" : "status bad"}
                 >
                   {analysis.containerized
-                    ? "Deployable"
+                    ? t("Deployable")
                     : analysis.scaffoldable
-                      ? "Source detected"
-                      : "Needs containerization"}
+                      ? t("Source detected")
+                      : t("Needs containerization")}
                 </div>
                 <div className="signal-list">
                   {(analysis.signals || []).map((signal) => (
                     <span key={signal}>{signal}</span>
                   ))}
                   {analysis.compose_path && (
-                    <span>Compose: {analysis.compose_path}</span>
+                    <span>
+                      {t("Compose:")} {analysis.compose_path}
+                    </span>
                   )}
                   {analysis.ports?.length > 0 && (
-                    <span>Ports: {analysis.ports.join(", ")}</span>
+                    <span>
+                      {t("Ports:")} {analysis.ports.join(", ")}
+                    </span>
                   )}
                   {(analysis.warnings || []).map((warning) => (
                     <span className="warning" key={warning}>
@@ -1080,7 +1111,7 @@ export default function DeployView({
         {step.id === "params" && isBasaltPassDeploy && (
           <div className="form-grid">
             <Field
-              label="Deployment name"
+              label={t("Deployment name")}
               value={form.name}
               onChange={(v) =>
                 setForm({
@@ -1094,7 +1125,7 @@ export default function DeployView({
               required
             />
             <Field
-              label="Tenant name"
+              label={t("Tenant name")}
               value={form.tenant_name}
               onChange={(v) =>
                 setForm({
@@ -1106,7 +1137,7 @@ export default function DeployView({
               required
             />
             <Field
-              label="Namespace"
+              label={t("Namespace")}
               value={form.namespace}
               onChange={(v) =>
                 setForm({
@@ -1117,7 +1148,7 @@ export default function DeployView({
               placeholder={form.name ? `bp-${form.name}` : "bp-basaltpass"}
             />
             <Field
-              label="Backend image"
+              label={t("Backend image")}
               value={form.backend_image}
               onChange={(v) =>
                 setForm({
@@ -1128,7 +1159,7 @@ export default function DeployView({
               required
             />
             <Field
-              label="Frontend image"
+              label={t("Frontend image")}
               value={form.frontend_image}
               onChange={(v) =>
                 setForm({
@@ -1138,7 +1169,7 @@ export default function DeployView({
               }
               required
             />
-            <label>Traffic</label>
+            <label>{t("Traffic")}</label>
             <Select
               value={form.exposure_mode}
               onChange={(event) =>
@@ -1148,12 +1179,12 @@ export default function DeployView({
                 })
               }
             >
-              <option value="public">Traefik public ingress</option>
-              <option value="private">Tailscale private ingress</option>
+              <option value="public">{t("Traefik public ingress")}</option>
+              <option value="private">{t("Tailscale private ingress")}</option>
             </Select>
             {form.exposure_mode === "public" && (
               <>
-                <label>Domain</label>
+                <label>{t("Domain")}</label>
                 <Select
                   value={
                     form.cloudflare_zone_id
@@ -1170,7 +1201,7 @@ export default function DeployView({
                   }}
                   required
                 >
-                  <option value="">Choose Cloudflare zone</option>
+                  <option value="">{t("Choose Cloudflare zone")}</option>
                   {(domains || []).map((domain) => (
                     <option
                       key={`${domain.credential_id}:${domain.zone_id}`}
@@ -1181,7 +1212,7 @@ export default function DeployView({
                   ))}
                 </Select>
                 <Field
-                  label="Subdomain"
+                  label={t("Subdomain")}
                   value={form.subdomain}
                   onChange={(v) =>
                     setForm({
@@ -1193,16 +1224,16 @@ export default function DeployView({
                   required
                 />
                 <div className="computed-host">
-                  {basaltPassPublicHost || "Choose a domain"}
+                  {basaltPassPublicHost || t("Choose a domain")}
                 </div>
                 <div className="computed-host">
-                  {basaltPassBaseURL || "Base URL preview"}
+                  {basaltPassBaseURL || t("Base URL preview")}
                 </div>
               </>
             )}
             {form.exposure_mode === "private" && (
               <Field
-                label="Private host"
+                label={t("Private host")}
                 value={form.public_host}
                 onChange={(v) =>
                   setForm({
@@ -1215,7 +1246,7 @@ export default function DeployView({
               />
             )}
             <Field
-              label="CORS origins"
+              label={t("CORS origins")}
               value={form.cors_allow_origins}
               onChange={(v) =>
                 setForm({
@@ -1223,10 +1254,10 @@ export default function DeployView({
                   cors_allow_origins: v.trim(),
                 })
               }
-              placeholder="Defaults to Base URL"
+              placeholder={t("Defaults to Base URL")}
             />
             <Field
-              label="Platform admin email"
+              label={t("Platform admin email")}
               type="email"
               value={form.platform_admin_email}
               onChange={(v) => {
@@ -1241,7 +1272,7 @@ export default function DeployView({
               required
             />
             <Field
-              label="Platform admin username"
+              label={t("Platform admin username")}
               value={form.platform_admin_username}
               onChange={(v) =>
                 setForm({
@@ -1252,7 +1283,7 @@ export default function DeployView({
               required
             />
             <Field
-              label="Platform admin password"
+              label={t("Platform admin password")}
               type="password"
               value={form.platform_admin_password}
               onChange={(v) =>
@@ -1264,7 +1295,7 @@ export default function DeployView({
               required
             />
             <Field
-              label="JWT secret"
+              label={t("JWT secret")}
               type="password"
               value={form.jwt_secret}
               onChange={(v) =>
@@ -1273,7 +1304,7 @@ export default function DeployView({
                   jwt_secret: v,
                 })
               }
-              placeholder="Generated if empty"
+              placeholder={t("Generated if empty")}
             />
           </div>
         )}
@@ -1282,8 +1313,8 @@ export default function DeployView({
             <Field
               label={
                 form.application_type === "monorepo"
-                  ? "Application name"
-                  : "Project name"
+                  ? t("Application name")
+                  : t("Project name")
               }
               value={form.name}
               onChange={(v) =>
@@ -1297,7 +1328,7 @@ export default function DeployView({
             {form.application_type !== "monorepo" && (
               <>
                 <Field
-                  label="Port"
+                  label={t("Port")}
                   type="number"
                   value={form.port}
                   onChange={(v) =>
@@ -1308,7 +1339,7 @@ export default function DeployView({
                   }
                 />
                 <Field
-                  label="Replicas"
+                  label={t("Replicas")}
                   type="number"
                   value={form.replicas}
                   onChange={(v) =>
@@ -1320,7 +1351,7 @@ export default function DeployView({
                 />
               </>
             )}
-            <label>Resource preset</label>
+            <label>{t("Resource preset")}</label>
             <Select
               value={form.resource_preset}
               onChange={(event) =>
@@ -1330,12 +1361,12 @@ export default function DeployView({
                 })
               }
             >
-              <option value="nano">Nano</option>
-              <option value="small">Small</option>
-              <option value="medium">Medium</option>
-              <option value="large">Large</option>
+              <option value="nano">{t("Nano")}</option>
+              <option value="small">{t("Small")}</option>
+              <option value="medium">{t("Medium")}</option>
+              <option value="large">{t("Large")}</option>
             </Select>
-            <label>BasaltPass tenant</label>
+            <label>{t("BasaltPass tenant")}</label>
             <Select
               value={form.basaltpass_instance_id}
               onChange={(event) =>
@@ -1345,7 +1376,7 @@ export default function DeployView({
                 })
               }
             >
-              <option value="">Do not register OAuth app</option>
+              <option value="">{t("Do not register OAuth app")}</option>
               {credentials.basaltpass.map((cred) => (
                 <option key={cred.id} value={cred.id}>
                   {[cred.name, cred.tenant_code || cred.tenant_id]
@@ -1358,10 +1389,10 @@ export default function DeployView({
               <div className="component-list">
                 {analysis?.source === "beancs_spec" && (
                   <p className="muted">
-                    These components are declared by repo config. Edit{" "}
-                    <span className="mono">{analysis.config_path}</span> in the
-                    repository to change build args, health checks, volumes, or
-                    dependency bindings.
+                    {t(
+                      "These components are declared by repo config. Edit {path} in the repository to change build args, health checks, volumes, or dependency bindings.",
+                      { path: analysis.config_path },
+                    )}
                   </p>
                 )}
                 {(form.components || []).map((component, index) => (
@@ -1390,7 +1421,7 @@ export default function DeployView({
                     </div>
                     <div className="component-grid">
                       <Field
-                        label="Project name"
+                        label={t("Project name")}
                         value={component.project_name}
                         onChange={(v) =>
                           updateComponent(index, {
@@ -1400,7 +1431,7 @@ export default function DeployView({
                         required
                       />
                       <Field
-                        label="Component path"
+                        label={t("Component path")}
                         value={component.component_path || component.path}
                         onChange={(v) =>
                           updateComponent(index, {
@@ -1409,7 +1440,7 @@ export default function DeployView({
                         }
                       />
                       <Field
-                        label="Dockerfile"
+                        label={t("Dockerfile")}
                         value={component.dockerfile_path}
                         onChange={(v) =>
                           updateComponent(index, {
@@ -1419,7 +1450,7 @@ export default function DeployView({
                         required
                       />
                       <Field
-                        label="Build context"
+                        label={t("Build context")}
                         value={component.build_context || "."}
                         onChange={(v) =>
                           updateComponent(index, {
@@ -1428,7 +1459,7 @@ export default function DeployView({
                         }
                       />
                       <Field
-                        label="Port"
+                        label={t("Port")}
                         type="number"
                         value={component.port || ""}
                         onChange={(v) =>
@@ -1442,7 +1473,7 @@ export default function DeployView({
                         }
                       />
                       <Field
-                        label="Replicas"
+                        label={t("Replicas")}
                         type="number"
                         value={component.replicas || 1}
                         onChange={(v) =>
@@ -1451,7 +1482,7 @@ export default function DeployView({
                           })
                         }
                       />
-                      <label>Exposure</label>
+                      <label>{t("Exposure")}</label>
                       <Select
                         value={
                           component.exposure_mode ||
@@ -1463,9 +1494,9 @@ export default function DeployView({
                           })
                         }
                       >
-                        <option value="public">Public</option>
-                        <option value="private">Private</option>
-                        <option value="internal-only">Internal only</option>
+                        <option value="public">{t("Public")}</option>
+                        <option value="private">{t("Private")}</option>
+                        <option value="internal-only">{t("Internal only")}</option>
                       </Select>
                     </div>
                     {analysis?.source === "beancs_spec" && (
@@ -1473,7 +1504,7 @@ export default function DeployView({
                         {component.build_args &&
                           Object.keys(component.build_args).length > 0 && (
                             <span>
-                              Build args:{" "}
+                              {t("Build args:")}{" "}
                               {Object.entries(component.build_args)
                                 .map(([key, value]) => `${key}=${value}`)
                                 .join(", ")}
@@ -1481,7 +1512,7 @@ export default function DeployView({
                           )}
                         {component.health_check?.type && (
                           <span>
-                            Health: {component.health_check.type}
+                            {t("Health:")} {component.health_check.type}
                             {component.health_check.path
                               ? ` ${component.health_check.path}`
                               : ""}
@@ -1489,7 +1520,7 @@ export default function DeployView({
                         )}
                         {(component.volumes || []).length > 0 && (
                           <span>
-                            Volumes:{" "}
+                            {t("Volumes:")}{" "}
                             {(component.volumes || [])
                               .map(
                                 (volume) =>
@@ -1499,7 +1530,7 @@ export default function DeployView({
                           </span>
                         )}
                         {(component.watch_paths || []).length > 0 && (
-                          <span>Watch: {component.watch_paths.join(", ")}</span>
+                          <span>{t("Watch:")} {component.watch_paths.join(", ")}</span>
                         )}
                       </div>
                     )}
@@ -1507,7 +1538,7 @@ export default function DeployView({
                 ))}
                 {(form.components || []).length === 0 && (
                   <div className="empty">
-                    Run repository analysis to detect deployable components.
+                    {t("Run repository analysis to detect deployable components.")}
                   </div>
                 )}
               </div>
@@ -1516,7 +1547,7 @@ export default function DeployView({
         )}
         {step.id === "dependencies" && isBasaltPassDeploy && (
           <div className="form-grid">
-            <label>Database</label>
+            <label>{t("Database")}</label>
             <Select
               value={form.database_dependency_id}
               onChange={(event) => {
@@ -1535,14 +1566,14 @@ export default function DeployView({
               }}
               required
             >
-              <option value="">Choose MySQL or PostgreSQL</option>
+              <option value="">{t("Choose MySQL or PostgreSQL")}</option>
               {databaseDependencies.map((dependency) => (
                 <option key={dependency.id} value={dependency.id}>
                   {dependency.name} · {dependency.type}
                 </option>
               ))}
             </Select>
-            <label>Credential mode</label>
+            <label>{t("Credential mode")}</label>
             <div className="segmented-control">
               <Button
                 type="button"
@@ -1556,7 +1587,7 @@ export default function DeployView({
                   })
                 }
               >
-                <ShieldCheck size={15} /> Existing
+                <ShieldCheck size={15} /> {t("Existing")}
               </Button>
               <Button
                 type="button"
@@ -1569,13 +1600,13 @@ export default function DeployView({
                   })
                 }
               >
-                <Plus size={15} /> New
+                <Plus size={15} /> {t("New")}
               </Button>
             </div>
             {form.database_credential_mode === "new" ? (
               <>
                 <Field
-                  label="Credential name"
+                  label={t("Credential name")}
                   value={form.database_credential_name}
                   onChange={(v) =>
                     setForm({
@@ -1586,7 +1617,7 @@ export default function DeployView({
                   required
                 />
                 <Field
-                  label="Database name"
+                  label={t("Database name")}
                   value={form.database_name}
                   onChange={(v) =>
                     setForm({
@@ -1597,7 +1628,7 @@ export default function DeployView({
                   required
                 />
                 <Field
-                  label="Database username"
+                  label={t("Database username")}
                   value={form.database_username}
                   onChange={(v) =>
                     setForm({
@@ -1608,7 +1639,7 @@ export default function DeployView({
                   required
                 />
                 <Field
-                  label="Database password"
+                  label={t("Database password")}
                   type="password"
                   value={form.database_password}
                   onChange={(v) =>
@@ -1620,7 +1651,7 @@ export default function DeployView({
                   required
                 />
                 <Field
-                  label="Credential description"
+                  label={t("Credential description")}
                   value={form.database_credential_description}
                   onChange={(v) =>
                     setForm({
@@ -1632,7 +1663,7 @@ export default function DeployView({
               </>
             ) : (
               <>
-                <label>Database credential</label>
+                <label>{t("Database credential")}</label>
                 <Select
                   value={form.database_binding}
                   onChange={(event) =>
@@ -1644,7 +1675,7 @@ export default function DeployView({
                   required
                   disabled={!selectedDatabaseDependency}
                 >
-                  <option value="">Choose existing credential</option>
+                  <option value="">{t("Choose existing credential")}</option>
                   {selectedDatabaseCredentials.map((credential) => (
                     <option
                       key={`${selectedDatabaseDependency.id}:${credential.id}`}
@@ -1657,7 +1688,7 @@ export default function DeployView({
               </>
             )}
             <Field
-              label="Tenant code"
+              label={t("Tenant code")}
               value={form.tenant_code}
               onChange={(v) =>
                 setForm({
@@ -1668,7 +1699,7 @@ export default function DeployView({
               required
             />
             <Field
-              label="Tenant admin email"
+              label={t("Tenant admin email")}
               type="email"
               value={form.owner_email}
               onChange={(v) => {
@@ -1682,7 +1713,7 @@ export default function DeployView({
               required
             />
             <Field
-              label="Tenant admin username"
+              label={t("Tenant admin username")}
               value={form.owner_username}
               onChange={(v) =>
                 setForm({
@@ -1693,7 +1724,7 @@ export default function DeployView({
               required
             />
             <Field
-              label="Tenant admin password"
+              label={t("Tenant admin password")}
               type="password"
               value={form.owner_password}
               onChange={(v) =>
@@ -1705,7 +1736,7 @@ export default function DeployView({
               required
             />
             <Field
-              label="Description"
+              label={t("Description")}
               value={form.description}
               onChange={(v) =>
                 setForm({
@@ -1715,7 +1746,7 @@ export default function DeployView({
               }
             />
             <Field
-              label="Max apps"
+              label={t("Max apps")}
               type="number"
               value={form.max_apps}
               onChange={(v) =>
@@ -1727,7 +1758,7 @@ export default function DeployView({
               placeholder="50"
             />
             <Field
-              label="Max users"
+              label={t("Max users")}
               type="number"
               value={form.max_users}
               onChange={(v) =>
@@ -1739,7 +1770,7 @@ export default function DeployView({
               placeholder="500"
             />
             <Field
-              label="Platform management token fallback"
+              label={t("Platform management token fallback")}
               type="password"
               value={form.service_token}
               onChange={(v) =>
@@ -1750,7 +1781,7 @@ export default function DeployView({
               }
             />
             <Field
-              label="Tenant automation token fallback"
+              label={t("Tenant automation token fallback")}
               type="password"
               value={form.automation_token}
               onChange={(v) =>
@@ -1766,18 +1797,20 @@ export default function DeployView({
           <div className="form-grid">
             {form.application_type !== "monorepo" && (
               <p className="muted">
-                Managed dependency components are currently available for
-                monorepo applications.
+                {t(
+                  "Managed dependency components are currently available for monorepo applications.",
+                )}
               </p>
             )}
             {form.application_type === "monorepo" && (
               <>
                 <div className="section-head">
                   <div>
-                    <h3>Dependency components</h3>
+                    <h3>{t("Dependency components")}</h3>
                     <p className="muted">
-                      Definitions drive config, outputs, and env presets for
-                      application components.
+                      {t(
+                        "Definitions drive config, outputs, and env presets for application components.",
+                      )}
                     </p>
                   </div>
                   <Button
@@ -1785,14 +1818,15 @@ export default function DeployView({
                     onClick={addDependency}
                     disabled={!dependencyDefinitions.length}
                   >
-                    <Plus size={15} /> Add dependency
+                    <Plus size={15} /> {t("Add dependency")}
                   </Button>
                 </div>
                 <div className="dependency-list">
                   {analysis?.source === "beancs_spec" && (
                     <p className="muted">
-                      Dependencies are declared by repo config and will be
-                      created from the spec during deploy.
+                      {t(
+                        "Dependencies are declared by repo config and will be created from the spec during deploy.",
+                      )}
                     </p>
                   )}
                   {(form.dependencies || []).map((dependency, index) => {
@@ -1806,11 +1840,11 @@ export default function DeployView({
                         key={`${dependency.name}-${index}`}
                       >
                         <div className="component-card-head">
-                          <b>{dependency.name || "dependency"}</b>
+                          <b>{dependency.name || t("dependency")}</b>
                           <Button
                             type="button"
                             onClick={() => deleteDependency(index)}
-                            title="Remove dependency"
+                            title={t("Remove dependency")}
                             variant="danger"
                           >
                             <Trash2 size={15} />
@@ -1818,7 +1852,7 @@ export default function DeployView({
                         </div>
                         <div className="component-grid">
                           <Field
-                            label="Name"
+                            label={t("Name")}
                             value={dependency.name}
                             onChange={(v) =>
                               updateDependency(index, {
@@ -1828,7 +1862,7 @@ export default function DeployView({
                             }
                             required
                           />
-                          <label>Source</label>
+                          <label>{t("Source")}</label>
                           <Select
                             value={dependency.source || "new"}
                             onChange={(event) => {
@@ -1853,10 +1887,10 @@ export default function DeployView({
                               });
                             }}
                           >
-                            <option value="new">New</option>
-                            <option value="existing">Existing</option>
+                            <option value="new">{t("New")}</option>
+                            <option value="existing">{t("Existing")}</option>
                           </Select>
-                          <label>Type</label>
+                          <label>{t("Type")}</label>
                           <Select
                             value={dependency.type}
                             disabled={(dependency.source || "new") === "existing"}
@@ -1891,7 +1925,7 @@ export default function DeployView({
                           </Select>
                           {(dependency.source || "new") === "existing" && (
                             <>
-                              <label>Dependency</label>
+                              <label>{t("Dependency")}</label>
                               <Select
                                 value={dependency.existing_dependency_id || ""}
                                 onChange={(event) => {
@@ -1907,7 +1941,7 @@ export default function DeployView({
                                   });
                                 }}
                               >
-                                <option value="">Choose dependency</option>
+                                <option value="">{t("Choose dependency")}</option>
                                 {(reusableDependencies || [])
                                   .filter(
                                     (item) => item.type === dependency.type,
@@ -1915,13 +1949,13 @@ export default function DeployView({
                                   .map((item) => (
                                     <option key={item.id} value={item.id}>
                                       {item.name} ·{" "}
-                                      {item.external ? "external" : "managed"}
+                                      {item.external ? t("external") : t("managed")}
                                     </option>
                                   ))}
                               </Select>
                             </>
                           )}
-                          <label>Deploy method</label>
+                          <label>{t("Deploy method")}</label>
                           <Select
                             value={
                               dependency.deploy_method ||
@@ -1940,12 +1974,12 @@ export default function DeployView({
                               definition?.supported_deploy_methods || ["helm"]
                             ).map((method) => (
                               <option key={method} value={method}>
-                                {method}
+                                {t(method)}
                               </option>
                             ))}
                           </Select>
                           <Field
-                            label="Version"
+                            label={t("Version")}
                             value={dependency.version || ""}
                             onChange={(v) =>
                               updateDependency(index, {
@@ -1968,7 +2002,7 @@ export default function DeployView({
                                     })
                                   }
                                 />
-                                <span>BeanCS can create credentials</span>
+                                <span>{t("BeanCS can create credentials")}</span>
                               </label>
                             )}
                             <DependencyConfigEditor
@@ -1987,7 +2021,7 @@ export default function DeployView({
                   })}
                   {(form.dependencies || []).length === 0 && (
                     <div className="empty">
-                      No managed dependencies selected.
+                      {t("No managed dependencies selected.")}
                     </div>
                   )}
                 </div>
@@ -2014,7 +2048,7 @@ export default function DeployView({
         )}
         {step.id === "namespace" && (
           <div className="form-grid">
-            <label>Namespace</label>
+            <label>{t("Namespace")}</label>
             <Input
               list="namespace-options"
               value={form.namespace}
@@ -2032,9 +2066,9 @@ export default function DeployView({
               ))}
             </datalist>
             <p className="muted">
-              Leave empty to create{" "}
-              {form.name ? <b>proj-{form.name}</b> : "a project namespace"}{" "}
-              automatically.
+              {t("Leave empty to create {name} automatically.", {
+                name: form.name ? `proj-${form.name}` : t("a project namespace"),
+              })}
             </p>
           </div>
         )}
@@ -2043,8 +2077,9 @@ export default function DeployView({
             {form.application_type === "monorepo" ? (
               <>
                 <p className="muted">
-                  Traffic mode is configured per component in the parameters
-                  step.
+                  {t(
+                    "Traffic mode is configured per component in the parameters step.",
+                  )}
                 </p>
                 <div className="signal-list">
                   {(form.components || [])
@@ -2054,14 +2089,14 @@ export default function DeployView({
                         {component.project_name}:{" "}
                         {component.port
                           ? component.exposure_mode
-                          : "internal-only"}
+                          : t("internal-only")}
                       </span>
                     ))}
                 </div>
               </>
             ) : (
               <>
-                <label>Traffic</label>
+                <label>{t("Traffic")}</label>
                 <Select
                   value={form.exposure_mode}
                   onChange={(event) =>
@@ -2071,9 +2106,9 @@ export default function DeployView({
                     })
                   }
                 >
-                  <option value="public">Traefik public ingress</option>
-                  <option value="private">Tailscale private ingress</option>
-                  <option value="internal-only">Cluster internal only</option>
+                  <option value="public">{t("Traefik public ingress")}</option>
+                  <option value="private">{t("Tailscale private ingress")}</option>
+                  <option value="internal-only">{t("Cluster internal only")}</option>
                 </Select>
               </>
             )}
@@ -2088,7 +2123,7 @@ export default function DeployView({
                   component.exposure_mode === "public",
               ) && (
                 <>
-                  <label>Cloudflare credential</label>
+                  <label>{t("Cloudflare credential")}</label>
                   <Select
                     value={
                       form.cloudflare_zone_id
@@ -2106,7 +2141,7 @@ export default function DeployView({
                     }}
                     required
                   >
-                    <option value="">Choose Cloudflare zone</option>
+                    <option value="">{t("Choose Cloudflare zone")}</option>
                     {(domains || []).map((domain) => (
                       <option
                         key={`${domain.credential_id}:${domain.zone_id}`}
@@ -2117,8 +2152,9 @@ export default function DeployView({
                     ))}
                   </Select>
                   <p className="muted">
-                    Public component hostnames use the component project name
-                    under the selected zone.
+                    {t(
+                      "Public component hostnames use the component project name under the selected zone.",
+                    )}
                   </p>
                 </>
               )}
@@ -2130,7 +2166,7 @@ export default function DeployView({
                     component.exposure_mode === "public",
                 ) && (
                   <p className="muted">
-                    No public DNS zone is required for the selected components.
+                    {t("No public DNS zone is required for the selected components.")}
                   </p>
                 )}
                 <div className="component-list">
@@ -2148,13 +2184,13 @@ export default function DeployView({
                         <div className="component-card-head">
                           <b>{component.project_name}</b>
                           <span>
-                            {component.exposure_mode || "internal-only"}
+                            {t(component.exposure_mode || "internal-only")}
                           </span>
                         </div>
                         {component.exposure_mode === "public" ? (
                           <div className="component-grid">
                             <Field
-                              label="Subdomain"
+                              label={t("Subdomain")}
                               value={
                                 component.subdomain ?? component.project_name
                               }
@@ -2178,7 +2214,7 @@ export default function DeployView({
                         ) : component.exposure_mode === "private" ? (
                           <div className="component-grid">
                             <Field
-                              label="Tailscale host"
+                              label={t("Tailscale host")}
                               value={
                                 component.private_host ||
                                 monorepoDefaultPrivateHost(component, form)
@@ -2201,7 +2237,7 @@ export default function DeployView({
                             </div>
                           </div>
                         ) : (
-                          <p className="muted">Internal-only component.</p>
+                          <p className="muted">{t("Internal-only component.")}</p>
                         )}
                       </div>
                     ))}
@@ -2211,7 +2247,7 @@ export default function DeployView({
             {form.application_type !== "monorepo" &&
               form.exposure_mode === "public" && (
                 <>
-                  <label>Cloudflare credential</label>
+                  <label>{t("Cloudflare credential")}</label>
                   <Select
                     value={
                       form.cloudflare_zone_id
@@ -2229,7 +2265,7 @@ export default function DeployView({
                     }}
                     required
                   >
-                    <option value="">Choose Cloudflare zone</option>
+                    <option value="">{t("Choose Cloudflare zone")}</option>
                     {(domains || []).map((domain) => (
                       <option
                         key={`${domain.credential_id}:${domain.zone_id}`}
@@ -2240,7 +2276,7 @@ export default function DeployView({
                     ))}
                   </Select>
                   <Field
-                    label="Subdomain"
+                    label={t("Subdomain")}
                     value={form.subdomain}
                     onChange={(v) =>
                       setForm({
@@ -2251,14 +2287,14 @@ export default function DeployView({
                     required
                   />
                   <div className="computed-host">
-                    {publicHost || "Subdomain preview"}
+                    {publicHost || t("Subdomain preview")}
                   </div>
                 </>
               )}
             {form.application_type !== "monorepo" &&
               form.exposure_mode === "private" && (
                 <Field
-                  label="Tailscale host"
+                  label={t("Tailscale host")}
                   value={form.private_host}
                   onChange={(v) =>
                     setForm({
@@ -2272,7 +2308,7 @@ export default function DeployView({
             {form.application_type !== "monorepo" &&
               form.exposure_mode === "internal-only" && (
                 <p className="muted">
-                  No domain is required for internal-only projects.
+                  {t("No domain is required for internal-only projects.")}
                 </p>
               )}
           </div>
@@ -2287,57 +2323,57 @@ export default function DeployView({
               })
             }
             masked={false}
-            title="Runtime environment"
+            title={t("Runtime environment")}
           />
         )}
         {step.id === "confirm" && isBasaltPassDeploy && (
           <div className="detail-list">
             <span>
-              Target <b>BasaltPass</b>
+              {t("Target")} <b>BasaltPass</b>
             </span>
             <span>
-              Source{" "}
+              {t("Source")}{" "}
               <b>
                 {form.github_repo || "-"} @ {form.github_branch || "main"}
               </b>
             </span>
             <span>
-              Name <b>{form.name || "-"}</b>
+              {t("Name")} <b>{form.name || "-"}</b>
             </span>
             <span>
-              Namespace{" "}
+              {t("Namespace")}{" "}
               <b>{form.namespace || (form.name ? `bp-${form.name}` : "-")}</b>
             </span>
             <span>
-              Base URL <b>{basaltPassBaseURL || "-"}</b>
+              {t("Base URL")} <b>{basaltPassBaseURL || "-"}</b>
             </span>
             <span>
-              Host <b>{basaltPassPublicHost || "private ingress"}</b>
+              {t("Host")} <b>{basaltPassPublicHost || t("private ingress")}</b>
             </span>
             <span>
-              Backend image <b>{form.backend_image || "-"}</b>
+              {t("Backend image")} <b>{form.backend_image || "-"}</b>
             </span>
             <span>
-              Frontend image <b>{form.frontend_image || "-"}</b>
+              {t("Frontend image")} <b>{form.frontend_image || "-"}</b>
             </span>
             <span>
-              Tenant <b>{form.tenant_name || "-"}</b>
+              {t("Tenant")} <b>{form.tenant_name || "-"}</b>
             </span>
             <span>
-              Tenant code <b>{form.tenant_code || "-"}</b>
+              {t("Tenant code")} <b>{form.tenant_code || "-"}</b>
             </span>
             <span>
-              Platform admin <b>{form.platform_admin_email || "-"}</b>
+              {t("Platform admin")} <b>{form.platform_admin_email || "-"}</b>
             </span>
             <span>
-              Tenant admin <b>{form.owner_email || "-"}</b>
+              {t("Tenant admin")} <b>{form.owner_email || "-"}</b>
             </span>
             <span>
-              Database{" "}
+              {t("Database")}{" "}
               <b>
                 {selectedDatabaseDependency?.name || "-"} /{" "}
                 {form.database_credential_mode === "new"
-                  ? form.database_credential_name || "new credential"
+                  ? form.database_credential_name || t("new credential")
                   : selectedDatabaseCredentials.find(
                       (credential) =>
                         form.database_binding ===
@@ -2350,28 +2386,31 @@ export default function DeployView({
         {step.id === "confirm" && !isBasaltPassDeploy && (
           <div className="detail-list">
             <span>
-              Install method <b>{sourceLabel(form.build_source)}</b>
+              {t("Install method")} <b>{sourceLabel(form.build_source)}</b>
             </span>
             <span>
-              Source <b>{sourceSummary(form)}</b>
+              {t("Source")} <b>{sourceSummary(form)}</b>
             </span>
             <span>
-              {form.application_type === "monorepo" ? "Application" : "Project"}{" "}
+              {form.application_type === "monorepo"
+                ? t("Application")
+                : t("Project")}{" "}
               <b>{form.name || "-"}</b>
             </span>
             <span>
-              Namespace{" "}
+              {t("Namespace")}{" "}
               <b>{form.namespace || (form.name ? `proj-${form.name}` : "-")}</b>
             </span>
             <span>
-              Ingress <b>{form.exposure_mode}</b>
+              {t("Ingress")} <b>{t(form.exposure_mode)}</b>
             </span>
             <span>
-              Domain <b>{publicHost || form.private_host || "internal only"}</b>
+              {t("Domain")}{" "}
+              <b>{publicHost || form.private_host || t("internal only")}</b>
             </span>
             {form.application_type === "monorepo" ? (
               <span>
-                Components{" "}
+                {t("Components")}{" "}
                 <b>
                   {
                     (form.components || []).filter(
@@ -2382,16 +2421,16 @@ export default function DeployView({
               </span>
             ) : (
               <span>
-                Port <b>{form.port}</b>
+                {t("Port")} <b>{form.port}</b>
               </span>
             )}
             {form.application_type === "monorepo" && (
               <span>
-                Dependencies <b>{(form.dependencies || []).length}</b>
+                {t("Dependencies")} <b>{(form.dependencies || []).length}</b>
               </span>
             )}
             <span>
-              Runtime variables{" "}
+              {t("Runtime variables")}{" "}
               <b>
                 {
                   (form.env_entries || []).filter((entry) => entry.key.trim())
@@ -2400,19 +2439,19 @@ export default function DeployView({
               </b>
             </span>
             <span>
-              Update mode{" "}
+              {t("Update mode")}{" "}
               <b>
                 {form.deploy_source === "registry"
-                  ? "Passive"
+                  ? t("Passive")
                   : form.update_mode === "argocd"
-                    ? "Argo CD"
-                    : "Passive"}
+                    ? t("Argo CD")
+                    : t("Passive")}
               </b>
             </span>
             {form.deploy_source === "gitops" &&
               form.update_mode === "argocd" && (
                 <span>
-                  Future Harbor image <b>{harborPreview}</b>
+                  {t("Future Harbor image")} <b>{harborPreview}</b>
                 </span>
               )}
           </div>
@@ -2451,12 +2490,29 @@ export default function DeployView({
             )}
             {!canContinue && stepBlockers.length > 0 && (
               <p className="warning-note span-2">
-                Missing: {stepBlockers.join(", ")}
+                {t("Missing:")} {stepBlockers.join(", ")}
               </p>
             )}
           </div>
         )}
       </form>
+      {dependencyCreateOpen && (
+        <Modal
+          title={t("Deploy dependency")}
+          subtitle={t("Create and deploy a managed dependency from this workflow.")}
+          className="wide-modal"
+          onClose={() => setDependencyCreateOpen(false)}
+        >
+          <DependencyCreateForm
+            definitions={dependencyDefinitions}
+            githubCredentials={credentials.github}
+            onSubmit={onDeployDependency}
+            onCancel={() => setDependencyCreateOpen(false)}
+            requireGitOpsCredential
+            submitLabel="Deploy dependency"
+          />
+        </Modal>
+      )}
     </div>
   );
 }

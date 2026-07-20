@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as LucideIcons from "lucide-react";
+import { t } from "../i18n/index";
 import { MetricCard } from "../components/index";
 import {
   Activity,
@@ -55,19 +56,21 @@ export default function SettingsView({ version }) {
     <div className="stack">
       <section className="panel">
         <h2>
-          <Settings size={18} /> Settings
+          <Settings size={18} /> {t("Settings")}
         </h2>
         <div className="metric-row">
           <MetricCard
             icon={Rocket}
-            label="Deployed version"
+            label={t("Deployed version")}
             value={version || "-"}
-            detail="Controller VERSION environment value"
+            detail={t("Controller VERSION environment value")}
           />
         </div>
         <p className="muted">
-          Authentication uses BasaltPass. Manage identity provider connections
-          under <b>Security → Access Control</b>.
+          {t(
+            "Authentication uses BasaltPass. Manage identity provider connections under",
+          )}{" "}
+          <b>{t("Security")} → {t("Access Control")}</b>.
         </p>
       </section>
     </div>

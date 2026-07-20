@@ -24,6 +24,8 @@ import (
 	"github.com/zeturn/beancs-controller/internal/model"
 	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
+	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 var portNamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,13}[a-z0-9])?$`)
@@ -254,6 +256,17 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID, te
 	if err := validateProjectPorts(req.Name, req.ExposureMode, req.Ports); err != nil {
 		return nil, err
 	}
+	if len(req.Volumes) > 0 {
+		volumes, err := projectVolumesFromConfig(req.Volumes)
+		if err != nil {
+			return nil, err
+		}
+		normalized, err := normalizeProjectVolumes(req.Name, volumes)
+		if err != nil {
+			return nil, err
+		}
+		req.Volumes = model.JSONMap{"items": normalized}
+	}
 	req.ExposureMode = aggregateExposureMode(req.Ports)
 	primaryPort := model.ProjectPort{Port: req.Port}
 	if len(req.Ports) > 0 {
@@ -359,7 +372,7 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID, te
 			rollback()
 			return nil, err
 		}
-		cfToken, err = s.credentials.DecryptCloudflareToken(cfCred)
+		cfToken, err = s.credentials.CloudflareToken(ctx, cfCred)
 		if err != nil {
 			rollback()
 			return nil, err
@@ -460,7 +473,7 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID, te
 	rollbacks = append(rollbacks, func() { _ = s.k8s.DeleteNamespace(context.Background(), project.Namespace) })
 
 	if project.BasaltClientID != "" {
-		if err := s.k8s.UpsertSecret(ctx, project.Namespace, "basaltpass-keys", project.Name, basaltPassRuntimeEnv(bpInstance, project, secret, map[string]string{"client_id": project.BasaltClientID, "client_secret": secret})); err != nil {
+		if err := s.k8s.UpsertSecret(ctx, project.Namespace, project.BasaltPassKeysSecretName(), project.Name, basaltPassRuntimeEnv(bpInstance, project, secret, map[string]string{"client_id": project.BasaltClientID, "client_secret": secret})); err != nil {
 			rollback()
 			return nil, err
 		}
@@ -476,7 +489,8 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID, te
 			return nil, err
 		}
 	}
-	if err := s.k8s.UpsertSecret(ctx, project.Namespace, "app-env-vars", project.Name, basaltPassRuntimeEnv(bpInstance, project, secret, req.Env)); err != nil {
+	runtimeEnv := basaltPassComponentRuntimeBaseEnv(project, req.BasaltPass, req.Env)
+	if err := s.k8s.UpsertSecret(ctx, project.Namespace, project.EnvSecretName(), project.Name, basaltPassRuntimeEnv(bpInstance, project, secret, runtimeEnv)); err != nil {
 		rollback()
 		return nil, err
 	}
@@ -523,7 +537,7 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID, te
 	}
 	if project.ImageReference != "" && project.BuildSource != model.BuildSourceGitHub {
 		resources := model.ResourcePresets[project.ResourcePreset]
-		if err := s.k8s.ApplyDeploymentPorts(ctx, project.Namespace, project.Name, project.ImageReference, project.Ports, int32(project.Replicas), resources.CPURequest, resources.CPULimit, resources.MemRequest, resources.MemLimit); err != nil {
+		if err := s.k8s.ApplyProjectDeployment(ctx, *project, project.ImageReference, resources); err != nil {
 			rollback()
 			return nil, err
 		}
@@ -567,7 +581,7 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID, te
 	})
 
 	if project.BuildSource != model.BuildSourceGitHub {
-		if err := s.gitops.CommitProjectManifests(ctx, ghToken, ghCred, project); err != nil {
+		if _, err := s.gitops.CommitProjectManifests(ctx, ghToken, ghCred, project); err != nil {
 			rollback()
 			return nil, err
 		}
@@ -648,13 +662,172 @@ func (s *ProjectService) UpdateProject(ctx context.Context, project *model.Proje
 	return project, nil
 }
 
+func (s *ProjectService) UpdateProjectVolumes(ctx context.Context, project *model.Project, volumes []model.ProjectVolume) (*model.Project, error) {
+	if project == nil || project.ID == 0 {
+		return nil, fmt.Errorf("project is required")
+	}
+	normalized, err := normalizeProjectVolumes(project.Name, volumes)
+	if err != nil {
+		return nil, err
+	}
+	updated := model.JSONMap{"items": normalized}
+	if err := s.db.WithContext(ctx).Model(project).Update("volumes", updated).Error; err != nil {
+		return nil, err
+	}
+	project.Volumes = updated
+
+	if err := s.commitProjectVolumeManifests(ctx, project); err != nil {
+		return nil, err
+	}
+	if s.k8s == nil || strings.TrimSpace(project.ImageReference) == "" {
+		return project, nil
+	}
+	resources, ok := model.ResourcePresets[project.ResourcePreset]
+	if !ok {
+		resources = model.ResourcePresets["small"]
+	}
+	if err := s.k8s.ApplyProjectDeployment(ctx, *project, project.ImageReference, resources); err != nil {
+		return nil, err
+	}
+	return project, nil
+}
+
+func (s *ProjectService) commitProjectVolumeManifests(ctx context.Context, project *model.Project) error {
+	if s.gitops == nil || s.credentials == nil || project.GitHubCredentialID == 0 {
+		return nil
+	}
+	var credential model.GitHubCredential
+	if err := s.db.WithContext(ctx).First(&credential, project.GitHubCredentialID).Error; err != nil {
+		return err
+	}
+	if strings.TrimSpace(credential.GitOpsRepo) == "" {
+		return nil
+	}
+	token, err := s.credentials.GitHubToken(ctx, credential)
+	if err != nil {
+		return err
+	}
+	_, err = s.gitops.CommitProjectManifests(ctx, token, credential, project)
+	return err
+}
+
+func normalizeProjectVolumes(projectName string, volumes []model.ProjectVolume) ([]model.ProjectVolume, error) {
+	normalized := make([]model.ProjectVolume, 0, len(volumes))
+	names := map[string]bool{}
+	mountPaths := map[string]bool{}
+	maxNameLength := 63 - len(projectName) - 1
+	for _, volume := range volumes {
+		volume.Name = strings.TrimSpace(volume.Name)
+		volume.MountPath = strings.TrimSpace(volume.MountPath)
+		volume.Type = strings.ToLower(strings.TrimSpace(volume.Type))
+		if volume.Name == "" || len(validation.IsDNS1123Label(volume.Name)) > 0 {
+			return nil, fmt.Errorf("volume name %q must be a DNS-1123 label", volume.Name)
+		}
+		if len(volume.Name) > maxNameLength {
+			return nil, fmt.Errorf("volume name %q is too long for project %q", volume.Name, projectName)
+		}
+		if names[volume.Name] {
+			return nil, fmt.Errorf("volume name %q is duplicated", volume.Name)
+		}
+		if volume.MountPath == "" || !strings.HasPrefix(volume.MountPath, "/") || strings.ContainsAny(volume.MountPath, "\r\n") {
+			return nil, fmt.Errorf("volume %q mountPath must be an absolute path", volume.Name)
+		}
+		if mountPaths[volume.MountPath] {
+			return nil, fmt.Errorf("mountPath %q is duplicated", volume.MountPath)
+		}
+		names[volume.Name] = true
+		mountPaths[volume.MountPath] = true
+
+		switch volume.Type {
+		case "emptydir":
+			volume.Type = "emptyDir"
+			volume.Size = ""
+			volume.StorageClassName = ""
+			volume.AccessModes = nil
+		case "pvc":
+			volume.Size = strings.TrimSpace(volume.Size)
+			if volume.Size == "" {
+				return nil, fmt.Errorf("pvc volume %q requires size", volume.Name)
+			}
+			quantity, err := resource.ParseQuantity(volume.Size)
+			if err != nil || quantity.Sign() <= 0 {
+				return nil, fmt.Errorf("pvc volume %q has invalid size %q", volume.Name, volume.Size)
+			}
+			volume.Size = quantity.String()
+			volume.StorageClassName = strings.TrimSpace(volume.StorageClassName)
+			if volume.StorageClassName != "" && len(validation.IsDNS1123Subdomain(volume.StorageClassName)) > 0 {
+				return nil, fmt.Errorf("pvc volume %q has invalid storageClassName", volume.Name)
+			}
+			modes, err := normalizeVolumeAccessModes(volume.AccessModes)
+			if err != nil {
+				return nil, fmt.Errorf("pvc volume %q: %w", volume.Name, err)
+			}
+			volume.AccessModes = modes
+			volume.ClaimName = ""
+		case "existingpvc":
+			volume.Type = "existingPVC"
+			volume.ClaimName = strings.TrimSpace(volume.ClaimName)
+			if volume.ClaimName == "" || len(validation.IsDNS1123Label(volume.ClaimName)) > 0 {
+				return nil, fmt.Errorf("existing PVC volume %q requires a DNS-1123 claimName", volume.Name)
+			}
+			volume.Size = ""
+			volume.StorageClassName = ""
+			volume.AccessModes = nil
+		default:
+			return nil, fmt.Errorf("volume %q type must be pvc, existingPVC or emptyDir", volume.Name)
+		}
+		normalized = append(normalized, volume)
+	}
+	return normalized, nil
+}
+
+func projectVolumesFromConfig(config model.JSONMap) ([]model.ProjectVolume, error) {
+	raw, err := json.Marshal(config["items"])
+	if err != nil {
+		return nil, err
+	}
+	var volumes []model.ProjectVolume
+	if err := json.Unmarshal(raw, &volumes); err != nil {
+		return nil, fmt.Errorf("volumes.items must be a list of volume definitions")
+	}
+	return volumes, nil
+}
+
+func normalizeVolumeAccessModes(modes []string) ([]string, error) {
+	if len(modes) == 0 {
+		return []string{"ReadWriteOnce"}, nil
+	}
+	allowed := map[string]bool{
+		"ReadWriteOnce":    true,
+		"ReadOnlyMany":     true,
+		"ReadWriteMany":    true,
+		"ReadWriteOncePod": true,
+	}
+	seen := map[string]bool{}
+	normalized := make([]string, 0, len(modes))
+	for _, mode := range modes {
+		mode = strings.TrimSpace(mode)
+		if !allowed[mode] {
+			return nil, fmt.Errorf("unsupported access mode %q", mode)
+		}
+		if !seen[mode] {
+			seen[mode] = true
+			normalized = append(normalized, mode)
+		}
+	}
+	if len(normalized) == 0 {
+		return nil, fmt.Errorf("at least one access mode is required")
+	}
+	return normalized, nil
+}
+
 func (s *ProjectService) DeleteProject(ctx context.Context, project *model.Project) error {
 	var cleanupErrs []error
 	var cfCred model.CloudflareCredential
 	var cfToken string
 	if project.CloudflareCredentialID != nil {
 		if err := s.db.WithContext(ctx).First(&cfCred, *project.CloudflareCredentialID).Error; err == nil {
-			cfToken, _ = s.credentials.DecryptCloudflareToken(cfCred)
+			cfToken, _ = s.credentials.CloudflareToken(ctx, cfCred)
 		}
 	}
 	var dnsRecords []model.DNSRecord
@@ -750,11 +923,16 @@ func basaltPassRuntimeEnv(inst *model.BasaltPassInstance, project *model.Project
 		return out
 	}
 	baseURL := strings.TrimRight(inst.BaseURL, "/")
-	redirectURI := projectHome(project) + "/callback"
+	redirectURI := strings.TrimSpace(out["BASALTPASS_REDIRECT_URI"])
+	if redirectURI == "" {
+		redirectURI = projectHome(project) + "/callback"
+	}
 	out["BASALTPASS_BASE_URL"] = baseURL
 	out["BASALTPASS_CLIENT_ID"] = project.BasaltClientID
 	out["BASALTPASS_CLIENT_SECRET"] = clientSecret
 	out["BASALTPASS_REDIRECT_URI"] = redirectURI
+	setDefaultEnv(out, "BASALTPASS_ENABLED", "true")
+	setDefaultEnv(out, "BASALTPASS_OAUTH_ENABLED", "true")
 	setDefaultEnv(out, "BASALTPASS_OAUTH_CLIENT_ID", project.BasaltClientID)
 	setDefaultEnv(out, "BASALTPASS_OAUTH_CLIENT_SECRET", clientSecret)
 	setDefaultEnv(out, "BASALTPASS_OAUTH_REDIRECT_URI", redirectURI)
@@ -772,6 +950,25 @@ func basaltPassRuntimeEnv(inst *model.BasaltPassInstance, project *model.Project
 	}
 	if project.BasaltAppID != 0 {
 		out["BASALTPASS_APP_ID"] = strconv.FormatUint(uint64(project.BasaltAppID), 10)
+	}
+	return out
+}
+
+func basaltPassComponentRuntimeBaseEnv(project *model.Project, cfg *dto.BasaltPassComponentConfig, base map[string]string) map[string]string {
+	out := make(map[string]string, len(base)+4)
+	for key, value := range base {
+		out[key] = value
+	}
+	if project == nil || project.BasaltClientID == "" {
+		return out
+	}
+	setDefaultEnv(out, "BASALTPASS_ENABLED", "true")
+	setDefaultEnv(out, "BASALTPASS_OAUTH_ENABLED", "true")
+	if cfg != nil && strings.TrimSpace(cfg.CallbackPath) != "" {
+		redirectURI := joinURLPath(projectHome(project), cfg.CallbackPath)
+		out["BASALTPASS_REDIRECT_URI"] = redirectURI
+		setDefaultEnv(out, "BASALTPASS_OAUTH_REDIRECT_URI", redirectURI)
+		setDefaultEnv(out, "BASALT_REDIRECT_URI", redirectURI)
 	}
 	return out
 }

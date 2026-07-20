@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as LucideIcons from "lucide-react";
+import { t } from "../i18n/index";
 import {
   formatTime,
   formatBytes,
@@ -62,7 +63,7 @@ export default function DashboardView({ dashboard }) {
   if (!dashboard) {
     return (
       <section className="panel">
-        <div className="empty">Loading cluster dashboard...</div>
+        <div className="empty">{t("Loading cluster dashboard...")}</div>
       </section>
     );
   }
@@ -76,39 +77,46 @@ export default function DashboardView({ dashboard }) {
       <section className="dashboard-kpis">
         <MetricCard
           icon={Server}
-          label="Nodes"
+          label={t("Nodes")}
           value={nodes.total || 0}
-          detail={`${nodes.server || 0} Server · ${nodes.agent || 0} Agent · ${nodes.not_ready || 0} NotReady`}
+          detail={t("{server} Server · {agent} Agent · {notReady} NotReady", {
+            server: nodes.server || 0,
+            agent: nodes.agent || 0,
+            notReady: nodes.not_ready || 0,
+          })}
         />
         <MetricCard
           icon={Boxes}
-          label="Pods"
+          label={t("Pods")}
           value={`${pods.running || 0} / ${pods.total || 0}`}
-          detail={`${pods.abnormal || 0} abnormal · ${pods.pending || 0} pending`}
+          detail={t("{abnormal} abnormal · {pending} pending", {
+            abnormal: pods.abnormal || 0,
+            pending: pods.pending || 0,
+          })}
         />
         <MetricCard
           icon={Cpu}
-          label="CPU"
+          label={t("CPU")}
           value={`${formatPercent(resources.cpu_percent)}%`}
           detail={`${resources.cpu_used_millis || 0}m / ${resources.cpu_total_millis || 0}m`}
         />
         <MetricCard
           icon={MemoryStick}
-          label="Memory"
+          label={t("Memory")}
           value={`${formatPercent(resources.memory_percent)}%`}
           detail={`${formatBytes(resources.memory_used_bytes)} / ${formatBytes(resources.memory_total_bytes)}`}
         />
         <MetricCard
           icon={HardDrive}
-          label="Disk"
+          label={t("Disk")}
           value={`${formatPercent(resources.disk_percent)}%`}
           detail={`${formatBytes(resources.disk_used_bytes)} / ${formatBytes(resources.disk_total_bytes)}`}
         />
         <MetricCard
           icon={AlertTriangle}
-          label="Alerts"
+          label={t("Alerts")}
           value={alerts.length}
-          detail={`${events.length} recent warning events`}
+          detail={t("{count} recent warning events", { count: events.length })}
           tone={alerts.length > 0 ? "warning" : "good"}
         />
       </section>
@@ -116,30 +124,30 @@ export default function DashboardView({ dashboard }) {
       <section className="dashboard-grid">
         <div className="panel dashboard-panel">
           <h2>
-            <Activity size={18} /> Live Resource Utilization
+            <Activity size={18} /> {t("Live Resource Utilization")}
           </h2>
           <div className="industrial-meters">
             <IndustrialMeter
-              label="CPU"
+              label={t("CPU")}
               value={resources.cpu_percent}
               detail={`${resources.cpu_used_millis || 0}m / ${resources.cpu_total_millis || 0}m`}
             />
             <IndustrialMeter
-              label="Memory"
+              label={t("Memory")}
               value={resources.memory_percent}
               detail={`${formatBytes(resources.memory_used_bytes)} / ${formatBytes(resources.memory_total_bytes)}`}
             />
             <IndustrialMeter
-              label="Disk"
+              label={t("Disk")}
               value={resources.disk_percent}
               detail={`${formatBytes(resources.disk_used_bytes)} / ${formatBytes(resources.disk_total_bytes)}`}
             />
           </div>
           {!dashboard.metrics_available && (
             <p className="muted">
-              Metrics partially unavailable:{" "}
+              {t("Metrics partially unavailable: ")}
               {dashboard.metrics_error ||
-                "metrics-server or node stats endpoint did not return data."}
+                t("metrics-server or node stats endpoint did not return data.")}
             </p>
           )}
         </div>
@@ -148,13 +156,13 @@ export default function DashboardView({ dashboard }) {
       <section className="dashboard-grid">
         <div className="panel dashboard-panel">
           <h2>
-            <AlertTriangle size={18} /> Recent Alerts
+            <AlertTriangle size={18} /> {t("Recent Alerts")}
           </h2>
-          <AlertList rows={alerts} empty="No active alerts reported." />
+          <AlertList rows={alerts} empty={t("No active alerts reported.")} />
         </div>
         <div className="panel dashboard-panel">
           <h2>
-            <ListRestart size={18} /> Events and Error Signals
+            <ListRestart size={18} /> {t("Events and Error Signals")}
           </h2>
           <div className="timeline">
             {events.map((event, index) => (
@@ -175,7 +183,7 @@ export default function DashboardView({ dashboard }) {
             ))}
             {events.length === 0 && (
               <div className="empty">
-                No warning events in the latest cluster feed.
+                {t("No warning events in the latest cluster feed.")}
               </div>
             )}
           </div>

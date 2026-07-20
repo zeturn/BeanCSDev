@@ -220,21 +220,9 @@ func (s *DeploymentService) HandleGitHubWebhook(ctx context.Context, req dto.Git
 			return err
 		}
 	}
-	if req.Status == "success" && imageRef != "" && s.credentials != nil && s.gitops != nil && p.GitHubCredentialID != 0 {
+	if req.Status == "success" && imageRef != "" {
 		p.ImageReference = imageRef
 		if err := s.db.WithContext(ctx).Model(&p).Update("image_reference", imageRef).Error; err != nil {
-			return err
-		}
-		var cred model.GitHubCredential
-		if err := s.db.WithContext(ctx).First(&cred, p.GitHubCredentialID).Error; err != nil {
-			return err
-		}
-		token, err := s.credentials.GitHubToken(ctx, cred)
-		if err != nil {
-			return err
-		}
-		if err := s.gitops.UpdateImageTag(ctx, token, cred, &p, imageRef); err != nil {
-			_ = s.db.WithContext(ctx).Model(&dep).Updates(map[string]any{"status": "failed", "failure_reason": truncateFailure(err.Error())}).Error
 			return err
 		}
 		if s.processes != nil {

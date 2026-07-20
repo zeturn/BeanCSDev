@@ -310,7 +310,7 @@ func (s *GitHubBuildService) reconcileDeployment(ctx context.Context, deployment
 	if err := s.db.WithContext(ctx).Model(&project).Updates(map[string]any{"image_reference": image}).Error; err != nil {
 		return err
 	}
-	if err := s.gitops.UpdateImageTag(ctx, token, cred, &project, image); err != nil {
+	if _, err := s.gitops.UpdateImageTag(ctx, token, cred, &project, image); err != nil {
 		return err
 	}
 	return s.db.WithContext(ctx).Model(&deployment).Updates(map[string]any{

@@ -1,5 +1,6 @@
 import { Button } from "../components/index";
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { t } from "../i18n/index";
 import * as LucideIcons from "lucide-react";
 import {
   formatDeploymentDate,
@@ -134,17 +135,17 @@ export default function DeploymentsView({
               <b>{deploymentShortID(row.name, row.id)}</b>
               <small>
                 {row.environment}
-                {row.current && <em>Current</em>}
+                {row.current && <em>{t("Current")}</em>}
               </small>
             </span>
             <span className={`deploy-state ${row.status}`}>
               <i />
               <b>
                 {row.status === "error"
-                  ? "Error"
+                  ? t("Error")
                   : row.status === "building"
-                    ? "Building"
-                    : "Ready"}
+                    ? t("Building")
+                    : t("Ready")}
               </b>
               <small>{row.duration}</small>
             </span>
@@ -165,7 +166,7 @@ export default function DeploymentsView({
           </Button>
         ))}
         {rows.length === 0 && (
-          <div className="empty">No deployments found.</div>
+          <div className="empty">{t("No deployments found.")}</div>
         )}
       </div>
     </section>

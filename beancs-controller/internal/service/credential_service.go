@@ -95,7 +95,7 @@ func (s *CredentialService) CreateCloudflare(ctx context.Context, userID string,
 			accountID = strings.TrimSpace(zone.Account.ID)
 		}
 	}
-	cred := model.CloudflareCredential{Name: name, APITokenEnc: enc, AccountID: accountID, IsActive: true, CreatedBy: userID}
+	cred := model.CloudflareCredential{Name: name, APITokenEnc: enc, AccountID: accountID, AuthType: "api_token", IsActive: true, CreatedBy: userID}
 	caches := cloudflareDomainCaches(0, accountID, zones)
 	if len(caches) == 0 {
 		return nil, fmt.Errorf("no usable Cloudflare zones were returned for this token")
@@ -116,6 +116,83 @@ func (s *CredentialService) CreateCloudflare(ctx context.Context, userID string,
 		return nil
 	})
 	return []model.CloudflareCredential{cred}, err
+}
+
+func (s *CredentialService) CreateCloudflareOAuth(ctx context.Context, userID, name, code string) (*model.CloudflareCredential, error) {
+	if s.cfg == nil || strings.TrimSpace(s.cfg.CloudflareOAuthClientID) == "" || strings.TrimSpace(s.cfg.CloudflareOAuthClientSecret) == "" {
+		return nil, fmt.Errorf("Cloudflare OAuth app is not configured")
+	}
+	token, err := s.exchangeCloudflareOAuthCode(ctx, strings.TrimSpace(code))
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(token.AccessToken) == "" {
+		return nil, fmt.Errorf("Cloudflare OAuth did not return an access token")
+	}
+	enc, err := s.cipher.EncryptString(token.AccessToken)
+	if err != nil {
+		return nil, err
+	}
+	var refreshEnc []byte
+	if strings.TrimSpace(token.RefreshToken) != "" {
+		refreshEnc, err = s.cipher.EncryptString(token.RefreshToken)
+		if err != nil {
+			return nil, err
+		}
+	}
+	expiresAt := cloudflareTokenExpiry(token.ExpiresIn)
+	zones, err := s.cloudflareZones(ctx, token.AccessToken, "", "")
+	if err != nil {
+		return nil, err
+	}
+	if len(zones) == 0 {
+		return nil, fmt.Errorf("no Cloudflare zones were returned for this authorization")
+	}
+	accountID := ""
+	for _, zone := range zones {
+		if accountID == "" {
+			accountID = strings.TrimSpace(zone.Account.ID)
+		}
+	}
+	credentialName := strings.TrimSpace(name)
+	if credentialName == "" {
+		credentialName = "Cloudflare OAuth"
+		if accountID != "" {
+			credentialName = "Cloudflare " + accountID
+		}
+	}
+	cred := &model.CloudflareCredential{
+		Name:            credentialName,
+		APITokenEnc:     enc,
+		RefreshTokenEnc: refreshEnc,
+		TokenExpiresAt:  expiresAt,
+		AuthType:        "oauth",
+		AccountID:       accountID,
+		IsActive:        true,
+		CreatedBy:       userID,
+	}
+	caches := cloudflareDomainCaches(0, accountID, zones)
+	if len(caches) == 0 {
+		return nil, fmt.Errorf("no usable Cloudflare zones were returned for this authorization")
+	}
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(cred).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(&model.UserCredential{UserID: userID, CredentialType: model.CredentialTypeCloudflare, CredentialID: cred.ID, Role: model.CredentialRoleOwner}).Error; err != nil {
+			return err
+		}
+		for i := range caches {
+			caches[i].CloudflareCredentialID = cred.ID
+			if err := upsertCloudflareDomainCache(tx, &caches[i]); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return cred, nil
 }
 
 func (s *CredentialService) CreateGitHub(ctx context.Context, userID string, req dto.CreateGitHubCredentialRequest) (*model.GitHubCredential, error) {
@@ -934,6 +1011,87 @@ func (s *CredentialService) ListCloudflareDomains(ctx context.Context, userID st
 	return out, nil
 }
 
+func (s *CredentialService) RefreshCloudflareDomains(ctx context.Context, id uint) ([]dto.CloudflareDomainResponse, error) {
+	cred, token, err := s.cloudflareCredentialToken(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	zones, err := s.cloudflareZones(ctx, token, cred.ZoneID, cred.AccountID)
+	if err != nil {
+		return nil, err
+	}
+	if len(zones) == 0 {
+		return nil, fmt.Errorf("no Cloudflare zones were returned for this token")
+	}
+	accountID := strings.TrimSpace(cred.AccountID)
+	for _, zone := range zones {
+		if accountID == "" {
+			accountID = strings.TrimSpace(zone.Account.ID)
+		}
+	}
+	caches := cloudflareDomainCaches(cred.ID, accountID, zones)
+	if len(caches) == 0 {
+		return nil, fmt.Errorf("no usable Cloudflare zones were returned for this token")
+	}
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if accountID != "" && cred.AccountID == "" {
+			if err := tx.Model(&model.CloudflareCredential{}).Where("id = ?", cred.ID).Update("account_id", accountID).Error; err != nil {
+				return err
+			}
+			cred.AccountID = accountID
+		}
+		for i := range caches {
+			if err := upsertCloudflareDomainCache(tx, &caches[i]); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return cloudflareDomainResponsesForCredential(ctx, s.db, cred), nil
+}
+
+func cloudflareDomainResponsesForCredential(ctx context.Context, db *gorm.DB, cred model.CloudflareCredential) []dto.CloudflareDomainResponse {
+	out := []dto.CloudflareDomainResponse{}
+	seen := map[string]bool{}
+	var cached []model.CloudflareDomainCache
+	_ = db.WithContext(ctx).Where("cloudflare_credential_id = ?", cred.ID).Order("domain asc").Find(&cached).Error
+	for _, domain := range cached {
+		if domain.Domain == "" || domain.ZoneID == "" {
+			continue
+		}
+		key := strings.ToLower(domain.AccountID + "|" + domain.ZoneID + "|" + domain.Domain)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, dto.CloudflareDomainResponse{
+			CredentialID: cred.ID,
+			Credential:   cred.Name,
+			ZoneID:       domain.ZoneID,
+			Domain:       domain.Domain,
+			AccountID:    domain.AccountID,
+			Status:       domain.Status,
+			Active:       cred.IsActive,
+		})
+	}
+	if cred.Domain != "" && cred.ZoneID != "" {
+		key := strings.ToLower(cred.AccountID + "|" + cred.ZoneID + "|" + cred.Domain)
+		if !seen[key] {
+			out = append(out, dto.CloudflareDomainResponse{
+				CredentialID: cred.ID,
+				Credential:   cred.Name,
+				ZoneID:       cred.ZoneID,
+				Domain:       cred.Domain,
+				AccountID:    cred.AccountID,
+				Active:       cred.IsActive,
+			})
+		}
+	}
+	return out
+}
+
 func (s *CredentialService) ListGitHub(ctx context.Context, userID string) ([]model.GitHubCredential, error) {
 	var out []model.GitHubCredential
 	err := s.db.WithContext(ctx).Joins("JOIN user_credentials uc ON uc.credential_id = git_hub_credentials.id AND uc.credential_type = ?", model.CredentialTypeGitHub).
@@ -1010,12 +1168,56 @@ func (s *CredentialService) DecryptCloudflareToken(cred model.CloudflareCredenti
 	return s.cipher.DecryptString(cred.APITokenEnc)
 }
 
+func (s *CredentialService) CloudflareToken(ctx context.Context, cred model.CloudflareCredential) (string, error) {
+	token, err := s.DecryptCloudflareToken(cred)
+	if err != nil {
+		return "", err
+	}
+	if cred.AuthType != "oauth" || cred.TokenExpiresAt == nil || cred.TokenExpiresAt.After(time.Now().Add(2*time.Minute)) {
+		return token, nil
+	}
+	if len(cred.RefreshTokenEnc) == 0 {
+		return token, nil
+	}
+	refreshToken, err := s.cipher.DecryptString(cred.RefreshTokenEnc)
+	if err != nil {
+		return "", err
+	}
+	refreshed, err := s.refreshCloudflareOAuthToken(ctx, refreshToken)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(refreshed.AccessToken) == "" {
+		return "", fmt.Errorf("Cloudflare OAuth refresh did not return an access token")
+	}
+	accessEnc, err := s.cipher.EncryptString(refreshed.AccessToken)
+	if err != nil {
+		return "", err
+	}
+	refreshEnc := cred.RefreshTokenEnc
+	if strings.TrimSpace(refreshed.RefreshToken) != "" {
+		refreshEnc, err = s.cipher.EncryptString(refreshed.RefreshToken)
+		if err != nil {
+			return "", err
+		}
+	}
+	updates := map[string]any{
+		"api_token_enc":     accessEnc,
+		"refresh_token_enc": refreshEnc,
+		"token_expires_at":  cloudflareTokenExpiry(refreshed.ExpiresIn),
+	}
+	if err := s.db.WithContext(ctx).Model(&model.CloudflareCredential{}).Where("id = ?", cred.ID).Updates(updates).Error; err != nil {
+		return "", err
+	}
+	return refreshed.AccessToken, nil
+}
+
 func (s *CredentialService) VerifyCloudflare(ctx context.Context, id uint) (map[string]any, error) {
 	var cred model.CloudflareCredential
 	if err := s.db.WithContext(ctx).First(&cred, id).Error; err != nil {
 		return nil, err
 	}
-	token, err := s.DecryptCloudflareToken(cred)
+	token, err := s.CloudflareToken(ctx, cred)
 	if err != nil {
 		return nil, err
 	}
@@ -1167,7 +1369,7 @@ func (s *CredentialService) cloudflareCredentialToken(ctx context.Context, id ui
 	if err := s.db.WithContext(ctx).First(&cred, id).Error; err != nil {
 		return cred, "", err
 	}
-	token, err := s.DecryptCloudflareToken(cred)
+	token, err := s.CloudflareToken(ctx, cred)
 	return cred, token, err
 }
 
@@ -1292,6 +1494,70 @@ type cloudflareZonePayload struct {
 	Name    string                `json:"name"`
 	Status  string                `json:"status"`
 	Account cloudflareZoneAccount `json:"account"`
+}
+
+type cloudflareOAuthTokenResponse struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	ExpiresIn    int    `json:"expires_in"`
+	TokenType    string `json:"token_type"`
+	Scope        string `json:"scope"`
+}
+
+func cloudflareTokenExpiry(expiresIn int) *time.Time {
+	if expiresIn <= 0 {
+		return nil
+	}
+	expiresAt := time.Now().Add(time.Duration(expiresIn) * time.Second)
+	return &expiresAt
+}
+
+func (s *CredentialService) exchangeCloudflareOAuthCode(ctx context.Context, code string) (cloudflareOAuthTokenResponse, error) {
+	if code == "" {
+		return cloudflareOAuthTokenResponse{}, fmt.Errorf("Cloudflare authorization code is required")
+	}
+	form := url.Values{}
+	form.Set("grant_type", "authorization_code")
+	form.Set("code", code)
+	form.Set("redirect_uri", strings.TrimSpace(s.cfg.CloudflareOAuthRedirectURL))
+	return s.cloudflareOAuthToken(ctx, form)
+}
+
+func (s *CredentialService) refreshCloudflareOAuthToken(ctx context.Context, refreshToken string) (cloudflareOAuthTokenResponse, error) {
+	if strings.TrimSpace(refreshToken) == "" {
+		return cloudflareOAuthTokenResponse{}, fmt.Errorf("Cloudflare refresh token is required")
+	}
+	form := url.Values{}
+	form.Set("grant_type", "refresh_token")
+	form.Set("refresh_token", strings.TrimSpace(refreshToken))
+	return s.cloudflareOAuthToken(ctx, form)
+}
+
+func (s *CredentialService) cloudflareOAuthToken(ctx context.Context, form url.Values) (cloudflareOAuthTokenResponse, error) {
+	if s.cfg == nil || strings.TrimSpace(s.cfg.CloudflareOAuthClientID) == "" || strings.TrimSpace(s.cfg.CloudflareOAuthClientSecret) == "" {
+		return cloudflareOAuthTokenResponse{}, fmt.Errorf("Cloudflare OAuth app is not configured")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://dash.cloudflare.com/oauth2/token", strings.NewReader(form.Encode()))
+	if err != nil {
+		return cloudflareOAuthTokenResponse{}, err
+	}
+	req.SetBasicAuth(strings.TrimSpace(s.cfg.CloudflareOAuthClientID), strings.TrimSpace(s.cfg.CloudflareOAuthClientSecret))
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	if err != nil {
+		return cloudflareOAuthTokenResponse{}, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return cloudflareOAuthTokenResponse{}, fmt.Errorf("Cloudflare OAuth token request failed: %s", strings.TrimSpace(string(body)))
+	}
+	var out cloudflareOAuthTokenResponse
+	if err := json.Unmarshal(body, &out); err != nil {
+		return cloudflareOAuthTokenResponse{}, fmt.Errorf("Cloudflare OAuth token response was invalid")
+	}
+	return out, nil
 }
 
 func (s *CredentialService) cloudflareZones(ctx context.Context, token, zoneID, accountID string) ([]cloudflareZonePayload, error) {
@@ -1578,6 +1844,9 @@ func (s *CredentialService) UpdateCloudflare(ctx context.Context, id uint, req d
 			return nil, err
 		}
 		cred.APITokenEnc = enc
+		cred.RefreshTokenEnc = nil
+		cred.TokenExpiresAt = nil
+		cred.AuthType = "api_token"
 	}
 	if req.ZoneID != nil {
 		cred.ZoneID = *req.ZoneID

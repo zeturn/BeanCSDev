@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { BrowserRouter, useLocation, useNavigate } from "react-router-dom";
 import {
   filterNavItems,
   filterNavSections,
@@ -60,6 +61,7 @@ import {
   Cpu,
   Database,
   Edit3,
+  ExternalLink,
   FileText,
   GitBranch,
   Github,
@@ -95,8 +97,12 @@ import {
   X,
 } from "lucide-react";
 import "./style.css";
+import { I18nProvider, useI18n, t } from "./i18n/index";
+import { LanguageSwitcher } from "./i18n/LanguageSwitcher";
 const API = "/v1/api";
 const tokenKey = "beancs.accessToken";
+const hasOAuthCallback = () =>
+  new URLSearchParams(window.location.search).has("code");
 const emptyRuntime = {
   namespaces: [],
   pods: [],
@@ -105,6 +111,67 @@ const emptyRuntime = {
   services: [],
   ingresses: [],
 };
+const emptyStorage = {
+  persistent_volume_claims: [],
+  persistent_volumes: [],
+  storage_classes: [],
+};
+const viewPaths = {
+  dashboard: "/",
+  applications: "/workloads/applications",
+  projects: "/workloads/projects",
+  deploy: "/workloads/deploy",
+  dependencies: "/workloads/dependencies",
+  progress: "/workloads/progress",
+  deployments: "/workloads/deployments",
+  pods: "/workloads/pods",
+  services: "/workloads/services",
+  ingresses: "/workloads/ingresses",
+  workloadImage: "/workloads/images",
+  nodes: "/infrastructure/nodes",
+  namespaces: "/infrastructure/namespaces",
+  networking: "/infrastructure/networking",
+  storage: "/infrastructure/storage",
+  github: "/integrations/github",
+  cloudflare: "/integrations/cloudflare",
+  domains: "/integrations/domains",
+  registries: "/integrations/registries",
+  apiKeys: "/security/api-keys",
+  secrets: "/security/secrets",
+  accessControl: "/security/access-control",
+  alerts: "/observability/alerts",
+  events: "/observability/events",
+  logs: "/observability/logs",
+  metrics: "/observability/metrics",
+  settings: "/settings",
+};
+const viewsByPath = Object.fromEntries(
+  Object.entries(viewPaths).map(([view, path]) => [path, view]),
+);
+
+function pathForView(view) {
+  return viewPaths[view] || viewPaths.dashboard;
+}
+
+function viewForPath(pathname) {
+  const normalized =
+    pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
+  return viewsByPath[normalized] || "dashboard";
+}
+
+function isKnownViewPath(pathname) {
+  const normalized =
+    pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
+  return Boolean(viewsByPath[normalized]);
+}
+
+function progressPath(projectID = "", processID = "") {
+  const params = new URLSearchParams();
+  if (projectID) params.set("project", String(projectID));
+  if (processID) params.set("process", String(processID));
+  const query = params.toString();
+  return `${pathForView("progress")}${query ? `?${query}` : ""}`;
+}
 const navOverview = {
   id: "dashboard",
   label: "Overview",
@@ -301,15 +368,22 @@ import GitHubView from "./views/GitHubView";
 import CloudflareView from "./views/CloudflareView";
 import DomainsView from "./views/DomainsView";
 import NetworkingView from "./views/NetworkingView";
+import StorageView from "./views/StorageView";
 import RuntimeDetailDrawer from "./views/RuntimeDetailDrawer";
 import NodeDetailView from "./views/NodeDetailView";
 import NamespaceDetailView from "./views/NamespaceDetailView";
 import ProjectModal from "./views/ProjectModal";
 function App() {
+  const { t } = useI18n();
+  const navigate = useNavigate();
+  const routeLocation = useLocation();
   const [config, setConfig] = useState(null);
   const [token, setToken] = useState(localStorage.getItem(tokenKey) || "");
+  const [loginPhase, setLoginPhase] = useState(() =>
+    hasOAuthCallback() ? "completing" : "idle",
+  );
   const [basaltProfile, setBasaltProfile] = useState(null);
-  const [view, setView] = useState("dashboard");
+  const view = viewForPath(routeLocation.pathname);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -317,6 +391,7 @@ function App() {
   const [runtime, setRuntime] = useState(emptyRuntime);
   const [dashboard, setDashboard] = useState(null);
   const [network, setNetwork] = useState(null);
+  const [storage, setStorage] = useState(emptyStorage);
   const [projects, setProjects] = useState([]);
   const [applications, setApplications] = useState([]);
   const [dependencyDefinitions, setDependencyDefinitions] = useState([]);
@@ -358,6 +433,8 @@ function App() {
   const [trackingLoading, setTrackingLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarQuery, setSidebarQuery] = useState("");
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef(null);
   const [activeProgressProjectID, setActiveProgressProjectID] = useState("");
   const [activeProcessID, setActiveProcessID] = useState("");
   const [processRecords, setProcessRecords] = useState([]);
@@ -378,6 +455,7 @@ function App() {
   const workspaceLoadingRef = useRef(false);
   const dashboardLoadingRef = useRef(false);
   const networkLoadingRef = useRef(false);
+  const storageLoadingRef = useRef(false);
   const progressLoadingRef = useRef(false);
   const nodeDetailLoadingRef = useRef(false);
   const registriesLoadingRef = useRef(false);
@@ -386,14 +464,76 @@ function App() {
     () => profileFromBasalt(basaltProfile, token),
     [basaltProfile, token],
   );
+  const configuredNavSections = useMemo(() => {
+    const argocdURL = String(config?.argocd_url || "").trim();
+    if (!argocdURL) return navSections;
+    return navSections.map((section) =>
+      section.id === "integrations"
+        ? {
+            ...section,
+            items: [
+              ...section.items,
+              {
+                id: "argocd",
+                label: "Argo CD",
+                icon: ExternalLink,
+                externalUrl: argocdURL,
+              },
+            ],
+          }
+        : section,
+    );
+  }, [config?.argocd_url]);
   const filteredNavSections = useMemo(
-    () => filterNavSections(navSections, sidebarQuery),
-    [sidebarQuery],
+    () => filterNavSections(configuredNavSections, sidebarQuery),
+    [configuredNavSections, sidebarQuery],
   );
   const filteredOverview = useMemo(
     () => filterNavItems([navOverview], sidebarQuery),
     [sidebarQuery],
   );
+
+  useEffect(() => {
+    if (!["progress", "logs"].includes(view)) return;
+    const params = new URLSearchParams(routeLocation.search);
+    const projectID = params.get("project") || "";
+    const processID = params.get("process") || "";
+    if (projectID !== activeProgressProjectID) {
+      setActiveProgressProjectID(projectID);
+      setProjectProgress(null);
+    }
+    if (processID !== activeProcessID) setActiveProcessID(processID);
+  }, [view, routeLocation.search]);
+
+  useEffect(() => {
+    const query = new URLSearchParams(routeLocation.search);
+    if (
+      !token ||
+      isKnownViewPath(routeLocation.pathname) ||
+      query.has("code") ||
+      query.get("github_app") === "connected" ||
+      query.has("cloudflare_app")
+    )
+      return;
+    navigate(pathForView("dashboard"), { replace: true });
+  }, [token, routeLocation.pathname, routeLocation.search, navigate]);
+
+  useEffect(() => {
+    if (!userMenuOpen) return undefined;
+    function handlePointerDown(event) {
+      if (userMenuRef.current?.contains(event.target)) return;
+      setUserMenuOpen(false);
+    }
+    function handleKeyDown(event) {
+      if (event.key === "Escape") setUserMenuOpen(false);
+    }
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [userMenuOpen]);
   useEffect(() => {
     boot();
   }, []);
@@ -417,6 +557,14 @@ function App() {
     loadNetwork();
     const timer = setInterval(() => {
       if (!document.hidden) loadNetwork();
+    }, 30000);
+    return () => clearInterval(timer);
+  }, [token, view]);
+  useEffect(() => {
+    if (!token || view !== "storage") return;
+    loadStorage();
+    const timer = setInterval(() => {
+      if (!document.hidden) loadStorage();
     }, 30000);
     return () => clearInterval(timer);
   }, [token, view]);
@@ -498,16 +646,30 @@ function App() {
       const cfg = await publicJSON(`${API}/ui/config`);
       setConfig(cfg);
       if (location.search.includes("code=")) {
+        setLoginPhase("completing");
         const accessToken = await finishLogin(cfg);
+        setLoginPhase("authenticated");
         localStorage.setItem(tokenKey, accessToken);
         setToken(accessToken);
-        history.replaceState({}, "", location.pathname);
+        navigate(pathForView("dashboard"), { replace: true });
       } else if (location.search.includes("github_app=connected")) {
-        setView("github");
-        setNotice("GitHub App connected.");
-        history.replaceState({}, "", location.pathname);
+        setLoginPhase("idle");
+        navigate(pathForView("github"), { replace: true });
+        setNotice(t("GitHub App connected."));
+      } else if (location.search.includes("cloudflare_app=connected")) {
+        setLoginPhase("idle");
+        navigate(pathForView("cloudflare"), { replace: true });
+        setNotice(t("Cloudflare account connected."));
+      } else if (location.search.includes("cloudflare_app=error")) {
+        const params = new URLSearchParams(location.search);
+        setLoginPhase("idle");
+        navigate(pathForView("cloudflare"), { replace: true });
+        setError(params.get("message") || t("Cloudflare authorization failed."));
+      } else {
+        setLoginPhase("idle");
       }
     } catch (err) {
+      setLoginPhase("idle");
       setError(err.message);
     }
   }
@@ -634,8 +796,22 @@ function App() {
       networkLoadingRef.current = false;
     }
   }
+  async function loadStorage() {
+    if (storageLoadingRef.current) return;
+    storageLoadingRef.current = true;
+    try {
+      const data = await api.get("/runtime/storage/overview");
+      setStorage(data.data || emptyStorage);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      storageLoadingRef.current = false;
+    }
+  }
   async function startLogin() {
-    if (!config) return;
+    if (!config || loginPhase !== "idle") return;
+    setLoginPhase("redirecting");
+    setError("");
     const verifier = randomString(64);
     const challenge = await codeChallenge(verifier);
     const authState = randomString(32);
@@ -659,12 +835,22 @@ function App() {
   function logout() {
     localStorage.removeItem(tokenKey);
     setToken("");
+    setLoginPhase("idle");
     setBasaltProfile(null);
     setRuntime(emptyRuntime);
     setProjects([]);
     setApplications([]);
     setDependencyDefinitions([]);
     setReusableDependencies([]);
+    navigate(pathForView("dashboard"), { replace: true });
+  }
+  function openProgress(projectID = "", processID = "", replace = false) {
+    const nextProjectID = String(projectID || "");
+    const nextProcessID = String(processID || "");
+    setActiveProgressProjectID(nextProjectID);
+    setActiveProcessID(nextProcessID);
+    setProjectProgress(null);
+    navigate(progressPath(nextProjectID, nextProcessID), { replace });
   }
   async function createDependency(event) {
     event.preventDefault();
@@ -727,13 +913,18 @@ function App() {
     try {
       await api.post("/dependencies", body);
       form.reset();
-      setNotice("Dependency added.");
+      setNotice(t("Dependency added."));
       await loadWorkspace();
       return true;
     } catch (err) {
       setError(err.message);
       return false;
     }
+  }
+  async function deployDependency(event) {
+    const created = await createDependency(event);
+    if (created) setNotice(t("Dependency deployment submitted."));
+    return created;
   }
   async function createDependencyCredential(dependencyID, event) {
     event.preventDefault();
@@ -759,7 +950,7 @@ function App() {
     try {
       await api.post(`/dependencies/${dependencyID}/credentials`, body);
       form.reset();
-      setNotice("Credential added.");
+      setNotice(t("Credential added."));
       await loadWorkspace();
       return true;
     } catch (err) {
@@ -775,11 +966,17 @@ function App() {
     const data = await api.post("/credentials/github/app/start", body);
     location.href = data.install_url;
   }
+  async function connectCloudflareApp(event) {
+    event?.preventDefault();
+    setError("");
+    const data = await api.post("/credentials/cloudflare/app/start", {});
+    location.href = data.auth_url;
+  }
   async function updateGitHubCredential(id, updates) {
     try {
       await api.patch(`/credentials/github/${id}`, updates);
       await loadWorkspace();
-      setNotice("GitHub credential updated.");
+      setNotice(t("GitHub credential updated."));
     } catch (err) {
       setError(err.message);
     }
@@ -804,10 +1001,27 @@ function App() {
     }
   }
   async function deleteCredential(kind, id) {
-    if (!confirm(`Delete this ${kind} credential?`)) return;
+    if (!confirm(t("Delete this {kind} credential?", { kind }))) return;
     try {
       await api.delete(`/credentials/${kind}/${id}`);
       await loadWorkspace();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+  async function refreshCloudflareDomains(id) {
+    if (!id) return;
+    setError("");
+    try {
+      const data = await api.post(`/credentials/cloudflare/${id}/domains/refresh`, {});
+      const refreshed = data.data || [];
+      setDomains((current) => [
+        ...current.filter(
+          (domain) => String(domain.credential_id) !== String(id),
+        ),
+        ...refreshed,
+      ]);
+      setNotice(t("Cloudflare domains refreshed."));
     } catch (err) {
       setError(err.message);
     }
@@ -903,10 +1117,17 @@ function App() {
     }
   }
   async function deleteContainerRegistry(row) {
-    if (!confirm(`删除镜像源「${row.name}」？关联的镜像跟踪也会删除。`)) return;
+    if (
+      !confirm(
+        t('Delete image registry "{name}"? Linked image tracking will also be removed.', {
+          name: row.name,
+        }),
+      )
+    )
+      return;
     try {
       await api.delete(`/container-registries/${row.id}`);
-      setNotice("镜像源已删除。");
+      setNotice(t("Image registry deleted."));
       await loadRegistriesPage();
     } catch (err) {
       setError(err.message);
@@ -922,7 +1143,7 @@ function App() {
       repository: String(data.get("repository") || "").trim(),
     };
     if (!body.registry_id || !body.repository) {
-      setError("请选择镜像源并填写仓库路径。");
+      setError(t("Select a registry and enter the repository path."));
       return;
     }
     try {
@@ -948,7 +1169,12 @@ function App() {
     }
   }
   async function deleteTrackedImage(row) {
-    if (!confirm(`从列表中移除「${row.repository}」？`)) return;
+    if (
+      !confirm(
+        t('Remove "{repository}" from the list?', { repository: row.repository }),
+      )
+    )
+      return;
     try {
       await api.delete(`/container-images/${row.id}`);
       await loadContainerImages();
@@ -979,7 +1205,9 @@ function App() {
   async function revokeAPIKey(key) {
     if (
       !confirm(
-        `Revoke API key ${key.name}? Existing clients using it will stop working.`,
+        t("Revoke API key {name}? Existing clients using it will stop working.", {
+          name: key.name,
+        }),
       )
     )
       return;
@@ -1064,7 +1292,10 @@ function App() {
     }
   }
   async function deleteDNSRecord(record) {
-    if (!selectedCloudflareID || !confirm(`Delete DNS record ${record.name}?`))
+    if (
+      !selectedCloudflareID ||
+      !confirm(t("Delete DNS record {name}?", { name: record.name }))
+    )
       return;
     try {
       const qs = selectedCloudflareZoneID
@@ -1151,7 +1382,7 @@ function App() {
     }
   }
   async function deleteResourceQuota(namespace, name) {
-    if (!confirm(`Delete ResourceQuota ${name}?`)) return;
+    if (!confirm(t("Delete ResourceQuota {name}?", { name }))) return;
     try {
       await api.delete(
         `/runtime/namespaces/${encodeURIComponent(namespace)}/resource-quotas/${encodeURIComponent(name)}`,
@@ -1181,7 +1412,7 @@ function App() {
     }
   }
   async function deleteLimitRange(namespace, name) {
-    if (!confirm(`Delete LimitRange ${name}?`)) return;
+    if (!confirm(t("Delete LimitRange {name}?", { name }))) return;
     try {
       await api.delete(
         `/runtime/namespaces/${encodeURIComponent(namespace)}/limit-ranges/${encodeURIComponent(name)}`,
@@ -1211,7 +1442,7 @@ function App() {
     }
   }
   async function deleteNamespacePermission(namespace, name) {
-    if (!confirm(`Delete namespace permission ${name}?`)) return;
+    if (!confirm(t("Delete namespace permission {name}?", { name }))) return;
     try {
       await api.delete(
         `/runtime/namespaces/${encodeURIComponent(namespace)}/permissions/${encodeURIComponent(name)}`,
@@ -1242,7 +1473,9 @@ function App() {
   async function deleteNamespace(namespace) {
     if (
       !confirm(
-        `Delete namespace ${namespace}? This removes resources inside it.`,
+        t("Delete namespace {namespace}? This removes resources inside it.", {
+          namespace,
+        }),
       )
     )
       return;
@@ -1254,7 +1487,8 @@ function App() {
     }
   }
   async function deletePod(pod) {
-    if (!confirm(`Delete pod ${pod.name}? Kubernetes may recreate it.`)) return;
+    if (!confirm(t("Delete pod {name}? Kubernetes may recreate it.", { name: pod.name })))
+      return;
     try {
       await api.delete(`/runtime/pods/${pod.namespace}/${pod.name}`);
       await loadWorkspace();
@@ -1317,7 +1551,7 @@ function App() {
       await api.patch(`/runtime/nodes/${encodeURIComponent(nodeName)}/labels`, {
         labels: parseKeyValues(labelsText),
       });
-      setNotice(`${nodeName} labels updated.`);
+      setNotice(t("{name} labels updated.", { name: nodeName }));
       await loadWorkspace();
       await loadNodeDetail(
         {
@@ -1334,7 +1568,7 @@ function App() {
       await api.put(`/runtime/nodes/${encodeURIComponent(nodeName)}/taints`, {
         taints: parseTaints(taintsText),
       });
-      setNotice(`${nodeName} taints updated.`);
+      setNotice(t("{name} taints updated.", { name: nodeName }));
       await loadWorkspace();
       await loadNodeDetail(
         {
@@ -1352,7 +1586,12 @@ function App() {
         `/runtime/nodes/${encodeURIComponent(nodeName)}/${schedulable ? "uncordon" : "cordon"}`,
         {},
       );
-      setNotice(`${nodeName} ${schedulable ? "uncordoned" : "cordoned"}.`);
+      setNotice(
+        t("{name} {state}.", {
+          name: nodeName,
+          state: schedulable ? t("uncordoned") : t("cordoned"),
+        }),
+      );
       await loadWorkspace();
       await loadNodeDetail(
         {
@@ -1367,7 +1606,9 @@ function App() {
   async function drainNode(nodeName, options) {
     if (
       !confirm(
-        `Drain node ${nodeName}? Workloads will be evicted from this node.`,
+        t("Drain node {nodeName}? Workloads will be evicted from this node.", {
+          nodeName,
+        }),
       )
     )
       return;
@@ -1377,7 +1618,11 @@ function App() {
         options,
       );
       setNotice(
-        `Drain started for ${nodeName}: ${(data.data?.evicted_pods || []).length} pods evicted, ${(data.data?.skipped_pods || []).length} skipped.`,
+        t("Drain started for {name}: {evicted} pods evicted, {skipped} skipped.", {
+          name: nodeName,
+          evicted: (data.data?.evicted_pods || []).length,
+          skipped: (data.data?.skipped_pods || []).length,
+        }),
       );
       await loadWorkspace();
       await loadNodeDetail(
@@ -1394,7 +1639,7 @@ function App() {
     try {
       await api.delete(`/runtime/nodes/${encodeURIComponent(nodeName)}`);
       setRuntimeDetail(null);
-      setNotice(`${nodeName} deleted from the cluster.`);
+      setNotice(t("{name} deleted from the cluster.", { name: nodeName }));
       await loadWorkspace();
     } catch (err) {
       setError(err.message);
@@ -1518,7 +1763,7 @@ function App() {
     }
   }
   async function deleteService(service) {
-    if (!confirm(`Delete service ${service.name}?`)) return;
+    if (!confirm(t("Delete service {name}?", { name: service.name }))) return;
     try {
       await api.delete(
         `/runtime/services/${service.namespace}/${service.name}`,
@@ -1546,14 +1791,21 @@ function App() {
         await api.post("/runtime/ingresses", body);
         event.currentTarget.reset();
       }
-      setNotice(`Ingress ${body.name || existing?.name} saved.`);
+      setNotice(t("Ingress {name} saved.", { name: body.name || existing?.name }));
       await loadWorkspace();
     } catch (err) {
       setError(err.message);
     }
   }
   async function deleteIngress(ingress) {
-    if (!confirm(`Delete ingress ${ingress.namespace}/${ingress.name}?`))
+    if (
+      !confirm(
+        t("Delete ingress {namespace}/{name}?", {
+          namespace: ingress.namespace,
+          name: ingress.name,
+        }),
+      )
+    )
       return;
     try {
       await api.delete(
@@ -1588,14 +1840,23 @@ function App() {
         await api.post("/runtime/network-policies", body);
         event.currentTarget.reset();
       }
-      setNotice(`NetworkPolicy ${body.name || existing?.name} saved.`);
+      setNotice(
+        t("NetworkPolicy {name} saved.", { name: body.name || existing?.name }),
+      );
       await loadWorkspace();
     } catch (err) {
       setError(err.message);
     }
   }
   async function deleteNetworkPolicy(policy) {
-    if (!confirm(`Delete NetworkPolicy ${policy.namespace}/${policy.name}?`))
+    if (
+      !confirm(
+        t("Delete NetworkPolicy {namespace}/{name}?", {
+          namespace: policy.namespace,
+          name: policy.name,
+        }),
+      )
+    )
       return;
     try {
       await api.delete(
@@ -1694,7 +1955,7 @@ function App() {
     }
     const image = (nextForm.image_reference || "").trim();
     if (!image) {
-      setError("Image reference is required for registry deployments.");
+      setError(t("Image reference is required for registry deployments."));
       return false;
     }
     setAnalysis({
@@ -1759,7 +2020,7 @@ function App() {
         },
       ],
     });
-    setView("progress");
+    openProgress();
     try {
       const created = await api.post("/projects", {
         ...payload,
@@ -1774,8 +2035,9 @@ function App() {
       );
       if (deploymentResult.process?.id)
         setActiveProcessID(String(deploymentResult.process.id));
-      setNotice("Project created. Deployment process queued.");
+      setNotice(t("Project created. Deployment process queued."));
       setActiveProgressProjectID(String(created.id));
+      openProgress(created.id, deploymentResult.process?.id, true);
       setInstallProgress((current) =>
         current
           ? {
@@ -1945,11 +2207,11 @@ function App() {
       }
       const result = await api.post("/credentials/basaltpass/deployments", body);
       if (result.process?.id) setActiveProcessID(String(result.process.id));
-      setNotice("BasaltPass deployment process started.");
+      setNotice(t("BasaltPass deployment process started."));
       setDeployForm(defaultDeployForm());
       await loadWorkspace();
       await loadProcesses();
-      setView("progress");
+      openProgress("", result.process?.id);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -1969,7 +2231,7 @@ function App() {
       },
     );
     if (!payload.components.length) {
-      setError("Select at least one monorepo component.");
+      setError(t("Select at least one monorepo component."));
       return;
     }
     setLoading(true);
@@ -2006,7 +2268,7 @@ function App() {
         },
       ],
     });
-    setView("progress");
+    openProgress();
     try {
       const created = await api.post("/applications/monorepo", payload);
       const projects = created.projects || created.data?.projects || [];
@@ -2014,9 +2276,16 @@ function App() {
         created.dependencies || created.data?.dependencies || [];
       const firstProject = projects[0];
       setNotice(
-        `Application ${payload.name} created with ${projects.length} components and ${dependencies.length} dependencies.`,
+        t(
+          "Application {name} created with {count} components and {deps} dependencies.",
+          {
+            name: payload.name,
+            count: projects.length,
+            deps: dependencies.length,
+          },
+        ),
       );
-      if (firstProject?.id) setActiveProgressProjectID(String(firstProject.id));
+      if (firstProject?.id) openProgress(firstProject.id);
       setInstallProgress((current) =>
         current
           ? {
@@ -2120,7 +2389,7 @@ function App() {
         },
       ],
     });
-    setView("progress");
+    openProgress();
     try {
       const created = await api.post("/applications/from-repo-config", payload);
       const app = created.application || {};
@@ -2128,9 +2397,12 @@ function App() {
       const dependencies = app.dependencies || [];
       const firstProject = projects[0];
       setNotice(
-        `Application ${app.name || deployForm.name} applied from ${payload.config_path}.`,
+        t("Application {name} applied from {path}.", {
+          name: app.name || deployForm.name,
+          path: payload.config_path,
+        }),
       );
-      if (firstProject?.id) setActiveProgressProjectID(String(firstProject.id));
+      if (firstProject?.id) openProgress(firstProject.id);
       setInstallProgress((current) =>
         current
           ? {
@@ -2266,7 +2538,7 @@ function App() {
       }
     }
     if (!selected) {
-      setProjectLogStatus("Choose a project before following logs.");
+      setProjectLogStatus(t("Choose a project before following logs."));
       return;
     }
     projectLogController.current?.abort();
@@ -2307,7 +2579,15 @@ function App() {
     const data = await api.get(`/projects/${project.id}/env`);
     return data.data || {};
   }
-  async function updateProject(event, envData) {
+  async function loadProjectVolumes(project) {
+    const data = await api.get(`/projects/${project.id}/volumes`);
+    return data.data?.items || [];
+  }
+  async function loadAvailablePVCs(project) {
+    const data = await api.get(`/projects/${project.id}/available-pvcs`);
+    return data.data || [];
+  }
+  async function updateProject(event, envData, volumes) {
     event.preventDefault();
     const body = Object.fromEntries(
       new FormData(event.currentTarget).entries(),
@@ -2315,9 +2595,10 @@ function App() {
     body.replicas = Number(body.replicas || 1);
     body.auto_deploy = body.auto_deploy === "on";
     await api.patch(`/projects/${editingProject.id}`, body);
+    await api.put(`/projects/${editingProject.id}/volumes`, { items: volumes });
     if (envData) {
       await api.put(`/projects/${editingProject.id}/env`, envData);
-      setNotice(`${editingProject.name} updated and restarted.`);
+      setNotice(t("{name} updated and restarted.", { name: editingProject.name }));
     }
     setEditingProject(null);
     await loadWorkspace();
@@ -2331,7 +2612,7 @@ function App() {
     setError("");
     try {
       await api.delete(`/projects/${deletingProject.id}`);
-      setNotice(`${deletingProject.name} deleted.`);
+      setNotice(t("{name} deleted.", { name: deletingProject.name }));
       setDeletingProject(null);
       if (String(activeProgressProjectID) === String(deletingProject.id)) {
         setActiveProgressProjectID("");
@@ -2353,7 +2634,7 @@ function App() {
     setError("");
     try {
       await api.delete(`/applications/${deletingApplication.id}`);
-      setNotice(`${deletingApplication.name} deleted.`);
+      setNotice(t("{name} deleted.", { name: deletingApplication.name }));
       setDeletingApplication(null);
       await loadWorkspace();
     } catch (err) {
@@ -2378,10 +2659,8 @@ function App() {
         tag: project.image_reference || "github-actions",
         commit_sha: project.github_branch || "",
       });
-      setNotice(`${project.name} build started.`);
-      setActiveProgressProjectID(String(project.id));
-      if (result.process?.id) setActiveProcessID(String(result.process.id));
-      setView("progress");
+      setNotice(t("{name} build started.", { name: project.name }));
+      openProgress(project.id, result.process?.id);
       await loadProcesses();
       await loadProjectProgress(String(project.id));
     } catch (err) {
@@ -2403,6 +2682,11 @@ function App() {
     }
   }
   function selectNav(item) {
+    if (item.externalUrl) {
+      setSidebarOpen(false);
+      window.open(item.externalUrl, "_blank", "noopener,noreferrer");
+      return;
+    }
     if (item.id === "progress") {
       setActiveProgressProjectID("");
       setActiveProcessID("");
@@ -2410,20 +2694,39 @@ function App() {
       stopProjectLogFollow();
     }
     setSidebarOpen(false);
-    setView(item.id);
+    navigate(pathForView(item.id));
   }
   if (!token) {
+    const loginBusy = loginPhase !== "idle";
+    const callbackBusy =
+      loginPhase === "completing" || loginPhase === "authenticated";
     return (
       <main className="login-screen">
         <section className="login-copy">
-          <h1>BeanCS</h1>
+          <h1>{t("BeanCS")}</h1>
           <p>
-            Operate k3s projects, GitHub App deployments, DNS, and traffic
-            routes from one console.
+            {t(
+              "Operate k3s projects, GitHub App deployments, DNS, and traffic routes from one console.",
+            )}
           </p>
-          <Button onClick={startLogin} variant="primary">
-            <Lock size={18} /> Sign in with BasaltPass
-          </Button>
+          {loginBusy ? (
+            <div className="login-status" role="status" aria-live="polite">
+              {callbackBusy ? (
+                <CheckCircle2 size={18} />
+              ) : (
+                <LoaderCircle className="spin" size={18} />
+              )}
+              <span>
+                {callbackBusy
+                  ? t("Login successful. Redirecting...")
+                  : t("Communicating with the identity server...")}
+              </span>
+            </div>
+          ) : (
+            <Button onClick={startLogin} variant="primary" disabled={!config}>
+              <Lock size={18} /> {t("Sign in with BasaltPass")}
+            </Button>
+          )}
           {error && <p className="error-text">{error}</p>}
         </section>
       </main>
@@ -2440,14 +2743,14 @@ function App() {
           <span className="brand-orb">
             <Coffee size={16} />
           </span>
-          <b>BeanCS</b>
+          <b>{t("BeanCS")}</b>
         </div>
         <label className="sidebar-search">
           <Search size={19} />
           <Input
             value={sidebarQuery}
             onChange={(event) => setSidebarQuery(event.target.value)}
-            placeholder="Find..."
+            placeholder={t("Find...")}
           />
           <kbd>F</kbd>
         </label>
@@ -2471,7 +2774,7 @@ function App() {
           {sidebarQuery &&
             filteredOverview.length === 0 &&
             filteredNavSections.length === 0 && (
-              <div className="nav-empty">No matches</div>
+              <div className="nav-empty">{t("No matches")}</div>
             )}
         </div>
         <div className="sidebar-user">
@@ -2489,42 +2792,59 @@ function App() {
             <b>{userProfile.name}</b>
             <span>{userProfile.detail}</span>
           </div>
-          <Button
-            type="button"
-            aria-label="More account actions"
-            variant="icon"
-          >
-            <MoreHorizontal size={16} />
-          </Button>
-          <Button
-            type="button"
-            aria-label="Sign out"
-            variant="icon"
-            onClick={logout}
-          >
-            <LogOut size={16} />
-          </Button>
+          <div className="sidebar-user-menu-anchor" ref={userMenuRef}>
+            <Button
+              type="button"
+              aria-label={t("More account actions")}
+              aria-expanded={userMenuOpen}
+              aria-haspopup="menu"
+              variant="icon"
+              onClick={() => setUserMenuOpen((open) => !open)}
+            >
+              <MoreHorizontal size={16} />
+            </Button>
+            {userMenuOpen && (
+              <div className="sidebar-user-menu" role="menu">
+                <div className="sidebar-user-menu-section" role="none">
+                  <span className="sidebar-user-menu-label">{t("Language")}</span>
+                  <LanguageSwitcher />
+                </div>
+                <button
+                  type="button"
+                  className="sidebar-user-menu-item"
+                  role="menuitem"
+                  onClick={() => {
+                    setUserMenuOpen(false);
+                    logout();
+                  }}
+                >
+                  <LogOut size={16} />
+                  {t("Sign out")}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </aside>
       <main className="workspace">
         <div className="mobile-topbar">
           <Button
             type="button"
-            aria-label="Open navigation"
+            aria-label={t("Open navigation")}
             onClick={() => setSidebarOpen(true)}
             variant="icon"
           >
             <Menu size={18} />
           </Button>
-          <span className="mobile-brand">BeanCS</span>
+          <span className="mobile-brand">{t("BeanCS")}</span>
         </div>
         <PageHeading
           title={
             view === "dashboard"
-              ? dashboard?.cluster_name || "Overview"
+              ? dashboard?.cluster_name || t("Overview")
               : titleFor(view)
           }
-          topLabel={view === "dashboard" ? "Overview" : undefined}
+          topLabel={view === "dashboard" ? t("Overview") : undefined}
           subtitle={
             view === "dashboard"
               ? `Kubernetes ${dashboard?.kubernetes_version || "-"}${dashboard?.k3s_version ? ` · K3s ${dashboard.k3s_version}` : ""}`
@@ -2571,6 +2891,7 @@ function App() {
                 reusableDependencies={reusableDependencies}
                 createTrackedImageFromDeploy={createTrackedImageFromDeploy}
                 deployBasaltPass={deployBasaltPass}
+                onDeployDependency={deployDependency}
                 onConnectGitHub={connectGitHubApp}
                 reposLoading={reposLoading}
               />
@@ -2613,8 +2934,7 @@ function App() {
                 onBuild={buildProject}
                 onTracking={openProjectTracking}
                 onProgress={(project) => {
-                  setActiveProgressProjectID(String(project.id));
-                  setView("progress");
+                  openProgress(project.id);
                 }}
               />
             )}
@@ -2631,9 +2951,7 @@ function App() {
                 runtimeDeployments={runtime.deployments || []}
                 refresh={loadWorkspace}
                 onOpenProcess={(process) => {
-                  setActiveProcessID(String(process.id));
-                  setActiveProgressProjectID(String(process.project_id || ""));
-                  setView("progress");
+                  openProgress(process.project_id, process.id);
                 }}
               />
             )}
@@ -2666,16 +2984,13 @@ function App() {
               <WorkloadImageView
                 images={containerImages}
                 onRefresh={loadRegistriesPage}
-                onOpenRegistry={() => setView("registries")}
+                onOpenRegistry={() => navigate(pathForView("registries"))}
                 onRefreshImage={refreshTrackedImage}
                 onDeleteImage={deleteTrackedImage}
               />
             )}
             {view === "storage" && (
-              <ComingSoonView
-                title="Storage"
-                description="PersistentVolumeClaims, PersistentVolumes, and StorageClasses will be manageable here in a future release."
-              />
+              <StorageView storage={storage} refresh={loadStorage} />
             )}
             {view === "secrets" && (
               <ComingSoonView
@@ -2701,7 +3016,7 @@ function App() {
                 logStatus={projectLogStatus}
                 onStartLogFollow={startProjectLogFollow}
                 onStopLogFollow={stopProjectLogFollow}
-                onOpenPods={() => setView("pods")}
+                onOpenPods={() => navigate(pathForView("pods"))}
               />
             )}
             {view === "metrics" && (
@@ -2749,8 +3064,10 @@ function App() {
                 dnsRecords={dnsRecords}
                 editingRecord={editingDNSRecord}
                 setEditingRecord={setEditingDNSRecord}
+                onConnectApp={connectCloudflareApp}
                 onCreate={createCredential}
                 onDelete={(id) => deleteCredential("cloudflare", id)}
+                onRefreshDomains={refreshCloudflareDomains}
                 onLoadDNS={loadDNSRecords}
                 onSaveDNS={saveDNSRecord}
                 onDeleteDNS={deleteDNSRecord}
@@ -2793,6 +3110,8 @@ function App() {
           onClose={() => setEditingProject(null)}
           onSubmit={updateProject}
           onLoadEnv={loadProjectEnv}
+          onLoadVolumes={loadProjectVolumes}
+          onLoadAvailablePVCs={loadAvailablePVCs}
         />
       )}
       {deletingProject && (
@@ -2867,4 +3186,10 @@ function App() {
     </div>
   );
 }
-createRoot(document.getElementById("root")).render(<App />);
+createRoot(document.getElementById("root")).render(
+  <I18nProvider>
+    <BrowserRouter>
+      <App />
+    </BrowserRouter>
+  </I18nProvider>,
+);

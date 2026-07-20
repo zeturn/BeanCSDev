@@ -33,6 +33,7 @@ func NewRuntimeHandler(db *gorm.DB, k8sManager *k8s.Manager, v *validator.Valida
 func (h *RuntimeHandler) Register(r fiber.Router) {
 	r.Get("/runtime/dashboard", middleware.RequireAPIScope(service.ScopeRuntimeRead), h.dashboard)
 	r.Get("/runtime/network/overview", middleware.RequireAPIScope(service.ScopeRuntimeRead), h.networkOverview)
+	r.Get("/runtime/storage/overview", middleware.RequireAPIScope(service.ScopeRuntimeRead), h.storageOverview)
 	r.Get("/runtime/overview", middleware.RequireAPIScope(service.ScopeRuntimeRead), h.overview)
 	r.Get("/runtime/nodes/join-command", middleware.RequireAPIScope(service.ScopeRuntimeRead), h.nodeJoinCommand)
 	r.Get("/runtime/nodes/:name", middleware.RequireAPIScope(service.ScopeRuntimeRead), h.nodeDetail)
@@ -362,6 +363,14 @@ func (h *RuntimeHandler) dashboard(c *fiber.Ctx) error {
 
 func (h *RuntimeHandler) networkOverview(c *fiber.Ctx) error {
 	out, err := h.k8s.NetworkOverview(c.UserContext())
+	if err != nil {
+		return fail(c, 400, err)
+	}
+	return c.JSON(fiber.Map{"data": out})
+}
+
+func (h *RuntimeHandler) storageOverview(c *fiber.Ctx) error {
+	out, err := h.k8s.StorageOverview(c.UserContext())
 	if err != nil {
 		return fail(c, 400, err)
 	}

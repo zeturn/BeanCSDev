@@ -314,7 +314,7 @@ func parseAPIKeyExpiry(value string) (*time.Time, error) {
 }
 
 func apiKeyPrefix(plain string) (string, bool) {
-	parts := strings.Split(plain, "_")
+	parts := strings.SplitN(plain, "_", 3)
 	if len(parts) != 3 || parts[0] != apiKeyMarker || parts[1] == "" || parts[2] == "" {
 		return "", false
 	}

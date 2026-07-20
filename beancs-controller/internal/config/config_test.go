@@ -22,3 +22,9 @@ func TestWebhookBaseURLFallsBackToPublicHost(t *testing.T) {
 		t.Fatalf("WebhookBaseURL() = %q", got)
 	}
 }
+
+func TestPublicURLNormalizesConfiguredExternalService(t *testing.T) {
+	if got := publicURL("argocd.example.com/"); got != "https://argocd.example.com" {
+		t.Fatalf("publicURL() = %q", got)
+	}
+}

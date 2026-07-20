@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"regexp"
@@ -13,7 +14,12 @@ import (
 	"gorm.io/gorm"
 )
 
-var newTagPattern = regexp.MustCompile(`(?m)^(\s*newTag:\s*)(.+)$`)
+var (
+	newTagPattern         = regexp.MustCompile(`(?m)^(\s*newTag:\s*)(.+)$`)
+	imageEntryNamePattern = regexp.MustCompile(`^\s*-\s*name:\s*(.+?)\s*$`)
+	imageNewNamePattern   = regexp.MustCompile(`^(\s*newName:\s*)(.+?)\s*$`)
+	imageNewTagPattern    = regexp.MustCompile(`^(\s*newTag:\s*)(.+?)\s*$`)
+)
 
 type GitOpsService struct {
 	db                 *gorm.DB
@@ -67,27 +73,26 @@ func (s *GitOpsService) resolveGitOpsCredential(ctx context.Context, cred model.
 	return cred
 }
 
-func (s *GitOpsService) CommitProjectManifests(ctx context.Context, token string, cred model.GitHubCredential, project *model.Project) error {
+func (s *GitOpsService) CommitProjectManifests(ctx context.Context, token string, cred model.GitHubCredential, project *model.Project) (string, error) {
 	if token == "" || cred.GitOpsRepo == "" {
-		return nil
+		return "", nil
 	}
 	owner, repo, ok := resolveGitOpsRepo(cred)
 	if !ok {
-		return fmt.Errorf("gitops repo must be owner/repo when org is empty")
+		return "", fmt.Errorf("gitops repo must be owner/repo when org is empty")
 	}
 	token, err := s.resolveGitOpsToken(ctx, token, cred)
 	if err != nil {
-		return err
+		return "", err
 	}
 	client := github.NewClient(nil).WithAuthToken(token)
 	files := s.RenderManifests(project)
-	msg := fmt.Sprintf("beancs: add %s manifests", project.Name)
-	for p, content := range files {
-		if err := putFile(ctx, client, owner, repo, p, content, msg); err != nil {
-			return err
-		}
+	imageTag := extractImageTag(project.ImageReference)
+	if strings.TrimSpace(imageTag) == "" {
+		imageTag = "latest"
 	}
-	return nil
+	msg := fmt.Sprintf("deploy(%s): update image to %s", project.Name, imageTag)
+	return commitFilesAtomically(ctx, client, owner, repo, files, msg)
 }
 
 func (s *GitOpsService) CommitDependencyManifests(ctx context.Context, token string, cred model.GitHubCredential, app model.Application, dep model.ManagedDependency) error {
@@ -125,25 +130,49 @@ func (s *GitOpsService) CommitDependencyManifests(ctx context.Context, token str
 
 // UpdateImageTag updates only the newTag field in the overlay kustomization.yaml.
 // This is much lighter than CommitProjectManifests — it modifies a single line in one file.
-func (s *GitOpsService) UpdateImageTag(ctx context.Context, token string, cred model.GitHubCredential, project *model.Project, newImageRef string) error {
+func (s *GitOpsService) UpdateImageTag(ctx context.Context, token string, cred model.GitHubCredential, project *model.Project, newImageRef string) (string, error) {
 	if token == "" || cred.GitOpsRepo == "" {
-		return nil
+		return "", nil
 	}
 	owner, repo, ok := resolveGitOpsRepo(cred)
 	if !ok {
-		return fmt.Errorf("gitops repo must be owner/repo when org is empty")
+		return "", fmt.Errorf("gitops repo must be owner/repo when org is empty")
 	}
 	token, err := s.resolveGitOpsToken(ctx, token, cred)
 	if err != nil {
-		return err
+		return "", err
 	}
 	newTag := extractImageTag(newImageRef)
 	if newTag == "" {
 		newTag = "latest"
 	}
-	filePath := path.Join("apps", project.Name, "overlays", "dev", "kustomization.yaml")
 	client := github.NewClient(nil).WithAuthToken(token)
 
+	for attempt := 0; attempt < 3; attempt++ {
+		if filePath, updated, sha, revision, ok, err := s.updateApplicationImageOverlay(ctx, client, owner, repo, project, newImageRef); err != nil {
+			return "", err
+		} else if ok {
+			if revision != "" {
+				return revision, nil
+			}
+			msg := fmt.Sprintf("beancs(%s): update image to %s", project.Name, newTag)
+			opts := &github.RepositoryContentFileOptions{
+				Message: github.String(msg),
+				Content: []byte(updated),
+				SHA:     sha,
+			}
+			resp, _, err := client.Repositories.UpdateFile(ctx, owner, repo, filePath, opts)
+			if err == nil {
+				return repositoryContentCommitSHA(resp), nil
+			}
+			if !isGitHubReferenceConflict(err) || attempt == 2 {
+				return "", err
+			}
+			continue
+		}
+	}
+
+	filePath := path.Join("apps", project.Name, "overlays", "dev", "kustomization.yaml")
 	// Read current kustomization.yaml
 	current, _, resp, err := client.Repositories.GetContents(ctx, owner, repo, filePath, nil)
 	if err != nil {
@@ -151,11 +180,11 @@ func (s *GitOpsService) UpdateImageTag(ctx context.Context, token string, cred m
 			// Overlay doesn't exist yet — fall back to full manifest commit
 			return s.CommitProjectManifests(ctx, token, cred, project)
 		}
-		return fmt.Errorf("read gitops overlay: %w", err)
+		return "", fmt.Errorf("read gitops overlay: %w", err)
 	}
 	content, err := current.GetContent()
 	if err != nil {
-		return fmt.Errorf("decode gitops overlay: %w", err)
+		return "", fmt.Errorf("decode gitops overlay: %w", err)
 	}
 
 	// Also update newName if the image base changed
@@ -176,7 +205,7 @@ func (s *GitOpsService) UpdateImageTag(ctx context.Context, token string, cred m
 	updated = newTagPattern.ReplaceAllString(updated, "${1}"+newTag)
 
 	if updated == content {
-		return nil // no change needed
+		return "", nil // no change needed
 	}
 
 	msg := fmt.Sprintf("beancs(%s): update image to %s", project.Name, newTag)
@@ -185,8 +214,170 @@ func (s *GitOpsService) UpdateImageTag(ctx context.Context, token string, cred m
 		Content: []byte(updated),
 		SHA:     current.SHA,
 	}
-	_, _, err = client.Repositories.UpdateFile(ctx, owner, repo, filePath, opts)
-	return err
+	contentResp, _, err := client.Repositories.UpdateFile(ctx, owner, repo, filePath, opts)
+	if err != nil {
+		return "", err
+	}
+	return repositoryContentCommitSHA(contentResp), nil
+}
+
+func repositoryContentCommitSHA(resp *github.RepositoryContentResponse) string {
+	if resp != nil {
+		return resp.Commit.GetSHA()
+	}
+	return ""
+}
+
+func (s *GitOpsService) updateApplicationImageOverlay(ctx context.Context, client *github.Client, owner, repo string, project *model.Project, newImageRef string) (string, string, *string, string, bool, error) {
+	if s == nil || s.db == nil || project == nil || project.ApplicationID == nil || *project.ApplicationID == 0 {
+		return "", "", nil, "", false, nil
+	}
+	var app model.Application
+	if err := s.db.WithContext(ctx).First(&app, *project.ApplicationID).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return "", "", nil, "", false, nil
+		}
+		return "", "", nil, "", false, err
+	}
+	if strings.TrimSpace(app.Name) == "" || app.Name == project.Name {
+		return "", "", nil, "", false, nil
+	}
+	filePath := path.Join("apps", app.Name, "overlays", "dev", "kustomization.yaml")
+	current, _, resp, err := client.Repositories.GetContents(ctx, owner, repo, filePath, nil)
+	if err != nil {
+		if resp != nil && resp.Response != nil && resp.Response.StatusCode == 404 {
+			return "", "", nil, "", false, nil
+		}
+		return "", "", nil, "", false, fmt.Errorf("read gitops application overlay: %w", err)
+	}
+	content, err := current.GetContent()
+	if err != nil {
+		return "", "", nil, "", false, fmt.Errorf("decode gitops application overlay: %w", err)
+	}
+	updated, matched, changed := updateKustomizeImageEntry(content, project, newImageRef)
+	if !matched {
+		return "", "", nil, "", false, nil
+	}
+	if !changed {
+		revision, err := gitOpsHeadRevision(ctx, client, owner, repo)
+		if err != nil {
+			return "", "", nil, "", false, err
+		}
+		return "", "", nil, revision, true, nil
+	}
+	return filePath, updated, current.SHA, "", true, nil
+}
+
+func updateKustomizeImageEntry(content string, project *model.Project, newImageRef string) (string, bool, bool) {
+	newName := extractImageName(newImageRef)
+	newTag := extractImageTag(newImageRef)
+	if newName == "" || newTag == "" {
+		return content, false, false
+	}
+	targets := imageEntryTargets(project, newName)
+	if len(targets) == 0 {
+		return content, false, false
+	}
+	lines := strings.Split(content, "\n")
+	entryStart := -1
+	entryEnd := -1
+	for i, line := range lines {
+		match := imageEntryNamePattern.FindStringSubmatch(line)
+		if len(match) == 0 {
+			continue
+		}
+		if !targets[strings.TrimSpace(match[1])] {
+			continue
+		}
+		entryStart = i
+		entryEnd = len(lines)
+		for j := i + 1; j < len(lines); j++ {
+			if imageEntryNamePattern.MatchString(lines[j]) {
+				entryEnd = j
+				break
+			}
+		}
+		break
+	}
+	if entryStart == -1 {
+		return content, false, false
+	}
+	changed := false
+	hasNewName := false
+	hasNewTag := false
+	for i := entryStart + 1; i < entryEnd; i++ {
+		if imageNewNamePattern.MatchString(lines[i]) {
+			hasNewName = true
+			replaced := imageNewNamePattern.ReplaceAllString(lines[i], "${1}"+newName)
+			if replaced != lines[i] {
+				lines[i] = replaced
+				changed = true
+			}
+		}
+		if imageNewTagPattern.MatchString(lines[i]) {
+			hasNewTag = true
+			replaced := imageNewTagPattern.ReplaceAllString(lines[i], "${1}"+newTag)
+			if replaced != lines[i] {
+				lines[i] = replaced
+				changed = true
+			}
+		}
+	}
+	insertAt := entryEnd
+	if !hasNewName {
+		lines = append(lines[:insertAt], append([]string{"    newName: " + newName}, lines[insertAt:]...)...)
+		entryEnd++
+		insertAt++
+		changed = true
+	}
+	if !hasNewTag {
+		lines = append(lines[:insertAt], append([]string{"    newTag: " + newTag}, lines[insertAt:]...)...)
+		changed = true
+	}
+	if !changed {
+		return content, true, false
+	}
+	return strings.Join(lines, "\n"), true, true
+}
+
+func imageEntryTargets(project *model.Project, newName string) map[string]bool {
+	targets := map[string]bool{newName: true}
+	if project == nil {
+		return targets
+	}
+	for _, value := range []string{project.RegistryImageReference, project.ImageReference} {
+		if name := extractImageName(value); name != "" {
+			targets[name] = true
+		}
+	}
+	return targets
+}
+
+func gitOpsHeadRevision(ctx context.Context, client *github.Client, owner, repo string) (string, error) {
+	ghRepo, _, err := client.Repositories.Get(ctx, owner, repo)
+	if err != nil {
+		return "", err
+	}
+	branch := strings.TrimSpace(ghRepo.GetDefaultBranch())
+	if branch == "" {
+		branch = "main"
+	}
+	ref, _, err := client.Git.GetRef(ctx, owner, repo, "refs/heads/"+branch)
+	if err != nil {
+		return "", err
+	}
+	if ref != nil && ref.Object != nil {
+		return ref.Object.GetSHA(), nil
+	}
+	return "", nil
+}
+
+func isGitHubReferenceConflict(err error) bool {
+	var ghErr *github.ErrorResponse
+	if !errors.As(err, &ghErr) || ghErr.Response == nil {
+		return false
+	}
+	return ghErr.Response.StatusCode == 409 || ghErr.Response.StatusCode == 422
 }
 
 // DeleteProjectManifests removes the entire apps/<project>/ directory from the gitops repo.
@@ -371,9 +562,9 @@ spec:
 %s
           envFrom:
             - secretRef:
-                name: app-env-vars
+                name: %s
 %s%s
-`, project.Name, project.Namespace, project.Name, project.Replicas, project.Name, project.Name, pullSecrets, renderPodVolumesBlock(volumes, project.Name), image, renderContainerPortsBlock(ports), renderProbeBlock(project.HealthCheckConfig(), ports), renderContainerVolumeMountsBlock(volumes)),
+`, project.Name, project.Namespace, project.Name, project.Replicas, project.Name, project.Name, pullSecrets, renderPodVolumesBlock(volumes, project.Name), image, renderContainerPortsBlock(ports), project.EnvSecretName(), renderProbeBlock(project.HealthCheckConfig(), ports), renderContainerVolumeMountsBlock(volumes)),
 		path.Join(base, "base", "kustomization.yaml"): renderBaseKustomization(ports, volumes),
 		path.Join(base, "overlays", "dev", "kustomization.yaml"): fmt.Sprintf(`resources:
   - ../../base
@@ -548,7 +739,7 @@ primary:
 
 func renderTimescaleDBValues(dep model.ManagedDependency) string {
 	return fmt.Sprintf(`fullnameOverride: %s
-replicaCount: %s
+replicaCount: %d
 secrets:
   credentialsSecretName: %s
 persistentVolumes:
@@ -562,7 +753,7 @@ persistentVolumes:
     size: %s
 networkPolicy:
   enabled: false
-`, dep.ServiceName, yamlScalar(configString(dep.Config, "replica_count", "1")), yamlScalar(dep.SecretName), yamlBool(configBool(dep.Config, "persistence.enabled", true)), renderDependencyStorageClass(dep, 4), yamlScalar(configString(dep.Config, "persistence.size", "20Gi")), yamlBool(configBool(dep.Config, "persistence.enabled", true)), renderDependencyStorageClass(dep, 4), yamlScalar(configString(dep.Config, "persistence.walSize", "5Gi")))
+`, dep.ServiceName, configInt(dep.Config, "replica_count", 1), yamlScalar(dep.SecretName), yamlBool(configBool(dep.Config, "persistence.enabled", true)), renderDependencyStorageClass(dep, 4), yamlScalar(configString(dep.Config, "persistence.size", "20Gi")), yamlBool(configBool(dep.Config, "persistence.enabled", true)), renderDependencyStorageClass(dep, 4), yamlScalar(configString(dep.Config, "persistence.walSize", "5Gi")))
 }
 
 func renderMySQLValues(dep model.ManagedDependency) string {
@@ -692,6 +883,27 @@ func configBool(config model.JSONMap, path string, fallback bool) bool {
 	default:
 		return fallback
 	}
+}
+
+func configInt(config model.JSONMap, path string, fallback int) int {
+	value, ok := nestedConfigValue(config, path)
+	if !ok {
+		return fallback
+	}
+	switch v := value.(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	case string:
+		parsed, err := strconv.Atoi(strings.TrimSpace(v))
+		if err == nil {
+			return parsed
+		}
+	}
+	return fallback
 }
 
 func nestedConfigValue(config model.JSONMap, path string) (any, bool) {
@@ -868,6 +1080,8 @@ func renderPodVolumesBlock(volumes []model.ProjectVolume, projectName string) st
 			b.WriteString("          emptyDir: {}\n")
 		case strings.EqualFold(volume.Type, "pvc"):
 			fmt.Fprintf(&b, "          persistentVolumeClaim:\n            claimName: %s\n", projectVolumeClaimName(projectName, volume.Name))
+		case strings.EqualFold(volume.Type, "existingPVC"):
+			fmt.Fprintf(&b, "          persistentVolumeClaim:\n            claimName: %s\n", volume.ClaimName)
 		}
 	}
 	return b.String()
@@ -921,6 +1135,67 @@ func renderPVCStorageClassName(volume model.ProjectVolume) string {
 
 func projectVolumeClaimName(projectName, volumeName string) string {
 	return projectName + "-" + volumeName
+}
+
+func commitFilesAtomically(ctx context.Context, client *github.Client, owner, repo string, files map[string]string, message string) (string, error) {
+	repository, _, err := client.Repositories.Get(ctx, owner, repo)
+	if err != nil {
+		return "", fmt.Errorf("read gitops repository: %w", err)
+	}
+	branch := strings.TrimSpace(repository.GetDefaultBranch())
+	if branch == "" {
+		branch = "main"
+	}
+	refName := "refs/heads/" + branch
+	ref, _, err := client.Git.GetRef(ctx, owner, repo, refName)
+	if err != nil {
+		return "", fmt.Errorf("read gitops branch %s: %w", branch, err)
+	}
+	headSHA := ref.GetObject().GetSHA()
+	if strings.TrimSpace(headSHA) == "" {
+		return "", fmt.Errorf("gitops branch %s has empty head sha", branch)
+	}
+	baseCommit, _, err := client.Git.GetCommit(ctx, owner, repo, headSHA)
+	if err != nil {
+		return "", fmt.Errorf("read gitops head commit: %w", err)
+	}
+	baseTreeSHA := baseCommit.GetTree().GetSHA()
+	entries := make([]*github.TreeEntry, 0, len(files))
+	for p, content := range files {
+		filePath := strings.TrimSpace(p)
+		if filePath == "" {
+			continue
+		}
+		entries = append(entries, &github.TreeEntry{
+			Path:    github.String(filePath),
+			Type:    github.String("blob"),
+			Mode:    github.String("100644"),
+			Content: github.String(content),
+		})
+	}
+	tree, _, err := client.Git.CreateTree(ctx, owner, repo, baseTreeSHA, entries)
+	if err != nil {
+		return "", fmt.Errorf("create gitops tree: %w", err)
+	}
+	commit := &github.Commit{
+		Message: github.String(strings.TrimSpace(message)),
+		Tree:    tree,
+		Parents: []*github.Commit{{SHA: github.String(headSHA)}},
+	}
+	newCommit, _, err := client.Git.CreateCommit(ctx, owner, repo, commit, nil)
+	if err != nil {
+		return "", fmt.Errorf("create gitops commit: %w", err)
+	}
+	updatedRef := &github.Reference{
+		Ref: github.String(refName),
+		Object: &github.GitObject{
+			SHA: newCommit.SHA,
+		},
+	}
+	if _, _, err := client.Git.UpdateRef(ctx, owner, repo, updatedRef, false); err != nil {
+		return "", fmt.Errorf("update gitops branch ref: %w", err)
+	}
+	return newCommit.GetSHA(), nil
 }
 
 func putFile(ctx context.Context, client *github.Client, owner, repo, p, content, msg string) error {

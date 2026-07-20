@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 env:
-  REGISTRY_HOST: registry.beancs.hollowdata.com
+  REGISTRY_HOST: registry.beancs.com
   IMAGE_NAME: beancs-controller
   REGISTRY_PROJECT: hollowdata
   NAMESPACE: beancs-system
@@ -156,11 +156,14 @@ jobs:
 
       - name: Configure Harbor pull secret
         shell: bash
+        env:
+          REGISTRY_USERNAME: ${{ secrets.BEANCS_REGISTRY_USERNAME }}
+          REGISTRY_TOKEN: ${{ secrets.BEANCS_REGISTRY_TOKEN }}
         run: |
           kubectl -n "${NAMESPACE}" create secret docker-registry beancs-registry-push \
             --docker-server="${{ env.REGISTRY_HOST }}" \
-            --docker-username="${{ secrets.BEANCS_REGISTRY_USERNAME }}" \
-            --docker-password="${{ secrets.BEANCS_REGISTRY_TOKEN }}" \
+            --docker-username="${REGISTRY_USERNAME}" \
+            --docker-password="${REGISTRY_TOKEN}" \
             --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Deploy bundled Postgres
@@ -193,6 +196,11 @@ jobs:
         env:
           BEANCS_DATABASE_URL: ${{ secrets.BEANCS_DATABASE_URL }}
           BEANCS_POSTGRES_PASSWORD: ${{ secrets.BEANCS_POSTGRES_PASSWORD }}
+          BEANCS_REGISTRY_HOST: ${{ secrets.BEANCS_REGISTRY_HOST }}
+          BEANCS_REGISTRY_USERNAME: ${{ secrets.BEANCS_REGISTRY_USERNAME }}
+          BEANCS_REGISTRY_TOKEN: ${{ secrets.BEANCS_REGISTRY_TOKEN }}
+          BEANCS_REGISTRY_PULL_USERNAME: ${{ secrets.BEANCS_REGISTRY_PULL_USERNAME }}
+          BEANCS_REGISTRY_PULL_TOKEN: ${{ secrets.BEANCS_REGISTRY_PULL_TOKEN }}
         run: |
           RELEASE_VERSION="${GITHUB_REF_NAME}-${GITHUB_SHA::12}"
           DATABASE_URL="${BEANCS_DATABASE_URL}"
@@ -210,6 +218,7 @@ jobs:
             --from-literal=BP_BROWSER_AUTH_URL="${{ secrets.BP_BROWSER_AUTH_URL }}" \
             --from-literal=BP_BROWSER_CLIENT_ID="${{ secrets.BP_BROWSER_CLIENT_ID }}" \
             --from-literal=BP_BROWSER_CLIENT_SECRET="${{ secrets.BP_BROWSER_CLIENT_SECRET }}" \
+            --from-literal=BEANCS_ARGOCD_URL="${{ vars.BEANCS_ARGOCD_URL }}" \
             --from-literal=WEBHOOK_SECRET="${{ secrets.BEANCS_WEBHOOK_SECRET }}" \
             --from-literal=ENCRYPTION_KEY="${{ secrets.BEANCS_ENCRYPTION_KEY }}" \
             --from-literal=INGRESS_IP="${{ vars.INGRESS_IP }}" \
@@ -227,11 +236,15 @@ jobs:
             --from-literal=BEANCS_GITHUB_APP_ID="${{ vars.BEANCS_GITHUB_APP_ID }}" \
             --from-literal=BEANCS_GITHUB_APP_SLUG="${{ vars.BEANCS_GITHUB_APP_SLUG }}" \
             --from-literal=BEANCS_GITHUB_APP_PRIVATE_KEY="${{ secrets.BEANCS_GITHUB_APP_PRIVATE_KEY }}" \
-            --from-literal=BEANCS_REGISTRY_HOST="${{ secrets.BEANCS_REGISTRY_HOST }}" \
-            --from-literal=BEANCS_REGISTRY_USERNAME="${{ secrets.BEANCS_REGISTRY_USERNAME }}" \
-            --from-literal=BEANCS_REGISTRY_TOKEN="${{ secrets.BEANCS_REGISTRY_TOKEN }}" \
-            --from-literal=BEANCS_REGISTRY_PULL_USERNAME="${{ secrets.BEANCS_REGISTRY_PULL_USERNAME }}" \
-            --from-literal=BEANCS_REGISTRY_PULL_TOKEN="${{ secrets.BEANCS_REGISTRY_PULL_TOKEN }}" \
+            --from-literal=BEANCS_CLOUDFLARE_OAUTH_CLIENT_ID="${{ vars.BEANCS_CLOUDFLARE_OAUTH_CLIENT_ID }}" \
+            --from-literal=BEANCS_CLOUDFLARE_OAUTH_CLIENT_SECRET="${{ secrets.BEANCS_CLOUDFLARE_OAUTH_CLIENT_SECRET }}" \
+            --from-literal=BEANCS_CLOUDFLARE_OAUTH_SCOPES="${{ vars.BEANCS_CLOUDFLARE_OAUTH_SCOPES || 'zone.read dns.write' }}" \
+            --from-literal=BEANCS_CLOUDFLARE_OAUTH_REDIRECT_URL="${{ vars.BEANCS_CLOUDFLARE_OAUTH_REDIRECT_URL || 'https://beancs.com/api/v1/credentials/cloudflare/app/callback' }}" \
+            --from-literal=BEANCS_REGISTRY_HOST="${BEANCS_REGISTRY_HOST}" \
+            --from-literal=BEANCS_REGISTRY_USERNAME="${BEANCS_REGISTRY_USERNAME}" \
+            --from-literal=BEANCS_REGISTRY_TOKEN="${BEANCS_REGISTRY_TOKEN}" \
+            --from-literal=BEANCS_REGISTRY_PULL_USERNAME="${BEANCS_REGISTRY_PULL_USERNAME}" \
+            --from-literal=BEANCS_REGISTRY_PULL_TOKEN="${BEANCS_REGISTRY_PULL_TOKEN}" \
             --from-literal=BEANCS_REGISTRY_PULL_SECRET="${{ vars.BEANCS_REGISTRY_PULL_SECRET || 'beancs-registry-pull' }}" \
             --dry-run=client -o yaml | kubectl apply -f -
 

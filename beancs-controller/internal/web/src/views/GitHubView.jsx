@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as LucideIcons from "lucide-react";
 import { GitOpsRepoEditor, Input, Button } from "../components/index";
+import { t } from "../i18n/index";
 import {
   Activity,
   AlertTriangle,
@@ -66,11 +67,12 @@ export default function GitHubView({
       <section className="panel action-panel">
         <div>
           <h2>
-            <Github size={18} /> GitHub App
+            <Github size={18} /> {t("GitHub App")}
           </h2>
           <p>
-            Authorize repositories directly. BeanCS will name the credential
-            from the GitHub account.
+            {t(
+              "Authorize repositories directly. BeanCS will name the credential from the GitHub account.",
+            )}
           </p>
         </div>
         <form
@@ -95,7 +97,7 @@ export default function GitHubView({
                 opacity: 0.7,
               }}
             >
-              GitOps Repository (optional)
+              {t("GitOps Repository (optional)")}
             </label>
             <Input
               ref={gitopsRepoRef}
@@ -107,7 +109,7 @@ export default function GitHubView({
             />
           </div>
           <Button variant="primary">
-            <Github size={16} /> Connect GitHub App
+            <Github size={16} /> {t("Connect GitHub App")}
           </Button>
         </form>
       </section>
@@ -136,7 +138,7 @@ export default function GitHubView({
               </div>
               <div className="row-actions">
                 <Button onClick={() => onRepos(cred.id)}>
-                  <RefreshCw size={15} /> Load repos
+                  <RefreshCw size={15} /> {t("Load repos")}
                 </Button>
                 <Button onClick={() => onDelete(cred.id)}>
                   <Trash2 size={15} />
@@ -146,7 +148,7 @@ export default function GitHubView({
             <GitOpsRepoEditor cred={cred} onUpdate={onUpdate} />
             <div className="repo-toolbar">
               <Input
-                placeholder="Search repositories"
+                placeholder={t("Search repositories")}
                 value={filter}
                 onChange={(event) =>
                   setRepoFilters((current) => ({
@@ -156,7 +158,7 @@ export default function GitHubView({
                 }
               />
               <span>
-                {visible.length}/{repos.length} repos
+                {visible.length}/{repos.length} {t("repos")}
               </span>
             </div>
             <div className="repo-grid">
@@ -170,14 +172,14 @@ export default function GitHubView({
                 >
                   <b>{repo.full_name}</b>
                   <span>
-                    {repo.private ? "Private" : "Public"} ·{" "}
+                    {repo.private ? t("Private") : t("Public")} ·{" "}
                     {repo.default_branch || "main"}
                   </span>
                 </a>
               ))}
               {repos.length === 0 && (
                 <div className="empty">
-                  Click Load repos to inspect this account.
+                  {t("Click Load repos to inspect this account.")}
                 </div>
               )}
             </div>

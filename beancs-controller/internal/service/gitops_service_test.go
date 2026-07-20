@@ -28,6 +28,7 @@ func TestRenderManifestsIncludesHealthCheckAndPVC(t *testing.T) {
 		Volumes: model.JSONMap{
 			"items": []map[string]any{
 				{"name": "data", "type": "pvc", "mountPath": "/data", "size": "10Gi", "storageClassName": "longhorn"},
+				{"name": "archive", "type": "existingPVC", "mountPath": "/archive", "claimName": "shared-archive"},
 			},
 		},
 	}
@@ -36,9 +37,12 @@ func TestRenderManifestsIncludesHealthCheckAndPVC(t *testing.T) {
 	deployment := files[path.Join("apps", project.Name, "base", "deployment.yaml")]
 	assertContains(t, deployment, "path: /healthz")
 	assertContains(t, deployment, "port: http")
+	assertContains(t, deployment, "name: app-env-vars-araneae-control")
 	assertContains(t, deployment, "volumeMounts:")
 	assertContains(t, deployment, "mountPath: /data")
 	assertContains(t, deployment, "claimName: araneae-control-data")
+	assertContains(t, deployment, "mountPath: /archive")
+	assertContains(t, deployment, "claimName: shared-archive")
 
 	kustomization := files[path.Join("apps", project.Name, "base", "kustomization.yaml")]
 	assertContains(t, kustomization, "- pvc-data.yaml")
@@ -47,6 +51,9 @@ func TestRenderManifestsIncludesHealthCheckAndPVC(t *testing.T) {
 	assertContains(t, pvc, "kind: PersistentVolumeClaim")
 	assertContains(t, pvc, "storage: 10Gi")
 	assertContains(t, pvc, `storageClassName: "longhorn"`)
+	if _, ok := files[path.Join("apps", project.Name, "base", "pvc-archive.yaml")]; ok {
+		t.Fatal("existing PVC should not generate a PVC manifest")
+	}
 }
 
 func TestRenderManifestsIncludesTCPHealthCheck(t *testing.T) {
@@ -70,6 +77,58 @@ func TestRenderManifestsIncludesTCPHealthCheck(t *testing.T) {
 	assertContains(t, deployment, "port: http")
 	if strings.Contains(deployment, "httpGet:") {
 		t.Fatalf("expected tcp health check, got httpGet in deployment:\n%s", deployment)
+	}
+}
+
+func TestUpdateKustomizeImageEntryUpdatesOnlyMatchingImage(t *testing.T) {
+	content := `resources:
+  - ../../base
+images:
+  - name: registry.beancs.hollowdata.com/hollowdata/apicred-backend
+    newName: registry.beancs.hollowdata.com/hollowdata/apicred-backend
+    newTag: beancs-73fe1fa
+  - name: registry.beancs.hollowdata.com/hollowdata/apicred-frontend
+    newName: registry.beancs.hollowdata.com/hollowdata/apicred-frontend
+    newTag: beancs-73fe1fa
+`
+	project := &model.Project{
+		Name:                   "apicred-backend",
+		RegistryImageReference: "registry.beancs.hollowdata.com/hollowdata/apicred-backend",
+	}
+
+	updated, matched, changed := updateKustomizeImageEntry(content, project, "registry.beancs.hollowdata.com/hollowdata/apicred-backend:v2026.07.12-5")
+
+	if !matched {
+		t.Fatal("expected backend image entry to match")
+	}
+	if !changed {
+		t.Fatal("expected kustomization to change")
+	}
+	assertContains(t, updated, "registry.beancs.hollowdata.com/hollowdata/apicred-backend\n    newName: registry.beancs.hollowdata.com/hollowdata/apicred-backend\n    newTag: v2026.07.12-5")
+	assertContains(t, updated, "registry.beancs.hollowdata.com/hollowdata/apicred-frontend\n    newName: registry.beancs.hollowdata.com/hollowdata/apicred-frontend\n    newTag: beancs-73fe1fa")
+}
+
+func TestUpdateKustomizeImageEntryReportsMatchWithoutChange(t *testing.T) {
+	content := `images:
+  - name: registry.beancs.hollowdata.com/hollowdata/apicred-frontend
+    newName: registry.beancs.hollowdata.com/hollowdata/apicred-frontend
+    newTag: v2026.07.12-5
+`
+	project := &model.Project{
+		Name:                   "apicred-frontend",
+		RegistryImageReference: "registry.beancs.hollowdata.com/hollowdata/apicred-frontend",
+	}
+
+	updated, matched, changed := updateKustomizeImageEntry(content, project, "registry.beancs.hollowdata.com/hollowdata/apicred-frontend:v2026.07.12-5")
+
+	if !matched {
+		t.Fatal("expected frontend image entry to match")
+	}
+	if changed {
+		t.Fatal("expected matching image entry to require no change")
+	}
+	if updated != content {
+		t.Fatal("expected content to stay unchanged")
 	}
 }
 
@@ -242,8 +301,12 @@ func TestRenderTimescaleDBDependencyManifests(t *testing.T) {
 
 	files := service.RenderDependencyManifests(model.Application{Name: "araneae"}, dep, def)
 	values := files[path.Join("apps", "araneae", "dependencies", "timescale", "values.yaml")]
+	assertContains(t, values, "replicaCount: 1")
 	assertContains(t, values, `credentialsSecretName: "araneae-timescale-credentials"`)
 	assertContains(t, values, `storageClass: "longhorn"`)
+	if strings.Contains(values, `replicaCount: "1"`) {
+		t.Fatalf("timescaledb replicaCount must be rendered as an integer:\n%s", values)
+	}
 	if strings.Contains(values, "secret-password") {
 		t.Fatalf("dependency values must not include secret plaintext:\n%s", values)
 	}

@@ -1,3 +1,5 @@
+import { t } from "../i18n/index";
+
 export function filterNavItems(items, query) {
   const needle = String(query || "")
     .trim()
@@ -423,7 +425,7 @@ export function basaltPassStepBlockers(stepID, form, selectedCredential) {
 }
 
 export function sourceLabel(source) {
-  return (
+  const label = (
     {
       github: "GitHub",
       dockerhub: "Docker Hub",
@@ -432,6 +434,7 @@ export function sourceLabel(source) {
       "source-upload": "Source upload",
     }[source || "github"] || source
   );
+  return t(label);
 }
 
 export function sourceSummary(form) {
@@ -443,7 +446,7 @@ export function sourceSummary(form) {
 }
 
 export function detailTitle(kind) {
-  return (
+  const label = (
     {
       pod: "Pod",
       node: "Node",
@@ -457,6 +460,7 @@ export function detailTitle(kind) {
       "service-edit": "Service",
     }[kind] || kind
   );
+  return t(label);
 }
 
 export function podContainers(pod) {
@@ -1215,37 +1219,47 @@ export function titleFor(view) {
     metrics: "Metrics",
     settings: "Settings",
   };
-  return map[view] || "BeanCS";
+  return t(map[view] || "BeanCS");
 }
 
 export function subtitleFor(view, runtime, projects) {
   if (view === "dashboard")
-    return "Real-time cluster health and operating signals";
+    return t("Real-time cluster health and operating signals");
   if (view === "networking")
-    return "Service, Ingress, Endpoint, NetworkPolicy, Traefik and Tailscale operations";
-  if (view === "projects") return `${projects.length} managed projects`;
-  if (view === "applications") return "Monorepo and multi-project application records";
+    return t(
+      "Service, Ingress, Endpoint, NetworkPolicy, Traefik and Tailscale operations",
+    );
+  if (view === "projects")
+    return t("{count} managed projects", { count: projects.length });
+  if (view === "applications")
+    return t("Monorepo and multi-project application records");
   if (view === "dependencies")
-    return "Reusable managed and external service dependencies";
-  if (view === "progress") return "Watch installs and runtime readiness";
+    return t("Reusable managed and external service dependencies");
+  if (view === "progress") return t("Watch installs and runtime readiness");
   if (view === "registries")
-    return "Register OCI mirrors and sync image tags for this account";
+    return t("Register OCI mirrors and sync image tags for this account");
   if (view === "workloadImage")
-    return "Tracked registry tags; use Image Registry to add mirrors";
-  if (view === "apiKeys") return "Issue and revoke API keys for automation";
-  if (view === "accessControl") return "BasaltPass and access integrations";
-  if (view === "settings") return "Workspace and version information";
+    return t("Tracked registry tags; use Image Registry to add mirrors");
+  if (view === "apiKeys")
+    return t("Issue and revoke API keys for automation");
+  if (view === "accessControl")
+    return t("BasaltPass and access integrations");
+  if (view === "settings")
+    return t("Workspace and version information");
   if (view === "storage" || view === "secrets")
-    return "Planned console capabilities";
+    return t("Planned console capabilities");
   if (view === "alerts")
-    return "Active warning signals and degraded runtime objects";
+    return t("Active warning signals and degraded runtime objects");
   if (view === "events")
-    return "Recent Kubernetes warning events and reason groups";
+    return t("Recent Kubernetes warning events and reason groups");
   if (view === "metrics")
-    return "Cluster resource utilization and node readings";
-  if (view === "logs") return "Project log snapshots and live streaming";
-  if (runtime[view]) return `${(runtime[view] || []).length} cluster resources`;
-  return "Operate k3s, GitHub, DNS, and traffic from one console.";
+    return t("Cluster resource utilization and node readings");
+  if (view === "logs") return t("Project log snapshots and live streaming");
+  if (runtime[view])
+    return t("{count} cluster resources", {
+      count: (runtime[view] || []).length,
+    });
+  return t("Operate k3s, GitHub, DNS, and traffic from one console.");
 }
 
 export function formatTime(value) {

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { t } from "../i18n/index";
 import * as LucideIcons from "lucide-react";
 import {
   Activity,
@@ -63,29 +64,29 @@ import {
 } from "../components";
 export default function DomainsView({ domains }) {
   return (
-    <section className="panel">
-      <h2>
-        <Globe2 size={18} /> Cloudflare domains
-      </h2>
-      <div className="domain-grid">
-        {domains.map((domain) => (
-          <div
-            className="domain-tile"
-            key={`${domain.credential_id}-${domain.zone_id}`}
-          >
-            <Globe2 size={20} />
-            <div>
-              <b>{domain.domain}</b>
-              <span>{domain.credential}</span>
-              <small>{domain.zone_id}</small>
+      <section className="panel">
+        <h2>
+          <Globe2 size={18} /> {t("Cloudflare domains")}
+        </h2>
+        <div className="domain-grid">
+          {domains.map((domain) => (
+            <div
+              className="domain-tile"
+              key={`${domain.credential_id}-${domain.zone_id}`}
+            >
+              <Globe2 size={20} />
+              <div>
+                <b>{domain.domain}</b>
+                <span>{domain.credential}</span>
+                <small>{domain.zone_id}</small>
+              </div>
+              <em>{domain.active ? t("Active") : t("Inactive")}</em>
             </div>
-            <em>{domain.active ? "Active" : "Inactive"}</em>
-          </div>
-        ))}
-        {domains.length === 0 && (
-          <div className="empty">No Cloudflare domains linked yet.</div>
-        )}
-      </div>
-    </section>
+          ))}
+          {domains.length === 0 && (
+            <div className="empty">{t("No Cloudflare domains linked yet.")}</div>
+          )}
+        </div>
+      </section>
   );
 }

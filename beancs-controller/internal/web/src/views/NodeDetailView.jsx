@@ -7,6 +7,7 @@ import {
   taintsToForm,
 } from "../utils/index";
 import { ResourceMeter, Button, Input, Textarea } from "../components/index";
+import { t } from "../i18n/index";
 import {
   Activity,
   AlertTriangle,
@@ -79,15 +80,15 @@ export default function NodeDetailView({
   const canConfirmDelete = Boolean(nodeName) && deleteName.trim() === nodeName;
   return (
     <div className="node-detail">
-      {detail.loading && <p className="muted">Loading live node status...</p>}
+      {detail.loading && <p className="muted">{t("Loading live node status...")}</p>}
       {detail.error && <p className="error-inline">{detail.error}</p>}
       <section className="node-section node-actions">
         <div className="row-actions">
           <Button onClick={() => onLoadHealth(nodeName)}>
-            <CheckCircle2 size={15} /> Health check
+            <CheckCircle2 size={15} /> {t("Health check")}
           </Button>
-          <Button onClick={() => onCordon(nodeName, false)}>Cordon</Button>
-          <Button onClick={() => onCordon(nodeName, true)}>Uncordon</Button>
+          <Button onClick={() => onCordon(nodeName, false)}>{t("Cordon")}</Button>
+          <Button onClick={() => onCordon(nodeName, true)}>{t("Uncordon")}</Button>
           <Button
             onClick={() =>
               onDrain(nodeName, {
@@ -98,7 +99,7 @@ export default function NodeDetailView({
               })
             }
           >
-            Drain safe
+            {t("Drain safe")}
           </Button>
           <Button
             disabled={!nodeName}
@@ -108,7 +109,7 @@ export default function NodeDetailView({
             }}
             variant="danger"
           >
-            <Trash2 size={15} /> Delete node
+            <Trash2 size={15} /> {t("Delete node")}
           </Button>
         </div>
         {health && (
@@ -119,9 +120,11 @@ export default function NodeDetailView({
           >
             <b>{health.status}</b>
             <span>
-              {(health.checks || []).length} checks ·{" "}
-              {(health.abnormal_pods || []).length} abnormal pods ·{" "}
-              {formatTime(health.checked_at)}
+              {t("{count} checks", { count: (health.checks || []).length })} ·{" "}
+              {t("{count} abnormal pods", {
+                count: (health.abnormal_pods || []).length,
+              })}{" "}
+              · {formatTime(health.checked_at)}
             </span>
             {(health.checks || []).map((check) => (
               <small key={`${check.name}-${check.message}`}>
@@ -135,28 +138,28 @@ export default function NodeDetailView({
       {deleteStep !== "idle" && (
         <section className="node-section destructive-flow">
           <h3>
-            <AlertTriangle size={15} /> Dangerous node deletion
+            <AlertTriangle size={15} /> {t("Dangerous node deletion")}
           </h3>
           {deleteStep === "warning" && (
             <>
               <p>
-                Deleting a node removes it from Kubernetes cluster state. Make
-                sure workloads are drained and the machine is intentionally
-                removed or ready to rejoin.
+                {t(
+                  "Deleting a node removes it from Kubernetes cluster state. Make sure workloads are drained and the machine is intentionally removed or ready to rejoin.",
+                )}
               </p>
               <div className="row-actions">
                 <Button type="button" onClick={() => setDeleteStep("name")}>
-                  Continue
+                  {t("Continue")}
                 </Button>
                 <Button type="button" onClick={() => setDeleteStep("idle")}>
-                  Cancel
+                  {t("Cancel")}
                 </Button>
               </div>
             </>
           )}
           {deleteStep === "name" && (
             <>
-              <p>Type the exact machine name to continue.</p>
+              <p>{t("Type the exact machine name to continue.")}</p>
               <Input
                 value={deleteName}
                 onChange={(event) => setDeleteName(event.target.value)}
@@ -168,10 +171,10 @@ export default function NodeDetailView({
                   disabled={!canConfirmDelete}
                   onClick={() => setDeleteStep("final")}
                 >
-                  Continue
+                  {t("Continue")}
                 </Button>
                 <Button type="button" onClick={() => setDeleteStep("idle")}>
-                  Cancel
+                  {t("Cancel")}
                 </Button>
               </div>
             </>
@@ -179,9 +182,7 @@ export default function NodeDetailView({
           {deleteStep === "final" && (
             <>
               <p>
-                <b>Final warning.</b> This action deletes node{" "}
-                <span className="mono">{nodeName}</span> from the cluster API.
-                This is the last confirmation step.
+                <b>{t("Final warning.")}</b> {t("This action deletes node {name} from the cluster API. This is the last confirmation step.", { name: nodeName })}
               </p>
               <div className="row-actions">
                 <Button
@@ -190,10 +191,10 @@ export default function NodeDetailView({
                   onClick={() => onDelete(nodeName)}
                   variant="danger"
                 >
-                  <Trash2 size={15} /> Delete {nodeName}
+                  <Trash2 size={15} /> {t("Delete {name}", { name: nodeName })}
                 </Button>
                 <Button type="button" onClick={() => setDeleteStep("idle")}>
-                  Cancel
+                  {t("Cancel")}
                 </Button>
               </div>
             </>
@@ -209,89 +210,91 @@ export default function NodeDetailView({
         </div>
         <div className="detail-list compact-details">
           <span>
-            Internal IP{" "}
+            {t("Internal IP")}{" "}
             <b>{summary.internal_ip || row.addresses?.InternalIP || "-"}</b>
           </span>
           <span>
-            Roles <b>{(summary.roles || []).join(", ") || "-"}</b>
+            {t("Roles")} <b>{(summary.roles || []).join(", ") || "-"}</b>
           </span>
           <span>
-            Scheduling{" "}
-            <b>{summary.schedulable === false ? "Cordoned" : "Schedulable"}</b>
+            {t("Scheduling")}{" "}
+            <b>
+              {summary.schedulable === false ? t("Cordoned") : t("Schedulable")}
+            </b>
           </span>
           <span>
-            Pods{" "}
+            {t("Pods")}{" "}
             <b>
               {pods.length}/{row.allocatable?.pods || "-"}
             </b>
           </span>
           <span>
-            Checked <b>{formatTime(row.checked_at)}</b>
+            {t("Checked")} <b>{formatTime(row.checked_at)}</b>
           </span>
         </div>
       </div>
       <section className="node-section">
-        <h3>Live resources</h3>
+        <h3>{t("Live resources")}</h3>
         {row.metrics_available || row.disk || row.network ? (
           <div className="resource-grid">
             <ResourceMeter
-              label="CPU allocatable"
+              label={t("CPU allocatable")}
               value={usage.cpu_allocatable_percent}
               detail={
                 row.metrics_available
                   ? `${usage.cpu_millis || 0}m / ${row.allocatable?.cpu_millis || 0}m`
-                  : "metrics-server unavailable"
+                  : t("metrics-server unavailable")
               }
             />
             <ResourceMeter
-              label="Memory allocatable"
+              label={t("Memory allocatable")}
               value={usage.memory_allocatable_percent}
               detail={
                 row.metrics_available
                   ? `${formatBytes(usage.memory_bytes)} / ${formatBytes(row.allocatable?.memory_bytes)}`
-                  : "metrics-server unavailable"
+                  : t("metrics-server unavailable")
               }
             />
             <ResourceMeter
-              label="CPU capacity"
+              label={t("CPU capacity")}
               value={usage.cpu_capacity_percent}
               detail={
                 row.metrics_available
                   ? `${usage.cpu || "-"} / ${row.capacity?.cpu || "-"}`
-                  : "metrics-server unavailable"
+                  : t("metrics-server unavailable")
               }
             />
             <ResourceMeter
-              label="Memory capacity"
+              label={t("Memory capacity")}
               value={usage.memory_capacity_percent}
               detail={
                 row.metrics_available
                   ? `${usage.memory || "-"} / ${row.capacity?.memory || "-"}`
-                  : "metrics-server unavailable"
+                  : t("metrics-server unavailable")
               }
             />
             <ResourceMeter
-              label="Disk"
+              label={t("Disk")}
               value={disk.used_percent}
               detail={`${formatBytes(disk.used_bytes)} / ${formatBytes(disk.capacity_bytes)}`}
             />
             <ResourceMeter
-              label="Network"
+              label={t("Network")}
               value={0}
               detail={`RX ${formatBytes(network.rx_bytes)} · TX ${formatBytes(network.tx_bytes)}`}
             />
           </div>
         ) : (
           <p className="muted">
-            Metrics unavailable
+            {t("Metrics unavailable")}
             {row.metrics_error
               ? `: ${row.metrics_error}`
-              : ". Install metrics-server to show live CPU and memory usage."}
+              : t(". Install metrics-server to show live CPU and memory usage.")}
           </p>
         )}
       </section>
       <section className="node-section">
-        <h3>Conditions</h3>
+        <h3>{t("Conditions")}</h3>
         <div className="condition-grid">
           {conditions.map((condition) => (
             <div
@@ -317,7 +320,7 @@ export default function NodeDetailView({
         </div>
       </section>
       <section className="node-section">
-        <h3>System</h3>
+        <h3>{t("System")}</h3>
         <div className="detail-list compact-details">
           {Object.entries(row.system_info || {}).map(([key, value]) => (
             <span key={key}>
@@ -327,7 +330,7 @@ export default function NodeDetailView({
         </div>
       </section>
       <section className="node-section">
-        <h3>Pods on this node</h3>
+        <h3>{t("Pods on this node")}</h3>
         <div className="mini-table">
           {pods.map((pod) => (
             <div key={`${pod.namespace}/${pod.name}`}>
@@ -341,12 +344,12 @@ export default function NodeDetailView({
             </div>
           ))}
           {pods.length === 0 && (
-            <div className="empty">No pods scheduled on this node.</div>
+            <div className="empty">{t("No pods scheduled on this node.")}</div>
           )}
         </div>
       </section>
       <section className="node-section">
-        <h3>Labels</h3>
+        <h3>{t("Labels")}</h3>
         <form
           className="form-grid node-edit-form"
           onSubmit={(event) => {
@@ -355,7 +358,7 @@ export default function NodeDetailView({
           }}
         >
           <Textarea name="labels" defaultValue={formatKeyValues(row.labels)} />
-          <Button variant="primary">Save labels</Button>
+          <Button variant="primary">{t("Save labels")}</Button>
         </form>
         <div className="label-cloud">
           {Object.entries(row.labels || {}).map(([key, value]) => (
@@ -366,7 +369,7 @@ export default function NodeDetailView({
         </div>
       </section>
       <section className="node-section">
-        <h3>Taints</h3>
+        <h3>{t("Taints")}</h3>
         <form
           className="form-grid node-edit-form"
           onSubmit={(event) => {
@@ -379,13 +382,13 @@ export default function NodeDetailView({
             placeholder="key=value:NoSchedule, dedicated=gpu:NoExecute"
             defaultValue={taintsToForm(row.taints || [])}
           />
-          <Button variant="primary">Save taints</Button>
+          <Button variant="primary">{t("Save taints")}</Button>
         </form>
         <div className="signal-list">
           {(row.taints || []).map((taint) => (
             <span key={taint}>{taint}</span>
           ))}
-          {(row.taints || []).length === 0 && <span>No taints</span>}
+          {(row.taints || []).length === 0 && <span>{t("No taints")}</span>}
         </div>
       </section>
     </div>

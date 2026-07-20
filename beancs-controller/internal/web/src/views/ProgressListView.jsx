@@ -2,6 +2,7 @@ import { Button } from "../components/index";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as LucideIcons from "lucide-react";
 import { formatTime } from "../utils/index";
+import { t } from "../i18n/index";
 import {
   Activity,
   AlertTriangle,
@@ -59,10 +60,10 @@ export default function ProgressListView({
     <div className="stack progress-list-page">
       <section className="progress-list-panel">
         <div className="progress-list-head">
-          <span>Process</span>
-          <span>Project</span>
-          <span>Type</span>
-          <span>Status</span>
+          <span>{t("Process")}</span>
+          <span>{t("Project")}</span>
+          <span>{t("Type")}</span>
+          <span>{t("Status")}</span>
           <span />
         </div>
         {(processes || []).map((process) => (
@@ -85,14 +86,14 @@ export default function ProgressListView({
             </span>
             <span>{process.type || "-"}</span>
             <span>{process.status || "-"}</span>
-            <span>Open</span>
+            <span>{t("Open")}</span>
           </Button>
         ))}
         {(processes || []).length === 0 && (
           <div className="empty">
             {(projects || []).length
-              ? "No deployment process records yet."
-              : "No projects yet."}
+              ? t("No deployment process records yet.")
+              : t("No projects yet.")}
           </div>
         )}
       </section>

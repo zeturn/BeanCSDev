@@ -21,6 +21,7 @@ type Config struct {
 	BPBrowserAuthURL   string `env:"BP_BROWSER_AUTH_URL"`
 	BPBrowserClientID  string `env:"BP_BROWSER_CLIENT_ID"`
 	BPBrowserSecret    string `env:"BP_BROWSER_CLIENT_SECRET"`
+	ArgoCDURL          string `env:"BEANCS_ARGOCD_URL"`
 
 	WebhookSecret string `env:"WEBHOOK_SECRET,required"`
 	EncryptionKey string `env:"ENCRYPTION_KEY,required"`
@@ -57,6 +58,11 @@ type Config struct {
 	GitHubAppSlug       string `env:"BEANCS_GITHUB_APP_SLUG"`
 	GitHubAppPrivateKey string `env:"BEANCS_GITHUB_APP_PRIVATE_KEY"`
 
+	CloudflareOAuthClientID     string `env:"BEANCS_CLOUDFLARE_OAUTH_CLIENT_ID"`
+	CloudflareOAuthClientSecret string `env:"BEANCS_CLOUDFLARE_OAUTH_CLIENT_SECRET"`
+	CloudflareOAuthScopes       string `env:"BEANCS_CLOUDFLARE_OAUTH_SCOPES" envDefault:"zone.read dns.write"`
+	CloudflareOAuthRedirectURL  string `env:"BEANCS_CLOUDFLARE_OAUTH_REDIRECT_URL" envDefault:"https://beancs.com/api/v1/credentials/cloudflare/app/callback"`
+
 	RegistryHost         string `env:"BEANCS_REGISTRY_HOST" envDefault:"registry.beancs.hollowdata.com"`
 	RegistryUsername     string `env:"BEANCS_REGISTRY_USERNAME"`
 	RegistryToken        string `env:"BEANCS_REGISTRY_TOKEN"`
@@ -81,6 +87,7 @@ func Load() (*Config, error) {
 	if cfg.BPBrowserClientID == "" {
 		cfg.BPBrowserClientID = cfg.BPMgmtClientID
 	}
+	cfg.ArgoCDURL = publicURL(cfg.ArgoCDURL)
 	cfg.SelfWebhookHost = strings.TrimRight(strings.TrimSpace(cfg.SelfWebhookHost), "/")
 	return &cfg, nil
 }

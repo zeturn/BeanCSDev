@@ -66,7 +66,7 @@ func (m *Manager) ApplyProjectDeployment(ctx context.Context, project model.Proj
 		Name:    "app",
 		Image:   image,
 		Ports:   containerPorts,
-		EnvFrom: []corev1.EnvFromSource{{SecretRef: &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: "app-env-vars"}}}},
+		EnvFrom: []corev1.EnvFromSource{{SecretRef: &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: project.EnvSecretName()}}}},
 		Resources: corev1.ResourceRequirements{
 			Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(resources.CPURequest), corev1.ResourceMemory: resource.MustParse(resources.MemRequest)},
 			Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(resources.CPULimit), corev1.ResourceMemory: resource.MustParse(resources.MemLimit)},
@@ -152,6 +152,44 @@ func (m *Manager) ScaleDeployment(ctx context.Context, namespace, name string, r
 	dep.Spec.Replicas = &replicas
 	_, err = m.Clientset.AppsV1().Deployments(namespace).Update(ctx, dep, metav1.UpdateOptions{})
 	return err
+}
+
+func (m *Manager) WaitForDeploymentRollout(ctx context.Context, namespace, name string, timeout time.Duration) error {
+	if err := m.ensure(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(namespace) == "" || strings.TrimSpace(name) == "" {
+		return fmt.Errorf("deployment namespace and name are required")
+	}
+	if timeout <= 0 {
+		timeout = 5 * time.Minute
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		dep, err := m.Clientset.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		if dep.Spec.Replicas != nil {
+			expected := *dep.Spec.Replicas
+			status := dep.Status
+			if status.ObservedGeneration >= dep.Generation &&
+				status.UpdatedReplicas >= expected &&
+				status.AvailableReplicas >= expected &&
+				status.ReadyReplicas >= expected &&
+				status.UnavailableReplicas == 0 {
+				return nil
+			}
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("deployment rollout timeout for %s/%s: observed_generation=%d generation=%d updated=%d ready=%d available=%d unavailable=%d", namespace, name, dep.Status.ObservedGeneration, dep.Generation, dep.Status.UpdatedReplicas, dep.Status.ReadyReplicas, dep.Status.AvailableReplicas, dep.Status.UnavailableReplicas)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(3 * time.Second):
+		}
+	}
 }
 
 func int64Ptr(v int64) *int64 { return &v }
@@ -257,6 +295,12 @@ func (m *Manager) reconcileProjectVolumes(ctx context.Context, namespace, projec
 			claimName := projectVolumeClaimName(projectName, name)
 			if err := m.reconcilePVC(ctx, namespace, projectName, claimName, spec); err != nil {
 				return nil, nil, err
+			}
+			volumes = append(volumes, corev1.Volume{Name: name, VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: claimName}}})
+		case "existingpvc":
+			claimName := strings.TrimSpace(spec.ClaimName)
+			if claimName == "" {
+				return nil, nil, fmt.Errorf("existing PVC volume %s requires claimName", name)
 			}
 			volumes = append(volumes, corev1.Volume{Name: name, VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: claimName}}})
 		default:

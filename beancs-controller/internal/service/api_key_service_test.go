@@ -36,6 +36,25 @@ func TestAllowedAPIKeyScopesRestrictsAPIKeyPrivilegeEscalation(t *testing.T) {
 	}
 }
 
+func TestAPIKeyPrefixAllowsUnderscoreInSecret(t *testing.T) {
+	prefix, ok := apiKeyPrefix("bcs_vaMJLkE4_zQMhNrs6_gZNgblsMl1c_rCUxDoonXXYmzo8mMdJ7dc")
+	if !ok {
+		t.Fatal("expected token format with underscores in secret to be valid")
+	}
+	if prefix != "vaMJLkE4" {
+		t.Fatalf("expected prefix vaMJLkE4, got %s", prefix)
+	}
+}
+
+func TestAPIKeyPrefixRejectsInvalidTokens(t *testing.T) {
+	if _, ok := apiKeyPrefix("bcs_onlyprefix"); ok {
+		t.Fatal("expected token without secret to be invalid")
+	}
+	if _, ok := apiKeyPrefix("notbcs_vaMJLkE4_secret"); ok {
+		t.Fatal("expected token with invalid marker to be invalid")
+	}
+}
+
 func containsScope(scopes []string, want string) bool {
 	for _, scope := range scopes {
 		if scope == want {

@@ -178,6 +178,7 @@ func registerAPI(api fiber.Router, cfg *config.Config, db *gorm.DB, registry *ba
 		return c.JSON(fiber.Map{
 			"auth_url":                 cfg.BPBrowserAuthURL,
 			"client_id":                cfg.BPBrowserClientID,
+			"argocd_url":               cfg.ArgoCDURL,
 			"registry_host":            cfg.RegistryHost,
 			"basaltpass_image_project": "basaltpass",
 		})
@@ -203,6 +204,7 @@ func registerAPI(api fiber.Router, cfg *config.Config, db *gorm.DB, registry *ba
 	})
 	credentialHandler := handler.NewCredentialHandler(db, credentialSvc, registry, cfg, v)
 	credentialHandler.RegisterGitHubAppCallback(api.Group("/credentials/github"))
+	credentialHandler.RegisterCloudflareAppCallback(api.Group("/credentials/cloudflare"))
 	secured := api.Group("/", authLimiter, middleware.Auth(registry, apiKeySvc), middleware.Audit(db))
 	credentialHandler.Register(secured)
 	handler.NewAPIKeyHandler(apiKeySvc, v).Register(secured)

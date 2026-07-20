@@ -1,5 +1,6 @@
 import { Button } from "../components/ui";
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { t } from "../i18n/index";
 import * as LucideIcons from "lucide-react";
 import {
   Activity,
@@ -62,8 +63,8 @@ export default function ComingSoonView({
   return (
     <div className="stack">
       <section className="panel">
-        <h2>{title}</h2>
-        <p className="muted">{description}</p>
+        <h2>{t(title)}</h2>
+        <p className="muted">{t(description)}</p>
         {actionLabel && onAction && (
           <div
             style={{
@@ -71,7 +72,7 @@ export default function ComingSoonView({
             }}
           >
             <Button type="button" onClick={onAction} variant="primary">
-              {actionLabel}
+              {t(actionLabel)}
             </Button>
           </div>
         )}
