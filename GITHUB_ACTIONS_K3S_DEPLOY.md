@@ -4,8 +4,8 @@ This repository can deploy BeanCS from GitHub Actions to a k3s cluster.
 
 ## Flow
 
-- Push to `main` or `deploy`: run tests, build the controller image, push to GHCR.
-- Push a `v*` tag: verify the tag commit belongs to `origin/deploy`, then deploy to k3s.
+- Push to `master`, `main`, or `deploy`: run tests, build the controller image, push it to the configured registry.
+- Push a `v*`, `beancs-v*`, or `california-beans-v*` tag: verify the tag commit belongs to `origin/deploy`, then deploy to k3s.
 
 ## Required GitHub Secrets
 
@@ -19,6 +19,8 @@ This repository can deploy BeanCS from GitHub Actions to a k3s cluster.
 - `BP_BROWSER_CLIENT_SECRET`: BasaltPass browser OAuth client secret.
 - `BEANCS_WEBHOOK_SECRET`: webhook verification secret.
 - `BEANCS_ENCRYPTION_KEY`: 64 hex characters.
+- `BEANCS_REGISTRY_USERNAME`: registry username used to push and pull the controller image.
+- `BEANCS_REGISTRY_TOKEN`: registry token used to push and pull the controller image.
 
 Optional:
 

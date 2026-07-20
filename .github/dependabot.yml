@@ -1,0 +1,43 @@
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /beancs-controller
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      go-controller:
+        patterns:
+          - "*"
+
+  - package-ecosystem: gomod
+    directory: /beanctl
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      go-cli:
+        patterns:
+          - "*"
+
+  - package-ecosystem: npm
+    directory: /beancs-controller/internal/web
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      web-ui:
+        patterns:
+          - "*"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: docker
+    directory: /beancs-controller
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
