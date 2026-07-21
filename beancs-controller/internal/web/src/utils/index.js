@@ -840,6 +840,16 @@ export function buildMonorepoApplicationPayload(
       external: dependency.source === "existing" ? undefined : dependency.external,
       controlled:
         dependency.source === "existing" ? undefined : dependency.controlled,
+      credential:
+        dependency.source === "existing"
+          ? undefined
+          : {
+              name: dependency.credential_name || "default",
+              description:
+                dependency.credential_description ||
+                `Default ${dependency.name} credential`,
+              config: dependency.credential_config || dependency.config || {},
+            },
     })),
     components: (form.components || [])
       .filter((component) => component.enabled !== false)

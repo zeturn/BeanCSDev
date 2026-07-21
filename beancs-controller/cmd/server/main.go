@@ -78,10 +78,10 @@ func main() {
 	gitopsSvc.SetDependencyRegistry(dependencyRegistry)
 	dependencySvc := service.NewDependencyService(db, dependencyRegistry)
 	dependencySvc.SetDeployers(credentialSvc, gitopsSvc, k8sManager)
-	applicationSvc := service.NewApplicationService(db, projectSvc, dependencySvc)
-	applicationSpecSvc := service.NewApplicationSpecService(db, credentialSvc, dependencySvc, applicationSvc)
 	processSvc := service.NewProcessService(db, buildSvc, credentialSvc, gitopsSvc, dnsSvc, k8sManager)
 	deploymentSvc := service.NewDeploymentService(db, buildSvc, credentialSvc, gitopsSvc, processSvc)
+	applicationSvc := service.NewApplicationService(db, projectSvc, dependencySvc, deploymentSvc)
+	applicationSpecSvc := service.NewApplicationSpecService(db, credentialSvc, dependencySvc, applicationSvc)
 
 	app := fiber.New(fiber.Config{
 		ErrorHandler: func(c *fiber.Ctx, err error) error {

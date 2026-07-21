@@ -15,10 +15,11 @@ type ApplicationService struct {
 	db           *gorm.DB
 	projects     *ProjectService
 	dependencies *DependencyService
+	deployments  *DeploymentService
 }
 
-func NewApplicationService(db *gorm.DB, projects *ProjectService, dependencies *DependencyService) *ApplicationService {
-	return &ApplicationService{db: db, projects: projects, dependencies: dependencies}
+func NewApplicationService(db *gorm.DB, projects *ProjectService, dependencies *DependencyService, deployments *DeploymentService) *ApplicationService {
+	return &ApplicationService{db: db, projects: projects, dependencies: dependencies, deployments: deployments}
 }
 
 func (s *ApplicationService) CreateMonorepo(ctx context.Context, userID, tenantID, tenantCode string, req dto.CreateMonorepoApplicationRequest) (*dto.ApplicationResponse, error) {
@@ -51,13 +52,26 @@ func (s *ApplicationService) CreateMonorepo(ctx context.Context, userID, tenantI
 			failures = append(failures, fmt.Sprintf("%s: %s", dependency.Name, err.Error()))
 			continue
 		}
+		if dependency.ExistingDependencyID == 0 && dep.DeployMethod != model.DependencyDeployMethodExternal && req.GitHubCredentialID != 0 {
+			if err := s.dependencies.deployStandalone(ctx, userID, *app, *dep, req.GitHubCredentialID); err != nil {
+				failures = append(failures, fmt.Sprintf("%s deploy: %s", dependency.Name, err.Error()))
+				continue
+			}
+		}
 		createdDeps = append(createdDeps, *dep)
 		depsByName[dep.Name] = *dep
 		depsByName[dependency.Name] = *dep
 	}
+	if len(failures) > 0 {
+		_ = s.db.WithContext(ctx).Model(app).Update("status", model.ApplicationStatusPartialFailed).Error
+		return &dto.ApplicationResponse{Application: *app, Projects: created, Dependencies: s.dependencies.MaskList(createdDeps)}, fmt.Errorf("dependencies failed: %s", strings.Join(failures, "; "))
+	}
 	for _, component := range req.Components {
 		component.Env = s.componentEnvWithDependencies(component, depsByName)
 		projectReq := monorepoProjectRequest(req, component)
+		shouldDeploy := projectReq.AutoDeploy == nil || *projectReq.AutoDeploy
+		autoDeploy := false
+		projectReq.AutoDeploy = &autoDeploy
 		project, err := s.projects.CreateProject(ctx, userID, tenantID, tenantCode, projectReq)
 		if err != nil {
 			failures = append(failures, fmt.Sprintf("%s: %s", component.ProjectName, err.Error()))
@@ -94,6 +108,11 @@ func (s *ApplicationService) CreateMonorepo(ctx context.Context, userID, tenantI
 		}
 		_ = s.db.WithContext(ctx).Create(&appComponent).Error
 		created = append(created, *project)
+		if shouldDeploy && s.deployments != nil {
+			if _, err := s.deployments.Create(ctx, project.ID, "", project.GitHubBranch, userID); err != nil {
+				failures = append(failures, fmt.Sprintf("%s deploy: %s", component.ProjectName, err.Error()))
+			}
+		}
 	}
 	status := model.ApplicationStatusActive
 	if len(failures) > 0 {
