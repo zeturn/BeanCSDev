@@ -2175,6 +2175,58 @@ button.domain-tile {
   color: #64748b;
 }
 
+.process-live-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 10px 14px;
+  border: 1px solid var(--wc-border-default);
+  border-radius: 8px;
+  background: var(--wc-surface-raised);
+  color: var(--wc-text-secondary);
+}
+
+.process-live-strip.live {
+  border-color: color-mix(in srgb, var(--wc-accent) 34%, var(--wc-border-default));
+  background: color-mix(in srgb, var(--wc-accent-subtle) 58%, var(--wc-surface-raised));
+  color: var(--wc-text-primary);
+}
+
+.process-live-strip b {
+  font-size: 13px;
+}
+
+.process-live-strip small {
+  margin-left: auto;
+  color: var(--wc-text-secondary);
+}
+
+.live-pulse {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: var(--wc-action-hover);
+  color: var(--wc-accent);
+}
+
+.process-live-strip.live .live-pulse {
+  animation: livePulse 1.4s ease-in-out infinite;
+}
+
+@keyframes livePulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--wc-accent) 24%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 8px color-mix(in srgb, var(--wc-accent) 0%, transparent);
+  }
+}
+
 .process-back {
   min-height: 28px;
   padding: 0;

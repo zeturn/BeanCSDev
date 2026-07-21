@@ -124,6 +124,26 @@ export default function ProgressView({
   const selectedJob = detailTabID
     ? null
     : jobs.find((job) => job.id === activeJob) || jobs[0];
+  const waitingForProcessRecord = Boolean(activeProcessID && !selectedProcess);
+  const waitingForExecutorJobs =
+    Boolean(selectedProcess) && jobs.length === 1 && jobs[0]?.id === "queued";
+  const liveStatus = (
+    selectedProcess?.status ||
+    selectedJob?.status ||
+    scopedInstallProgress?.steps?.find((step) => step.state === "running")?.state ||
+    ""
+  ).toLowerCase();
+  const isLiveProcess =
+    waitingForProcessRecord ||
+    waitingForExecutorJobs ||
+    ["queued", "pending", "running"].includes(liveStatus);
+  const liveMessage = waitingForProcessRecord
+    ? t("Waiting for the process record to load.")
+    : waitingForExecutorJobs
+      ? t("Process created. Waiting for executor jobs.")
+      : isLiveProcess
+        ? t("Auto-refreshing every 5 seconds.")
+        : t("Latest status loaded.");
   const selectedJobLogs =
     selectedProcess && selectedJob
       ? selectedJob.steps.map((step) => step.log || "").join("\n")
@@ -205,6 +225,21 @@ export default function ProgressView({
           </p>
         </div>
       </section>
+      <div className={isLiveProcess ? "process-live-strip live" : "process-live-strip"}>
+        <span className="live-pulse">
+          {isLiveProcess ? (
+            <LoaderCircle className="spin" size={14} />
+          ) : (
+            <CheckCircle2 size={14} />
+          )}
+        </span>
+        <b>{liveMessage}</b>
+        <small>
+          {activeProcessID
+            ? `#${activeProcessID}`
+            : currentProjectName || t("Deployment process")}
+        </small>
+      </div>
 
       <div className="process-shell">
         <aside className="process-sidebar">

@@ -918,15 +918,34 @@ function App() {
       const data = await api.get("/processes");
       const rows = data.data || [];
       setProcessRecords(rows);
+      const routeProcessID = progressProcessIDForPath(routeLocation.pathname);
       if (
         activeProcessID &&
+        !routeProcessID &&
         !rows.some((row) => String(row.id) === String(activeProcessID))
       ) {
         setActiveProcessID("");
       }
+      return rows;
     } catch (err) {
       setError(err.message);
+      return [];
     }
+  }
+  function latestProcessForProjects(rows, projectIDs) {
+    const ids = new Set((projectIDs || []).filter(Boolean).map(String));
+    if (!ids.size) return null;
+    return (rows || [])
+      .filter((process) => ids.has(String(process.project_id || "")))
+      .filter((process) =>
+        ["deployment", "basaltpass_deployment"].includes(process.type || ""),
+      )
+      .sort((a, b) => {
+        const byTime =
+          new Date(b.created_at || 0).getTime() -
+          new Date(a.created_at || 0).getTime();
+        return byTime || Number(b.id || 0) - Number(a.id || 0);
+      })[0];
   }
   async function loadUserProfile() {
     try {
@@ -2145,7 +2164,9 @@ function App() {
       if (
         !analysis?.is_monorepo ||
         analysis?.deployable === false ||
-        !(deployForm.components || []).some((component) => component.enabled)
+        !(deployForm.components || []).some(
+          (component) => component.enabled !== false,
+        )
       )
         return;
       return deployMonorepoApplication();
@@ -2197,11 +2218,15 @@ function App() {
           commit_sha: payload.github_branch || "",
         },
       );
-      if (deploymentResult.process?.id)
-        setActiveProcessID(String(deploymentResult.process.id));
+      let processID = deploymentResult.process?.id || "";
+      if (!processID) {
+        const rows = await loadProcesses();
+        processID = latestProcessForProjects(rows, [created.id])?.id || "";
+      }
+      if (processID) setActiveProcessID(String(processID));
       setNotice(t("Project created. Deployment process queued."));
       setActiveProgressProjectID(String(created.id));
-      openProgress(created.id, deploymentResult.process?.id, true);
+      openProgress(created.id, processID, true);
       setInstallProgress((current) =>
         current
           ? {
@@ -2439,6 +2464,7 @@ function App() {
       const dependencies =
         created.dependencies || created.data?.dependencies || [];
       const firstProject = projects[0];
+      const projectIDs = projects.map((project) => project.id);
       setNotice(
         t(
           "Application {name} created with {count} components and {deps} dependencies.",
@@ -2449,7 +2475,6 @@ function App() {
           },
         ),
       );
-      if (firstProject?.id) openProgress(firstProject.id);
       setInstallProgress((current) =>
         current
           ? {
@@ -2474,7 +2499,9 @@ function App() {
       setAnalysis(null);
       setSelectedRepo("");
       await loadWorkspace();
-      await loadProcesses();
+      const processRows = await loadProcesses();
+      const process = latestProcessForProjects(processRows, projectIDs);
+      if (firstProject?.id) openProgress(firstProject.id, process?.id || "", true);
       if (firstProject?.id) await loadProjectProgress(String(firstProject.id));
     } catch (err) {
       setError(err.message);
@@ -2560,13 +2587,13 @@ function App() {
       const projects = app.projects || [];
       const dependencies = app.dependencies || [];
       const firstProject = projects[0];
+      const projectIDs = projects.map((project) => project.id);
       setNotice(
         t("Application {name} applied from {path}.", {
           name: app.name || deployForm.name,
           path: payload.config_path,
         }),
       );
-      if (firstProject?.id) openProgress(firstProject.id);
       setInstallProgress((current) =>
         current
           ? {
@@ -2591,7 +2618,9 @@ function App() {
       setAnalysis(null);
       setSelectedRepo("");
       await loadWorkspace();
-      await loadProcesses();
+      const processRows = await loadProcesses();
+      const process = latestProcessForProjects(processRows, projectIDs);
+      if (firstProject?.id) openProgress(firstProject.id, process?.id || "", true);
       if (firstProject?.id) await loadProjectProgress(String(firstProject.id));
     } catch (err) {
       setError(err.message);
