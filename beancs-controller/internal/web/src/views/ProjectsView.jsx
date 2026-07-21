@@ -53,6 +53,7 @@ import {
 } from "lucide-react";
 export default function ProjectsView({
   projects,
+  onOpen,
   onEdit,
   onDelete,
   onScale,
@@ -107,11 +108,13 @@ export default function ProjectsView({
           </div>
           {visibleProjects.map((project) => (
             <div className="tr project-table-row" key={project.id}>
-              <ExpandableCell
-                className="strong"
-                value={project.display_name || project.name}
-                max={32}
-              />
+              <button
+                type="button"
+                className="project-name-link strong"
+                onClick={() => onOpen?.(project)}
+              >
+                {project.display_name || project.name}
+              </button>
               <ExpandableCell
                 value={
                   project.github_repo ||

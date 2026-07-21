@@ -2282,6 +2282,83 @@ button.domain-tile {
   outline: none;
 }
 
+.project-name-link {
+  min-width: 0;
+  justify-content: flex-start;
+  border: 0;
+  background: transparent;
+  color: var(--wc-text-primary);
+  font-weight: 800;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-name-link:hover {
+  color: var(--wc-accent);
+  background: transparent;
+}
+
+.project-detail-page {
+  gap: 16px;
+}
+
+.project-detail-hero {
+  display: grid;
+  gap: 16px;
+}
+
+.project-detail-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.project-detail-field {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--wc-border-default);
+  border-radius: var(--bc-radius);
+  background: var(--wc-surface-subtle);
+}
+
+.project-detail-field small {
+  color: var(--wc-text-tertiary);
+  font-size: 12px;
+}
+
+.project-detail-field b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 14px;
+}
+
+.project-detail-list span {
+  grid-template-columns: minmax(110px, 0.45fr) minmax(0, 1fr);
+}
+
+.project-detail-list b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .process-step-list {
   padding: 12px 16px 24px;
 }
@@ -3743,12 +3820,18 @@ button:not(.beancs-button):hover {
   letter-spacing: 0;
 }
 
+.page-heading-block {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
 .page-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 16px;
+  margin-bottom: 0;
 }
 
 .page-heading-top-label {

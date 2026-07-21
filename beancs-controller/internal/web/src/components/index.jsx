@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { t } from "../i18n/index";
 import * as LucideIcons from "lucide-react";
+import { Breadcrumb as WatercolorBreadcrumb } from "@zeturn/watercolor-react";
 export * from "./ui";
 import { Button, Input, Select, Textarea, Checkbox, Modal, Drawer } from "./ui";
 import {
@@ -91,15 +92,32 @@ export function SidebarNavGroup({ label, items, view, onSelect }) {
   );
 }
 
-export function PageHeading({ title, topLabel, subtitle, actions }) {
+export function PageHeading({
+  title,
+  topLabel,
+  subtitle,
+  actions,
+  breadcrumbs,
+  onBreadcrumb,
+}) {
   return (
-    <section className="page-heading">
-      <div>
-        {topLabel && <span className="page-heading-top-label">{topLabel}</span>}
-        <h1>{title}</h1>
-        {subtitle && <p>{subtitle}</p>}
+    <section className="page-heading-block">
+      {breadcrumbs?.length > 0 && (
+        <WatercolorBreadcrumb
+          items={breadcrumbs}
+          showHome={false}
+          variant="compact"
+          onItemClick={onBreadcrumb}
+        />
+      )}
+      <div className="page-heading">
+        <div>
+          {topLabel && <span className="page-heading-top-label">{topLabel}</span>}
+          <h1>{title}</h1>
+          {subtitle && <p>{subtitle}</p>}
+        </div>
+        {actions && <div className="top-actions">{actions}</div>}
       </div>
-      {actions && <div className="top-actions">{actions}</div>}
     </section>
   );
 }

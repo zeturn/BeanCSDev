@@ -5,6 +5,7 @@ import {
   GitBranch,
   Globe2,
   Layers3,
+  Trash2,
 } from "lucide-react";
 import { t } from "../i18n/index";
 import { Button } from "../components/index";

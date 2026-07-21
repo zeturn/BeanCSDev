@@ -165,6 +165,9 @@ function viewForPath(pathname) {
   if (normalized.startsWith(`${viewPaths.applications}/`)) {
     return "applicationDetail";
   }
+  if (normalized.startsWith(`${viewPaths.projects}/`)) {
+    return "projectDetail";
+  }
   return viewsByPath[normalized] || "dashboard";
 }
 
@@ -173,7 +176,8 @@ function isKnownViewPath(pathname) {
     pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
   return (
     Boolean(viewsByPath[normalized]) ||
-    normalized.startsWith(`${viewPaths.applications}/`)
+    normalized.startsWith(`${viewPaths.applications}/`) ||
+    normalized.startsWith(`${viewPaths.projects}/`)
   );
 }
 
@@ -189,10 +193,22 @@ function applicationDetailPath(applicationID) {
   return `${pathForView("applications")}/${applicationID}`;
 }
 
+function projectDetailPath(projectID) {
+  return `${pathForView("projects")}/${projectID}`;
+}
+
 function applicationIDForPath(pathname) {
   const normalized =
     pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
   const prefix = `${viewPaths.applications}/`;
+  if (!normalized.startsWith(prefix)) return "";
+  return decodeURIComponent(normalized.slice(prefix.length));
+}
+
+function projectIDForPath(pathname) {
+  const normalized =
+    pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
+  const prefix = `${viewPaths.projects}/`;
   if (!normalized.startsWith(prefix)) return "";
   return decodeURIComponent(normalized.slice(prefix.length));
 }
@@ -379,6 +395,7 @@ import LogsView from "./views/LogsView";
 import DeploymentsView from "./views/DeploymentsView";
 import DependenciesView from "./views/DependenciesView";
 import ProjectsView from "./views/ProjectsView";
+import ProjectDetailView from "./views/ProjectDetailView";
 import ApplicationsView from "./views/ApplicationsView";
 import ProjectTrackingModal from "./views/ProjectTrackingModal";
 import DeleteProjectModal from "./views/DeleteProjectModal";
@@ -411,6 +428,12 @@ function App() {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const activeNavView =
+    view === "applicationDetail"
+      ? "applications"
+      : view === "projectDetail"
+        ? "projects"
+        : view;
   const [reposLoading, setReposLoading] = useState(false);
   const [runtime, setRuntime] = useState(emptyRuntime);
   const [dashboard, setDashboard] = useState(null);
@@ -418,6 +441,13 @@ function App() {
   const [storage, setStorage] = useState(emptyStorage);
   const [projects, setProjects] = useState([]);
   const [applications, setApplications] = useState([]);
+  const selectedProjectID = projectIDForPath(routeLocation.pathname);
+  const selectedProject = useMemo(
+    () =>
+      (projects || []).find((project) => String(project.id) === selectedProjectID) ||
+      null,
+    [projects, selectedProjectID],
+  );
   const selectedApplicationID = applicationIDForPath(routeLocation.pathname);
   const selectedApplication = useMemo(
     () =>
@@ -496,6 +526,53 @@ function App() {
     () => profileFromBasalt(basaltProfile, token),
     [basaltProfile, token],
   );
+  const breadcrumbs = useMemo(() => {
+    if (view === "applicationDetail") {
+      return [
+        { label: t("Applications"), href: pathForView("applications") },
+        {
+          label:
+            selectedApplication?.display_name ||
+            selectedApplication?.name ||
+            t("Application"),
+          current: true,
+        },
+      ];
+    }
+    if (view === "projectDetail") {
+      const parentApplication = (applications || []).find((application) =>
+        (application.projects || []).some(
+          (project) => String(project.id) === selectedProjectID,
+        ),
+      );
+      return [
+        { label: t("Projects"), href: pathForView("projects") },
+        ...(parentApplication
+          ? [
+              {
+                label: parentApplication.display_name || parentApplication.name,
+                href: applicationDetailPath(parentApplication.id),
+              },
+            ]
+          : []),
+        {
+          label:
+            selectedProject?.display_name ||
+            selectedProject?.name ||
+            t("Project"),
+          current: true,
+        },
+      ];
+    }
+    return [];
+  }, [
+    applications,
+    selectedApplication,
+    selectedProject,
+    selectedProjectID,
+    t,
+    view,
+  ]);
   const configuredNavSections = useMemo(() => {
     const argocdURL = String(config?.argocd_url || "").trim();
     if (!argocdURL) return navSections;
@@ -2795,7 +2872,7 @@ function App() {
           {filteredOverview.length > 0 && (
             <SidebarNavGroup
               items={filteredOverview}
-              view={view}
+              view={activeNavView}
               onSelect={selectNav}
             />
           )}
@@ -2804,7 +2881,7 @@ function App() {
               key={section.id}
               label={section.label}
               items={section.items}
-              view={view}
+              view={activeNavView}
               onSelect={selectNav}
             />
           ))}
@@ -2883,6 +2960,10 @@ function App() {
                 ? selectedApplication?.display_name ||
                   selectedApplication?.name ||
                   t("Application")
+                : view === "projectDetail"
+                  ? selectedProject?.display_name ||
+                    selectedProject?.name ||
+                    t("Project")
               : titleFor(view)
           }
           topLabel={view === "dashboard" ? t("Overview") : undefined}
@@ -2893,8 +2974,17 @@ function App() {
                 ? selectedApplication
                   ? `${selectedApplication.github_repo || selectedApplication.type || "-"}${selectedApplication.github_branch ? ` · ${selectedApplication.github_branch}` : ""}`
                   : t("Loading application...")
+                : view === "projectDetail"
+                  ? selectedProject
+                    ? `${selectedProject.namespace || "-"} · ${selectedProject.domain || selectedProject.exposure_mode || "-"}`
+                    : t("Loading project...")
               : subtitleFor(view, runtime, projects)
           }
+          breadcrumbs={breadcrumbs}
+          onBreadcrumb={(event, item) => {
+            event.preventDefault();
+            if (item.href) navigate(item.href);
+          }}
           actions={
             view === "dashboard" ? null : (
               <Button onClick={loadWorkspace} disabled={loading}>
@@ -2988,6 +3078,7 @@ function App() {
             {view === "projects" && (
               <ProjectsView
                 projects={projects}
+                onOpen={(project) => navigate(projectDetailPath(project.id))}
                 onEdit={setEditingProject}
                 onDelete={deleteProject}
                 onScale={scaleProject}
@@ -3016,7 +3107,22 @@ function App() {
                 applicationID={selectedApplicationID}
                 onBack={() => navigate(pathForView("applications"))}
                 onDeleteApplication={deleteApplication}
-                onOpenProject={setEditingProject}
+                onOpenProject={(project) => navigate(projectDetailPath(project.id))}
+              />
+            )}
+            {view === "projectDetail" && (
+              <ProjectDetailView
+                project={selectedProject}
+                projectID={selectedProjectID}
+                projects={projects}
+                onEdit={setEditingProject}
+                onDelete={deleteProject}
+                onRestart={restartProject}
+                onBuild={buildProject}
+                onTracking={openProjectTracking}
+                onProgress={(project) => {
+                  openProgress(project.id);
+                }}
               />
             )}
             {view === "deployments" && (
