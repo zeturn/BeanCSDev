@@ -156,13 +156,19 @@ function pathForView(view) {
 function viewForPath(pathname) {
   const normalized =
     pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
+  if (normalized.startsWith(`${viewPaths.applications}/`)) {
+    return "applicationDetail";
+  }
   return viewsByPath[normalized] || "dashboard";
 }
 
 function isKnownViewPath(pathname) {
   const normalized =
     pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
-  return Boolean(viewsByPath[normalized]);
+  return (
+    Boolean(viewsByPath[normalized]) ||
+    normalized.startsWith(`${viewPaths.applications}/`)
+  );
 }
 
 function progressPath(projectID = "", processID = "") {
@@ -171,6 +177,18 @@ function progressPath(projectID = "", processID = "") {
   if (processID) params.set("process", String(processID));
   const query = params.toString();
   return `${pathForView("progress")}${query ? `?${query}` : ""}`;
+}
+
+function applicationDetailPath(applicationID) {
+  return `${pathForView("applications")}/${applicationID}`;
+}
+
+function applicationIDForPath(pathname) {
+  const normalized =
+    pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
+  const prefix = `${viewPaths.applications}/`;
+  if (!normalized.startsWith(prefix)) return "";
+  return decodeURIComponent(normalized.slice(prefix.length));
 }
 const navOverview = {
   id: "dashboard",
@@ -394,6 +412,14 @@ function App() {
   const [storage, setStorage] = useState(emptyStorage);
   const [projects, setProjects] = useState([]);
   const [applications, setApplications] = useState([]);
+  const selectedApplicationID = applicationIDForPath(routeLocation.pathname);
+  const selectedApplication = useMemo(
+    () =>
+      (applications || []).find(
+        (application) => String(application.id) === selectedApplicationID,
+      ) || null,
+    [applications, selectedApplicationID],
+  );
   const [dependencyDefinitions, setDependencyDefinitions] = useState([]);
   const [reusableDependencies, setReusableDependencies] = useState([]);
   const [credentials, setCredentials] = useState({
@@ -2942,6 +2968,20 @@ function App() {
               <ApplicationsView
                 applications={applications}
                 onDeleteApplication={deleteApplication}
+                onOpenApplication={(application) =>
+                  navigate(applicationDetailPath(application.id))
+                }
+              />
+            )}
+            {view === "applicationDetail" && (
+              <ApplicationsView
+                mode="detail"
+                applications={applications}
+                application={selectedApplication}
+                applicationID={selectedApplicationID}
+                onBack={() => navigate(pathForView("applications"))}
+                onDeleteApplication={deleteApplication}
+                onOpenProject={setEditingProject}
               />
             )}
             {view === "deployments" && (

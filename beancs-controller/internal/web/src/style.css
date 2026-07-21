@@ -962,6 +962,24 @@ button.ghost:hover,
   background: #ffffff;
 }
 
+.application-card-button {
+  width: 100%;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.application-card-button:hover {
+  border-color: rgba(37, 99, 235, 0.36);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+}
+
+.application-card-button:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.7);
+  outline-offset: 2px;
+}
+
 .application-card > div:first-child {
   display: grid;
   gap: 3px;
@@ -1001,6 +1019,75 @@ button.ghost:hover,
   padding: 8px;
   border-radius: 7px;
   background: #f8fafc;
+}
+
+.application-detail-header {
+  gap: 14px;
+}
+
+.application-detail-header .section-head {
+  align-items: flex-start;
+}
+
+.application-detail-header p {
+  margin: 4px 0 0;
+}
+
+.application-detail-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.application-detail-stat {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.application-detail-stat small {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.application-detail-project-row {
+  grid-template-columns:
+    minmax(160px, 1fr) minmax(120px, 0.8fr) minmax(180px, 1fr)
+    minmax(140px, 0.85fr) minmax(110px, 0.65fr);
+}
+
+.application-detail-dependency-row {
+  grid-template-columns:
+    minmax(160px, 1fr) minmax(120px, 0.8fr) minmax(140px, 1fr)
+    minmax(110px, 0.7fr) minmax(110px, 0.7fr);
+}
+
+.application-detail-row-button {
+  width: 100%;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.application-detail-row-button:hover {
+  background: #f8fafc;
+}
+
+.application-detail-project-row span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.application-component-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
 }
 
 .stack {
