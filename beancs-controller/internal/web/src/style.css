@@ -872,6 +872,47 @@ button.ghost:not(.beancs-button):hover,
   align-items: end;
 }
 
+.compact-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.compact-summary-grid span {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--wc-border-default);
+  border-radius: 6px;
+  background: var(--wc-surface-raised);
+}
+
+.compact-summary-grid small,
+.component-card-head .muted {
+  display: block;
+  margin: 2px 0 0;
+  color: var(--wc-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.compact-summary-grid b {
+  display: block;
+  overflow: hidden;
+  color: var(--wc-text-primary);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modal-form-stack {
+  display: grid;
+  gap: 14px;
+}
+
+.dependency-link-summary {
+  background: var(--wc-surface-raised);
+}
+
 .dependency-list {
   display: grid;
   gap: 10px;

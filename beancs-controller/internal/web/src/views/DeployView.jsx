@@ -245,6 +245,9 @@ export default function DeployView({
   const [repoSearch, setRepoSearch] = useState("");
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [dependencyCreateOpen, setDependencyCreateOpen] = useState(false);
+  const [componentEditorIndex, setComponentEditorIndex] = useState(null);
+  const [dependencyEditorIndex, setDependencyEditorIndex] = useState(null);
+  const [dependencyLinksIndex, setDependencyLinksIndex] = useState(null);
   const selectedCloudflareDomain = (domains || []).find(
     (domain) =>
       String(domain.credential_id) === String(form.cloudflare_credential_id) &&
@@ -472,6 +475,7 @@ export default function DeployView({
     const definition = dependencyDefinitions[0];
     if (!definition) return;
     const name = uniqueDependencyName(form.dependencies || [], definition.name);
+    const nextIndex = (form.dependencies || []).length;
     setForm({
       ...form,
       dependencies: [
@@ -485,6 +489,39 @@ export default function DeployView({
           config: dependencyDefaultConfig(definition),
         },
       ],
+    });
+    setDependencyEditorIndex(nextIndex);
+  };
+  const changeDependencySource = (index, dependency, source) => {
+    if (source === "existing") {
+      const match = (reusableDependencies || []).find(
+        (item) => item.type === dependency.type,
+      );
+      updateDependency(index, {
+        source,
+        existing_dependency_id: match?.id || "",
+        name: match?.name || dependency.name,
+        type: match?.type || dependency.type,
+        credentials: match?.credentials || [],
+      });
+      return;
+    }
+    updateDependency(index, {
+      source,
+      existing_dependency_id: "",
+      credentials: [],
+    });
+  };
+  const changeDependencyType = (index, dependency, type) => {
+    const nextDefinition = definitionForDependency(dependencyDefinitions, type);
+    updateDependency(index, {
+      type,
+      name: uniqueDependencyName(
+        (form.dependencies || []).filter((_, i) => i !== index),
+        type,
+      ),
+      deploy_method: nextDefinition?.default_deploy_method || "helm",
+      config: dependencyDefaultConfig(nextDefinition),
     });
   };
   const updateDependency = (index, patch) => {
@@ -513,6 +550,28 @@ export default function DeployView({
       })),
     });
   };
+  const dependencySummary = (dependency) => {
+    const definition = definitionForDependency(
+      dependencyDefinitions,
+      dependency.type,
+    );
+    const method =
+      dependency.deploy_method || definition?.default_deploy_method || "helm";
+    return [
+      dependency.source === "existing" ? t("Existing") : t("New"),
+      definition?.display_name || dependency.type,
+      t(method),
+      dependency.version || "",
+    ]
+      .filter(Boolean)
+      .join(" / ");
+  };
+  const dependencyConfigCount = (dependency) =>
+    Object.keys(dependency.config || {}).length;
+  const componentDependencyNames = (component) =>
+    (component.dependency_links || [])
+      .map((link) => link.dependency)
+      .filter(Boolean);
   return (
     <div className="deploy-wizard">
       <div className="deploy-wizard-actions">
@@ -1399,7 +1458,7 @@ export default function DeployView({
                   <div
                     key={`${component.path}-${index}`}
                     className={
-                      component.enabled
+                      component.enabled !== false
                         ? "component-card active"
                         : "component-card"
                     }
@@ -1417,87 +1476,42 @@ export default function DeployView({
                         />
                         <b>{component.name}</b>
                       </label>
-                      <span>{component.kind || "service"}</span>
+                      <div className="row-actions">
+                        <span>{component.kind || "service"}</span>
+                        <Button
+                          type="button"
+                          onClick={() => setComponentEditorIndex(index)}
+                        >
+                          <Edit3 size={15} /> {t("Edit")}
+                        </Button>
+                      </div>
                     </div>
-                    <div className="component-grid">
-                      <Field
-                        label={t("Project name")}
-                        value={component.project_name}
-                        onChange={(v) =>
-                          updateComponent(index, {
-                            project_name: slugify(v),
-                          })
-                        }
-                        required
-                      />
-                      <Field
-                        label={t("Component path")}
-                        value={component.component_path || component.path}
-                        onChange={(v) =>
-                          updateComponent(index, {
-                            component_path: v.trim(),
-                          })
-                        }
-                      />
-                      <Field
-                        label={t("Dockerfile")}
-                        value={component.dockerfile_path}
-                        onChange={(v) =>
-                          updateComponent(index, {
-                            dockerfile_path: v.trim(),
-                          })
-                        }
-                        required
-                      />
-                      <Field
-                        label={t("Build context")}
-                        value={component.build_context || "."}
-                        onChange={(v) =>
-                          updateComponent(index, {
-                            build_context: v.trim() || ".",
-                          })
-                        }
-                      />
-                      <Field
-                        label={t("Port")}
-                        type="number"
-                        value={component.port || ""}
-                        onChange={(v) =>
-                          updateComponent(index, {
-                            port: Number(v || 0),
-                            exposure_mode:
-                              Number(v || 0) > 0
-                                ? component.exposure_mode || "private"
-                                : "internal-only",
-                          })
-                        }
-                      />
-                      <Field
-                        label={t("Replicas")}
-                        type="number"
-                        value={component.replicas || 1}
-                        onChange={(v) =>
-                          updateComponent(index, {
-                            replicas: Number(v || 1),
-                          })
-                        }
-                      />
-                      <label>{t("Exposure")}</label>
-                      <Select
-                        value={
-                          component.exposure_mode ||
-                          (component.port ? "private" : "internal-only")
-                        }
-                        onChange={(event) =>
-                          updateComponent(index, {
-                            exposure_mode: event.target.value,
-                          })
-                        }
-                      >
-                        <option value="public">{t("Public")}</option>
-                        <option value="private">{t("Private")}</option>
-                        <option value="internal-only">{t("Internal only")}</option>
-                      </Select>
+                    <div className="compact-summary-grid">
+                      <span>
+                        <small>{t("Project name")}</small>
+                        <b>{component.project_name || "-"}</b>
+                      </span>
+                      <span>
+                        <small>{t("Port")}</small>
+                        <b>{component.port || t("internal-only")}</b>
+                      </span>
+                      <span>
+                        <small>{t("Replicas")}</small>
+                        <b>{component.replicas || 1}</b>
+                      </span>
+                      <span>
+                        <small>{t("Exposure")}</small>
+                        <b>
+                          {t(
+                            component.exposure_mode ||
+                              (component.port ? "private" : "internal-only"),
+                          )}
+                        </b>
+                      </span>
+                      <span>
+                        <small>{t("Component path")}</small>
+                        <b>{component.component_path || component.path || "-"}</b>
+                      </span>
                     </div>
                     {analysis?.source === "beancs_spec" && (
                       <div className="spec-component-meta">
@@ -1840,182 +1854,61 @@ export default function DeployView({
                         key={`${dependency.name}-${index}`}
                       >
                         <div className="component-card-head">
-                          <b>{dependency.name || t("dependency")}</b>
-                          <Button
-                            type="button"
-                            onClick={() => deleteDependency(index)}
-                            title={t("Remove dependency")}
-                            variant="danger"
-                          >
-                            <Trash2 size={15} />
-                          </Button>
+                          <div>
+                            <b>{dependency.name || t("dependency")}</b>
+                            <p className="muted">{dependencySummary(dependency)}</p>
+                          </div>
+                          <div className="row-actions">
+                            <Button
+                              type="button"
+                              onClick={() => setDependencyEditorIndex(index)}
+                            >
+                              <Edit3 size={15} /> {t("Edit")}
+                            </Button>
+                            <Button
+                              type="button"
+                              onClick={() => deleteDependency(index)}
+                              title={t("Remove dependency")}
+                              variant="danger"
+                            >
+                              <Trash2 size={15} />
+                            </Button>
+                          </div>
                         </div>
-                        <div className="component-grid">
-                          <Field
-                            label={t("Name")}
-                            value={dependency.name}
-                            onChange={(v) =>
-                              updateDependency(index, {
-                                ...dependency,
-                                name: slugify(v),
-                              })
-                            }
-                            required
-                          />
-                          <label>{t("Source")}</label>
-                          <Select
-                            value={dependency.source || "new"}
-                            onChange={(event) => {
-                              const source = event.target.value;
-                              if (source === "existing") {
-                                const match = (reusableDependencies || []).find(
-                                  (item) => item.type === dependency.type,
-                                );
-                                updateDependency(index, {
-                                  source,
-                                  existing_dependency_id: match?.id || "",
-                                  name: match?.name || dependency.name,
-                                  type: match?.type || dependency.type,
-                                  credentials: match?.credentials || [],
-                                });
-                                return;
-                              }
-                              updateDependency(index, {
-                                source,
-                                existing_dependency_id: "",
-                                credentials: [],
-                              });
-                            }}
-                          >
-                            <option value="new">{t("New")}</option>
-                            <option value="existing">{t("Existing")}</option>
-                          </Select>
-                          <label>{t("Type")}</label>
-                          <Select
-                            value={dependency.type}
-                            disabled={(dependency.source || "new") === "existing"}
-                            onChange={(event) => {
-                              const nextDefinition = definitionForDependency(
-                                dependencyDefinitions,
-                                event.target.value,
-                              );
-                              updateDependency(index, {
-                                type: event.target.value,
-                                name: uniqueDependencyName(
-                                  (form.dependencies || []).filter(
-                                    (_, i) => i !== index,
-                                  ),
-                                  event.target.value,
-                                ),
-                                deploy_method:
-                                  nextDefinition?.default_deploy_method ||
+                        <div className="compact-summary-grid">
+                          <span>
+                            <small>{t("Source")}</small>
+                            <b>
+                              {dependency.source === "existing"
+                                ? t("Existing")
+                                : t("New")}
+                            </b>
+                          </span>
+                          <span>
+                            <small>{t("Type")}</small>
+                            <b>{definition?.display_name || dependency.type}</b>
+                          </span>
+                          <span>
+                            <small>{t("Deploy method")}</small>
+                            <b>
+                              {t(
+                                dependency.deploy_method ||
+                                  definition?.default_deploy_method ||
                                   "helm",
-                                config: dependencyDefaultConfig(nextDefinition),
-                              });
-                            }}
-                          >
-                            {dependencyDefinitions.map((definition) => (
-                              <option
-                                key={definition.name}
-                                value={definition.name}
-                              >
-                                {definition.display_name || definition.name}
-                              </option>
-                            ))}
-                          </Select>
-                          {(dependency.source || "new") === "existing" && (
-                            <>
-                              <label>{t("Dependency")}</label>
-                              <Select
-                                value={dependency.existing_dependency_id || ""}
-                                onChange={(event) => {
-                                  const match = (reusableDependencies || []).find(
-                                    (item) =>
-                                      String(item.id) === event.target.value,
-                                  );
-                                  updateDependency(index, {
-                                    existing_dependency_id: match?.id || "",
-                                    name: match?.name || dependency.name,
-                                    type: match?.type || dependency.type,
-                                    credentials: match?.credentials || [],
-                                  });
-                                }}
-                              >
-                                <option value="">{t("Choose dependency")}</option>
-                                {(reusableDependencies || [])
-                                  .filter(
-                                    (item) => item.type === dependency.type,
-                                  )
-                                  .map((item) => (
-                                    <option key={item.id} value={item.id}>
-                                      {item.name} ·{" "}
-                                      {item.external ? t("external") : t("managed")}
-                                    </option>
-                                  ))}
-                              </Select>
-                            </>
-                          )}
-                          <label>{t("Deploy method")}</label>
-                          <Select
-                            value={
-                              dependency.deploy_method ||
-                              definition?.default_deploy_method ||
-                              "helm"
-                            }
-                            onChange={(event) =>
-                              updateDependency(index, {
-                                deploy_method: event.target.value,
-                                external: event.target.value === "external",
-                              })
-                            }
-                            disabled={(dependency.source || "new") === "existing"}
-                          >
-                            {(
-                              definition?.supported_deploy_methods || ["helm"]
-                            ).map((method) => (
-                              <option key={method} value={method}>
-                                {t(method)}
-                              </option>
-                            ))}
-                          </Select>
-                          <Field
-                            label={t("Version")}
-                            value={dependency.version || ""}
-                            onChange={(v) =>
-                              updateDependency(index, {
-                                version: v.trim(),
-                              })
-                            }
-                          />
+                              )}
+                            </b>
+                          </span>
+                          <span>
+                            <small>{t("Config")}</small>
+                            <b>
+                              {dependency.source === "existing"
+                                ? t("Existing")
+                                : t("{count} fields", {
+                                    count: dependencyConfigCount(dependency),
+                                  })}
+                            </b>
+                          </span>
                         </div>
-                        {(dependency.source || "new") !== "existing" && (
-                          <>
-                            {(dependency.deploy_method === "external" ||
-                              dependency.external) && (
-                              <label className="checkbox-label">
-                                <Input
-                                  type="checkbox"
-                                  checked={Boolean(dependency.controlled)}
-                                  onChange={(event) =>
-                                    updateDependency(index, {
-                                      controlled: event.target.checked,
-                                    })
-                                  }
-                                />
-                                <span>{t("BeanCS can create credentials")}</span>
-                              </label>
-                            )}
-                            <DependencyConfigEditor
-                              definition={definition}
-                              value={dependency.config || {}}
-                              onChange={(config) =>
-                                updateDependency(index, {
-                                  config,
-                                })
-                              }
-                            />
-                          </>
-                        )}
                       </div>
                     );
                   })}
@@ -2027,19 +1920,32 @@ export default function DeployView({
                 </div>
                 {(form.dependencies || []).length > 0 && (
                   <div className="component-list">
-                    {(form.components || []).map((component, index) => (
-                      <DependencyLinksEditor
-                        key={`${component.project_name}-${index}`}
-                        component={component}
-                        dependencies={form.dependencies || []}
-                        definitions={dependencyDefinitions}
-                        onChange={(dependency_links) =>
-                          updateComponent(index, {
-                            dependency_links,
-                          })
-                        }
-                      />
-                    ))}
+                    {(form.components || []).map((component, index) => {
+                      const names = componentDependencyNames(component);
+                      return (
+                        <div
+                          className="component-card dependency-link-summary"
+                          key={`${component.project_name}-${index}`}
+                        >
+                          <div className="component-card-head">
+                            <div>
+                              <b>{component.project_name || component.name}</b>
+                              <p className="muted">
+                                {names.length
+                                  ? names.join(", ")
+                                  : t("No dependency links configured.")}
+                              </p>
+                            </div>
+                            <Button
+                              type="button"
+                              onClick={() => setDependencyLinksIndex(index)}
+                            >
+                              <Edit3 size={15} /> {t("Configure")}
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </>
@@ -2496,6 +2402,310 @@ export default function DeployView({
           </div>
         )}
       </form>
+      {componentEditorIndex !== null &&
+        (form.components || [])[componentEditorIndex] && (
+          <Modal
+            title={t("Edit component")}
+            subtitle={(form.components || [])[componentEditorIndex].name}
+            className="wide-modal"
+            onClose={() => setComponentEditorIndex(null)}
+          >
+            {(() => {
+              const component = (form.components || [])[componentEditorIndex];
+              return (
+                <div className="modal-form-stack">
+                  <div className="component-grid">
+                    <Field
+                      label={t("Project name")}
+                      value={component.project_name}
+                      onChange={(v) =>
+                        updateComponent(componentEditorIndex, {
+                          project_name: slugify(v),
+                        })
+                      }
+                      required
+                    />
+                    <Field
+                      label={t("Component path")}
+                      value={component.component_path || component.path}
+                      onChange={(v) =>
+                        updateComponent(componentEditorIndex, {
+                          component_path: v.trim(),
+                        })
+                      }
+                    />
+                    <Field
+                      label={t("Dockerfile")}
+                      value={component.dockerfile_path}
+                      onChange={(v) =>
+                        updateComponent(componentEditorIndex, {
+                          dockerfile_path: v.trim(),
+                        })
+                      }
+                      required
+                    />
+                    <Field
+                      label={t("Build context")}
+                      value={component.build_context || "."}
+                      onChange={(v) =>
+                        updateComponent(componentEditorIndex, {
+                          build_context: v.trim() || ".",
+                        })
+                      }
+                    />
+                    <Field
+                      label={t("Port")}
+                      type="number"
+                      value={component.port || ""}
+                      onChange={(v) =>
+                        updateComponent(componentEditorIndex, {
+                          port: Number(v || 0),
+                          exposure_mode:
+                            Number(v || 0) > 0
+                              ? component.exposure_mode || "private"
+                              : "internal-only",
+                        })
+                      }
+                    />
+                    <Field
+                      label={t("Replicas")}
+                      type="number"
+                      value={component.replicas || 1}
+                      onChange={(v) =>
+                        updateComponent(componentEditorIndex, {
+                          replicas: Number(v || 1),
+                        })
+                      }
+                    />
+                    <label>{t("Exposure")}</label>
+                    <Select
+                      value={
+                        component.exposure_mode ||
+                        (component.port ? "private" : "internal-only")
+                      }
+                      onChange={(event) =>
+                        updateComponent(componentEditorIndex, {
+                          exposure_mode: event.target.value,
+                        })
+                      }
+                    >
+                      <option value="public">{t("Public")}</option>
+                      <option value="private">{t("Private")}</option>
+                      <option value="internal-only">{t("Internal only")}</option>
+                    </Select>
+                  </div>
+                  <div className="modal-actions">
+                    <Button
+                      type="button"
+                      variant="primary"
+                      onClick={() => setComponentEditorIndex(null)}
+                    >
+                      {t("Done")}
+                    </Button>
+                  </div>
+                </div>
+              );
+            })()}
+          </Modal>
+        )}
+      {dependencyEditorIndex !== null &&
+        (form.dependencies || [])[dependencyEditorIndex] && (
+          <Modal
+            title={t("Edit dependency")}
+            subtitle={(form.dependencies || [])[dependencyEditorIndex].name}
+            className="wide-modal"
+            onClose={() => setDependencyEditorIndex(null)}
+          >
+            {(() => {
+              const dependency = (form.dependencies || [])[dependencyEditorIndex];
+              const definition = definitionForDependency(
+                dependencyDefinitions,
+                dependency.type,
+              );
+              return (
+                <div className="modal-form-stack">
+                  <div className="component-grid">
+                    <Field
+                      label={t("Name")}
+                      value={dependency.name}
+                      onChange={(v) =>
+                        updateDependency(dependencyEditorIndex, {
+                          ...dependency,
+                          name: slugify(v),
+                        })
+                      }
+                      required
+                    />
+                    <label>{t("Source")}</label>
+                    <Select
+                      value={dependency.source || "new"}
+                      onChange={(event) =>
+                        changeDependencySource(
+                          dependencyEditorIndex,
+                          dependency,
+                          event.target.value,
+                        )
+                      }
+                    >
+                      <option value="new">{t("New")}</option>
+                      <option value="existing">{t("Existing")}</option>
+                    </Select>
+                    <label>{t("Type")}</label>
+                    <Select
+                      value={dependency.type}
+                      disabled={(dependency.source || "new") === "existing"}
+                      onChange={(event) =>
+                        changeDependencyType(
+                          dependencyEditorIndex,
+                          dependency,
+                          event.target.value,
+                        )
+                      }
+                    >
+                      {dependencyDefinitions.map((item) => (
+                        <option key={item.name} value={item.name}>
+                          {item.display_name || item.name}
+                        </option>
+                      ))}
+                    </Select>
+                    {(dependency.source || "new") === "existing" && (
+                      <>
+                        <label>{t("Dependency")}</label>
+                        <Select
+                          value={dependency.existing_dependency_id || ""}
+                          onChange={(event) => {
+                            const match = (reusableDependencies || []).find(
+                              (item) => String(item.id) === event.target.value,
+                            );
+                            updateDependency(dependencyEditorIndex, {
+                              existing_dependency_id: match?.id || "",
+                              name: match?.name || dependency.name,
+                              type: match?.type || dependency.type,
+                              credentials: match?.credentials || [],
+                            });
+                          }}
+                        >
+                          <option value="">{t("Choose dependency")}</option>
+                          {(reusableDependencies || [])
+                            .filter((item) => item.type === dependency.type)
+                            .map((item) => (
+                              <option key={item.id} value={item.id}>
+                                {item.name} ·{" "}
+                                {item.external ? t("external") : t("managed")}
+                              </option>
+                            ))}
+                        </Select>
+                      </>
+                    )}
+                    <label>{t("Deploy method")}</label>
+                    <Select
+                      value={
+                        dependency.deploy_method ||
+                        definition?.default_deploy_method ||
+                        "helm"
+                      }
+                      onChange={(event) =>
+                        updateDependency(dependencyEditorIndex, {
+                          deploy_method: event.target.value,
+                          external: event.target.value === "external",
+                        })
+                      }
+                      disabled={(dependency.source || "new") === "existing"}
+                    >
+                      {(definition?.supported_deploy_methods || ["helm"]).map(
+                        (method) => (
+                          <option key={method} value={method}>
+                            {t(method)}
+                          </option>
+                        ),
+                      )}
+                    </Select>
+                    <Field
+                      label={t("Version")}
+                      value={dependency.version || ""}
+                      onChange={(v) =>
+                        updateDependency(dependencyEditorIndex, {
+                          version: v.trim(),
+                        })
+                      }
+                    />
+                  </div>
+                  {(dependency.source || "new") !== "existing" && (
+                    <>
+                      {(dependency.deploy_method === "external" ||
+                        dependency.external) && (
+                        <label className="checkbox-label">
+                          <Input
+                            type="checkbox"
+                            checked={Boolean(dependency.controlled)}
+                            onChange={(event) =>
+                              updateDependency(dependencyEditorIndex, {
+                                controlled: event.target.checked,
+                              })
+                            }
+                          />
+                          <span>{t("BeanCS can create credentials")}</span>
+                        </label>
+                      )}
+                      <DependencyConfigEditor
+                        definition={definition}
+                        value={dependency.config || {}}
+                        onChange={(config) =>
+                          updateDependency(dependencyEditorIndex, {
+                            config,
+                          })
+                        }
+                      />
+                    </>
+                  )}
+                  <div className="modal-actions">
+                    <Button
+                      type="button"
+                      variant="primary"
+                      onClick={() => setDependencyEditorIndex(null)}
+                    >
+                      {t("Done")}
+                    </Button>
+                  </div>
+                </div>
+              );
+            })()}
+          </Modal>
+        )}
+      {dependencyLinksIndex !== null &&
+        (form.components || [])[dependencyLinksIndex] && (
+          <Modal
+            title={t("Configure dependency links")}
+            subtitle={
+              (form.components || [])[dependencyLinksIndex].project_name ||
+              (form.components || [])[dependencyLinksIndex].name
+            }
+            className="wide-modal"
+            onClose={() => setDependencyLinksIndex(null)}
+          >
+            <div className="modal-form-stack">
+              <DependencyLinksEditor
+                component={(form.components || [])[dependencyLinksIndex]}
+                dependencies={form.dependencies || []}
+                definitions={dependencyDefinitions}
+                onChange={(dependency_links) =>
+                  updateComponent(dependencyLinksIndex, {
+                    dependency_links,
+                  })
+                }
+              />
+              <div className="modal-actions">
+                <Button
+                  type="button"
+                  variant="primary"
+                  onClick={() => setDependencyLinksIndex(null)}
+                >
+                  {t("Done")}
+                </Button>
+              </div>
+            </div>
+          </Modal>
+        )}
       {dependencyCreateOpen && (
         <Modal
           title={t("Deploy dependency")}
