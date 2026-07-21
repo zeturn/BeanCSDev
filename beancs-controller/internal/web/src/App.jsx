@@ -2,6 +2,11 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, useLocation, useNavigate } from "react-router-dom";
 import {
+  LocaleProvider as WatercolorLocaleProvider,
+  ThemeProvider as WatercolorThemeProvider,
+} from "@zeturn/watercolor-react";
+import "@zeturn/watercolor-react/style.css";
+import {
   filterNavItems,
   filterNavSections,
   shouldShowSkeleton,
@@ -3227,9 +3232,13 @@ function App() {
   );
 }
 createRoot(document.getElementById("root")).render(
-  <I18nProvider>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
-  </I18nProvider>,
+  <WatercolorThemeProvider defaultMode="light" themeUrl="/theme.json">
+    <WatercolorLocaleProvider locale="en">
+      <I18nProvider>
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+      </I18nProvider>
+    </WatercolorLocaleProvider>
+  </WatercolorThemeProvider>,
 );

@@ -6,6 +6,9 @@
   "dependencies": {
     "@tailwindcss/vite": "^4.3.0",
     "@vitejs/plugin-react": "^5.1.1",
+    "@zeturn/watercolor-core": "^1.2.8",
+    "@zeturn/watercolor-icons-lucide-react": "^1.2.8",
+    "@zeturn/watercolor-react": "^1.2.8",
     "lucide-react": "^0.561.0",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",

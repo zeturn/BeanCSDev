@@ -1,0 +1,97 @@
+{
+  "$schema": "https://zeturn.github.io/watercolor/theme-v2.schema.json",
+  "version": 2,
+  "tokens": {
+    "colors": {
+      "primary": {
+        "50": "#f5f9ff",
+        "100": "#e7f1ff",
+        "200": "#cfe3ff",
+        "300": "#a8cbff",
+        "400": "#78a9ff",
+        "500": "#4f86f7",
+        "600": "#2f68d8",
+        "700": "#2455b3",
+        "800": "#21488f",
+        "900": "#1f3e75",
+        "950": "#14284d"
+      },
+      "secondary": {
+        "50": "#f3fbf6",
+        "100": "#ddf4e5",
+        "200": "#bee8ce",
+        "300": "#8ed6ab",
+        "400": "#5bbf85",
+        "500": "#35a668",
+        "600": "#258654",
+        "700": "#206b46",
+        "800": "#1d563a",
+        "900": "#194731",
+        "950": "#0c271a"
+      }
+    },
+    "fonts": {
+      "english": "Inter",
+      "chinese": "Noto Sans SC",
+      "fallback": "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+      "mono": "SFMono-Regular, Consolas, monospace"
+    },
+    "radius": {
+      "sm": "4px",
+      "md": "6px",
+      "lg": "8px",
+      "xl": "10px",
+      "2xl": "12px",
+      "3xl": "16px",
+      "full": "9999px"
+    },
+    "motion": {
+      "fast": "120ms",
+      "normal": "180ms",
+      "easing": "cubic-bezier(.2, 0, 0, 1)"
+    }
+  },
+  "modes": {
+    "light": {
+      "canvas": "#f7f9fc",
+      "surfaceSubtle": "#f1f5f9",
+      "surfaceRaised": "#ffffff",
+      "surfaceOverlay": "#ffffff",
+      "actionHover": "#eef4fb",
+      "actionActive": "#e5edf7",
+      "actionSelected": "#e8f1ff",
+      "textPrimary": "#162033",
+      "textSecondary": "#66758a",
+      "textTertiary": "#8a99aa",
+      "borderDefault": "#d9e3ee",
+      "borderStrong": "#b7c6d8",
+      "accent": "#2f68d8",
+      "accentHover": "#2455b3",
+      "accentActive": "#21488f",
+      "accentSubtle": "#e7f1ff",
+      "focusRing": "#78a9ff",
+      "shadowSm": "0 1px 2px rgba(22, 32, 51, 0.06)",
+      "shadowMd": "0 8px 20px rgba(22, 32, 51, 0.08)",
+      "shadowLg": "0 18px 44px rgba(22, 32, 51, 0.12)"
+    },
+    "dark": {
+      "canvas": "#101722",
+      "surfaceSubtle": "#151f2b",
+      "surfaceRaised": "#1b2635",
+      "surfaceOverlay": "#202d3d",
+      "actionHover": "#263446",
+      "actionActive": "#304057",
+      "actionSelected": "#263b5f",
+      "textPrimary": "#f5f8fc",
+      "textSecondary": "#b7c4d4",
+      "textTertiary": "#8b9aab",
+      "borderDefault": "#2d3b4f",
+      "borderStrong": "#40526a",
+      "accent": "#78a9ff",
+      "accentHover": "#a8cbff",
+      "accentActive": "#4f86f7",
+      "accentSubtle": "#2f68d833",
+      "focusRing": "#a8cbff"
+    }
+  }
+}
