@@ -184,12 +184,33 @@ func (s *ApplicationService) Delete(ctx context.Context, userID string, id uint)
 	if err := s.db.WithContext(ctx).Where("application_id = ?", app.ID).Order("name asc").Find(&projects).Error; err != nil {
 		return err
 	}
+	var deps []model.ManagedDependency
+	if err := s.db.WithContext(ctx).Where("application_id = ?", app.ID).Order("name asc").Find(&deps).Error; err != nil {
+		return err
+	}
 	var failures []string
 	for i := range projects {
 		project := projects[i]
 		_ = s.db.WithContext(ctx).Model(&project).Update("auto_deploy", false).Error
 		if err := s.projects.DeleteProject(ctx, &project); err != nil {
 			failures = append(failures, fmt.Sprintf("%s: %s", project.Name, err.Error()))
+		}
+	}
+	if s.dependencies != nil && s.dependencies.k8s != nil {
+		for i := range deps {
+			dep := deps[i]
+			if dep.DeployMethod != model.DependencyDeployMethodExternal {
+				if err := s.dependencies.k8s.DeleteArgoCDApplication(ctx, dependencyRootArgoApplicationName(app.Name, dep.Name)); err != nil {
+					failures = append(failures, fmt.Sprintf("%s argo: %s", dep.Name, err.Error()))
+				}
+			}
+		}
+		if canDelete, err := s.canDeleteApplicationNamespace(ctx, app); err != nil {
+			failures = append(failures, fmt.Sprintf("namespace check: %s", err.Error()))
+		} else if canDelete {
+			if err := s.dependencies.k8s.DeleteNamespace(ctx, app.Namespace); err != nil {
+				failures = append(failures, fmt.Sprintf("namespace %s: %s", app.Namespace, err.Error()))
+			}
 		}
 	}
 	if len(failures) > 0 {
@@ -205,6 +226,38 @@ func (s *ApplicationService) Delete(ctx context.Context, userID string, id uint)
 		}
 		return tx.Delete(&app).Error
 	})
+}
+
+func (s *ApplicationService) canDeleteApplicationNamespace(ctx context.Context, app model.Application) (bool, error) {
+	namespace := strings.TrimSpace(app.Namespace)
+	if namespace == "" {
+		return false, nil
+	}
+	var appCount int64
+	if err := s.db.WithContext(ctx).Model(&model.Application{}).
+		Where("namespace = ? AND id <> ?", namespace, app.ID).
+		Count(&appCount).Error; err != nil {
+		return false, err
+	}
+	if appCount > 0 {
+		return false, nil
+	}
+	var projectCount int64
+	if err := s.db.WithContext(ctx).Model(&model.Project{}).
+		Where("namespace = ? AND (application_id IS NULL OR application_id <> ?)", namespace, app.ID).
+		Count(&projectCount).Error; err != nil {
+		return false, err
+	}
+	if projectCount > 0 {
+		return false, nil
+	}
+	var depCount int64
+	if err := s.db.WithContext(ctx).Model(&model.ManagedDependency{}).
+		Where("namespace = ? AND application_id <> ?", namespace, app.ID).
+		Count(&depCount).Error; err != nil {
+		return false, err
+	}
+	return depCount == 0, nil
 }
 
 func normalizeMonorepoApplicationRequest(req *dto.CreateMonorepoApplicationRequest) {

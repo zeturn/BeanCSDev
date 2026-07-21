@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/go-github/v62/github"
 	"github.com/zeturn/beancs-controller/internal/model"
@@ -120,12 +121,8 @@ func (s *GitOpsService) CommitDependencyManifests(ctx context.Context, token str
 	client := github.NewClient(nil).WithAuthToken(token)
 	files := s.RenderDependencyManifests(app, dep, def)
 	msg := fmt.Sprintf("beancs: add %s dependency %s", app.Name, dep.Name)
-	for p, content := range files {
-		if err := putFile(ctx, client, owner, repo, p, content, msg); err != nil {
-			return err
-		}
-	}
-	return nil
+	_, err = commitFilesAtomically(ctx, client, owner, repo, files, msg)
+	return err
 }
 
 // UpdateImageTag updates only the newTag field in the overlay kustomization.yaml.
@@ -1138,6 +1135,27 @@ func projectVolumeClaimName(projectName, volumeName string) string {
 }
 
 func commitFilesAtomically(ctx context.Context, client *github.Client, owner, repo string, files map[string]string, message string) (string, error) {
+	const maxAttempts = 5
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		sha, err := commitFilesAtomicallyOnce(ctx, client, owner, repo, files, message)
+		if err == nil {
+			return sha, nil
+		}
+		if !isGitHubReferenceConflict(err) {
+			return "", err
+		}
+		lastErr = err
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(time.Duration(attempt+1) * 250 * time.Millisecond):
+		}
+	}
+	return "", lastErr
+}
+
+func commitFilesAtomicallyOnce(ctx context.Context, client *github.Client, owner, repo string, files map[string]string, message string) (string, error) {
 	repository, _, err := client.Repositories.Get(ctx, owner, repo)
 	if err != nil {
 		return "", fmt.Errorf("read gitops repository: %w", err)

@@ -78,13 +78,33 @@ func (m *Manager) CreateNamespace(ctx context.Context, name, projectName string)
 	if err := m.ensure(); err != nil {
 		return err
 	}
-	_, err := m.Clientset.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: Labels(projectName)},
-	}, metav1.CreateOptions{})
-	if apierrors.IsAlreadyExists(err) {
-		return nil
+	for attempt := 0; attempt < 60; attempt++ {
+		_, err := m.Clientset.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Labels: Labels(projectName)},
+		}, metav1.CreateOptions{})
+		if err == nil {
+			return nil
+		}
+		if !apierrors.IsAlreadyExists(err) {
+			return err
+		}
+		current, getErr := m.Clientset.CoreV1().Namespaces().Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(getErr) {
+			continue
+		}
+		if getErr != nil {
+			return getErr
+		}
+		if current.DeletionTimestamp == nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Second):
+		}
 	}
-	return err
+	return fmt.Errorf("namespace %s is still terminating", name)
 }
 
 func (m *Manager) DeleteNamespace(ctx context.Context, name string) error {

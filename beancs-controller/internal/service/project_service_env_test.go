@@ -47,7 +47,7 @@ func TestBasaltPassRuntimeEnvKeepsExplicitCompatibilityAlias(t *testing.T) {
 		"BASALTPASS_OAUTH_REDIRECT_URI": "https://app.example.com/custom/callback",
 	})
 
-	assertEnv(t, env, "BASALTPASS_REDIRECT_URI", "http://demo.proj-demo.svc.cluster.local/callback")
+	assertEnv(t, env, "BASALTPASS_REDIRECT_URI", "https://app.example.com/custom/callback")
 	assertEnv(t, env, "BASALTPASS_OAUTH_REDIRECT_URI", "https://app.example.com/custom/callback")
 }
 
@@ -78,6 +78,44 @@ func TestBasaltPassComponentRuntimeBaseEnvUsesCallbackPath(t *testing.T) {
 	assertEnv(t, env, "APP_MODE", "prod")
 	assertEnv(t, env, "BASALTPASS_ENABLED", "true")
 	assertEnv(t, env, "BASALTPASS_REDIRECT_URI", "https://demo.example.com/api/auth/basaltpass/callback/")
+}
+
+func TestBasaltPassComponentRuntimeBaseEnvPrefersExplicitRedirectURI(t *testing.T) {
+	project := &model.Project{
+		Name:           "demo",
+		Namespace:      "proj-demo",
+		Domain:         "demo.example.com",
+		BasaltClientID: "client-id",
+	}
+
+	env := basaltPassComponentRuntimeBaseEnv(project, &dto.BasaltPassComponentConfig{
+		CallbackPath: "/internal/callback",
+		RedirectURIs: []string{
+			"https://public.example.com/api/auth/callback",
+		},
+	}, map[string]string{})
+
+	assertEnv(t, env, "BASALTPASS_REDIRECT_URI", "https://public.example.com/api/auth/callback")
+	assertEnv(t, env, "BASALTPASS_OAUTH_REDIRECT_URI", "https://public.example.com/api/auth/callback")
+	assertEnv(t, env, "BASALT_REDIRECT_URI", "https://public.example.com/api/auth/callback")
+}
+
+func TestBasaltPassComponentRuntimeBaseEnvKeepsExistingRedirectEnv(t *testing.T) {
+	project := &model.Project{
+		Name:           "demo",
+		Namespace:      "proj-demo",
+		Domain:         "demo.example.com",
+		BasaltClientID: "client-id",
+	}
+
+	env := basaltPassComponentRuntimeBaseEnv(project, &dto.BasaltPassComponentConfig{
+		RedirectURIs: []string{"https://public.example.com/api/auth/callback"},
+	}, map[string]string{
+		"BASALTPASS_REDIRECT_URI": "https://override.example.com/callback",
+	})
+
+	assertEnv(t, env, "BASALTPASS_REDIRECT_URI", "https://override.example.com/callback")
+	assertEnv(t, env, "BASALTPASS_OAUTH_REDIRECT_URI", "https://public.example.com/api/auth/callback")
 }
 
 func assertEnv(t *testing.T, env map[string]string, key, want string) {

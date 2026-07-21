@@ -925,6 +925,12 @@ func basaltPassRuntimeEnv(inst *model.BasaltPassInstance, project *model.Project
 	baseURL := strings.TrimRight(inst.BaseURL, "/")
 	redirectURI := strings.TrimSpace(out["BASALTPASS_REDIRECT_URI"])
 	if redirectURI == "" {
+		redirectURI = strings.TrimSpace(out["BASALTPASS_OAUTH_REDIRECT_URI"])
+	}
+	if redirectURI == "" {
+		redirectURI = strings.TrimSpace(out["BASALT_REDIRECT_URI"])
+	}
+	if redirectURI == "" {
 		redirectURI = projectHome(project) + "/callback"
 	}
 	out["BASALTPASS_BASE_URL"] = baseURL
@@ -964,13 +970,28 @@ func basaltPassComponentRuntimeBaseEnv(project *model.Project, cfg *dto.BasaltPa
 	}
 	setDefaultEnv(out, "BASALTPASS_ENABLED", "true")
 	setDefaultEnv(out, "BASALTPASS_OAUTH_ENABLED", "true")
-	if cfg != nil && strings.TrimSpace(cfg.CallbackPath) != "" {
-		redirectURI := joinURLPath(projectHome(project), cfg.CallbackPath)
-		out["BASALTPASS_REDIRECT_URI"] = redirectURI
+	redirectURI := ""
+	if cfg != nil {
+		redirectURI = firstNonEmptyString(cfg.RedirectURIs)
+		if redirectURI == "" && strings.TrimSpace(cfg.CallbackPath) != "" {
+			redirectURI = joinURLPath(projectHome(project), cfg.CallbackPath)
+		}
+	}
+	if redirectURI != "" {
+		setDefaultEnv(out, "BASALTPASS_REDIRECT_URI", redirectURI)
 		setDefaultEnv(out, "BASALTPASS_OAUTH_REDIRECT_URI", redirectURI)
 		setDefaultEnv(out, "BASALT_REDIRECT_URI", redirectURI)
 	}
 	return out
+}
+
+func firstNonEmptyString(values []string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func setDefaultEnv(env map[string]string, key, value string) {
