@@ -10,7 +10,6 @@ import {
   ProgressEvidence,
   ProgressStatusIcon,
   MetricCard,
-  Select,
   Button,
   Input,
 } from "../components/index";
@@ -69,7 +68,6 @@ export default function ProgressView({
   projects,
   processes,
   activeProcessID,
-  setActiveProcessID,
   activeProjectID,
   setActiveProjectID,
   progress,
@@ -81,6 +79,8 @@ export default function ProgressView({
   logStatus,
   onStartLogFollow,
   onStopLogFollow,
+  initialListFilter = "all",
+  onOpenProcess,
 }) {
   const [activeJob, setActiveJob] = useState("runtime");
   const [expandedSteps, setExpandedSteps] = useState({});
@@ -168,10 +168,11 @@ export default function ProgressView({
       <ProgressListView
         processes={processes || []}
         projects={projects}
+        initialFilter={initialListFilter}
         onSelectProcess={(process) => {
-          setActiveProcessID(String(process.id));
           if (process.project_id)
             setActiveProjectID(String(process.project_id));
+          onOpenProcess?.(process);
         }}
       />
     );
@@ -202,25 +203,6 @@ export default function ProgressView({
                 ? ` · ${t("checked {time}", { time: formatTime(progress.checked_at) })}`
                 : ""}
           </p>
-        </div>
-        <div className="progress-controls">
-          <Select
-            value={activeProcessID}
-            onChange={(event) => {
-              const next = (processes || []).find(
-                (process) => String(process.id) === event.target.value,
-              );
-              setActiveProcessID(event.target.value);
-              if (next?.project_id) setActiveProjectID(String(next.project_id));
-            }}
-          >
-            <option value="">{t("Choose process")}</option>
-            {(processes || []).map((process) => (
-              <option key={process.id} value={process.id}>
-                #{process.id} {process.project?.name || process.title}
-              </option>
-            ))}
-          </Select>
         </div>
       </section>
 

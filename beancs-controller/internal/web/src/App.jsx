@@ -56,7 +56,6 @@ import {
   AlertTriangle,
   Bell,
   Boxes,
-  Box,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -168,7 +167,22 @@ function viewForPath(pathname) {
   if (normalized.startsWith(`${viewPaths.projects}/`)) {
     return "projectDetail";
   }
+  if (normalized === viewPaths.deployments) {
+    return "progress";
+  }
+  if (normalized.startsWith(`${viewPaths.progress}/`)) {
+    return "progress";
+  }
   return viewsByPath[normalized] || "dashboard";
+}
+
+function progressListFilterForRoute(pathname, search) {
+  const normalized =
+    pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
+  const params = new URLSearchParams(search);
+  return normalized === viewPaths.deployments || params.get("type") === "deployment"
+    ? "deployments"
+    : "all";
 }
 
 function isKnownViewPath(pathname) {
@@ -177,16 +191,27 @@ function isKnownViewPath(pathname) {
   return (
     Boolean(viewsByPath[normalized]) ||
     normalized.startsWith(`${viewPaths.applications}/`) ||
-    normalized.startsWith(`${viewPaths.projects}/`)
+    normalized.startsWith(`${viewPaths.projects}/`) ||
+    normalized.startsWith(`${viewPaths.progress}/`)
   );
 }
 
 function progressPath(projectID = "", processID = "") {
+  if (processID) {
+    return `${pathForView("progress")}/${encodeURIComponent(String(processID))}`;
+  }
   const params = new URLSearchParams();
   if (projectID) params.set("project", String(projectID));
-  if (processID) params.set("process", String(processID));
   const query = params.toString();
   return `${pathForView("progress")}${query ? `?${query}` : ""}`;
+}
+
+function progressProcessIDForPath(pathname) {
+  const normalized =
+    pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
+  const prefix = `${viewPaths.progress}/`;
+  if (!normalized.startsWith(prefix)) return "";
+  return decodeURIComponent(normalized.slice(prefix.length));
 }
 
 function applicationDetailPath(applicationID) {
@@ -246,11 +271,6 @@ const navSections = [
         id: "progress",
         label: "Progress",
         icon: LoaderCircle,
-      },
-      {
-        id: "deployments",
-        label: "Deployments",
-        icon: Box,
       },
       {
         id: "pods",
@@ -392,7 +412,6 @@ import AlertsView from "./views/AlertsView";
 import EventsView from "./views/EventsView";
 import MetricsView from "./views/MetricsView";
 import LogsView from "./views/LogsView";
-import DeploymentsView from "./views/DeploymentsView";
 import DependenciesView from "./views/DependenciesView";
 import ProjectsView from "./views/ProjectsView";
 import ProjectDetailView from "./views/ProjectDetailView";
@@ -425,6 +444,10 @@ function App() {
   );
   const [basaltProfile, setBasaltProfile] = useState(null);
   const view = viewForPath(routeLocation.pathname);
+  const progressInitialFilter = progressListFilterForRoute(
+    routeLocation.pathname,
+    routeLocation.search,
+  );
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -605,14 +628,46 @@ function App() {
   useEffect(() => {
     if (!["progress", "logs"].includes(view)) return;
     const params = new URLSearchParams(routeLocation.search);
+    const pathProcessID =
+      view === "progress"
+        ? progressProcessIDForPath(routeLocation.pathname)
+        : "";
     const projectID = params.get("project") || "";
-    const processID = params.get("process") || "";
-    if (projectID !== activeProgressProjectID) {
+    const queryProcessID = params.get("process") || "";
+    if (view === "progress" && !pathProcessID && queryProcessID) {
       setActiveProgressProjectID(projectID);
+      setActiveProcessID(queryProcessID);
+      navigate(progressPath(projectID, queryProcessID), { replace: true });
+      return;
+    }
+    const processID = pathProcessID || queryProcessID;
+    const nextProjectID =
+      pathProcessID && !projectID ? activeProgressProjectID : projectID;
+    if (nextProjectID !== activeProgressProjectID) {
+      setActiveProgressProjectID(nextProjectID);
       setProjectProgress(null);
     }
     if (processID !== activeProcessID) setActiveProcessID(processID);
-  }, [view, routeLocation.search]);
+  }, [
+    view,
+    routeLocation.pathname,
+    routeLocation.search,
+    navigate,
+    activeProgressProjectID,
+    activeProcessID,
+  ]);
+
+  useEffect(() => {
+    if (!activeProcessID) return;
+    const selected = (processRecords || []).find(
+      (process) => String(process.id) === String(activeProcessID),
+    );
+    const projectID = selected?.project_id ? String(selected.project_id) : "";
+    if (projectID && projectID !== activeProgressProjectID) {
+      setActiveProgressProjectID(projectID);
+      setProjectProgress(null);
+    }
+  }, [activeProcessID, activeProgressProjectID, processRecords]);
 
   useEffect(() => {
     const query = new URLSearchParams(routeLocation.search);
@@ -3061,7 +3116,6 @@ function App() {
                 projects={projects}
                 processes={processRecords}
                 activeProcessID={activeProcessID}
-                setActiveProcessID={setActiveProcessID}
                 activeProjectID={activeProgressProjectID}
                 setActiveProjectID={setActiveProgressProjectID}
                 progress={projectProgress}
@@ -3073,6 +3127,10 @@ function App() {
                 logStatus={projectLogStatus}
                 onStartLogFollow={startProjectLogFollow}
                 onStopLogFollow={stopProjectLogFollow}
+                initialListFilter={progressInitialFilter}
+                onOpenProcess={(process) => {
+                  openProgress(process.project_id, process.id);
+                }}
               />
             )}
             {view === "projects" && (
@@ -3122,17 +3180,6 @@ function App() {
                 onTracking={openProjectTracking}
                 onProgress={(project) => {
                   openProgress(project.id);
-                }}
-              />
-            )}
-            {view === "deployments" && (
-              <DeploymentsView
-                projects={projects}
-                processes={processRecords}
-                runtimeDeployments={runtime.deployments || []}
-                refresh={loadWorkspace}
-                onOpenProcess={(process) => {
-                  openProgress(process.project_id, process.id);
                 }}
               />
             )}

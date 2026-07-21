@@ -54,10 +54,42 @@ export default function ProgressListView({
   processes,
   projects,
   onSelectProcess,
+  initialFilter = "all",
 }) {
+  const [filter, setFilter] = useState(initialFilter);
+  useEffect(() => {
+    setFilter(initialFilter);
+  }, [initialFilter]);
+  const visibleProcesses =
+    filter === "deployments"
+      ? (processes || []).filter((process) => process.type === "deployment")
+      : processes || [];
+  const deploymentCount = (processes || []).filter(
+    (process) => process.type === "deployment",
+  ).length;
   return (
     <div className="stack progress-list-page">
       <section className="progress-list-panel">
+        <div className="progress-list-tabs" role="tablist">
+          <button
+            type="button"
+            className={filter === "all" ? "progress-filter active" : "progress-filter"}
+            onClick={() => setFilter("all")}
+          >
+            {t("All processes")} <b>{(processes || []).length}</b>
+          </button>
+          <button
+            type="button"
+            className={
+              filter === "deployments"
+                ? "progress-filter active"
+                : "progress-filter"
+            }
+            onClick={() => setFilter("deployments")}
+          >
+            {t("Deployments")} <b>{deploymentCount}</b>
+          </button>
+        </div>
         <div className="progress-list-head">
           <span>{t("Process")}</span>
           <span>{t("Project")}</span>
@@ -65,7 +97,7 @@ export default function ProgressListView({
           <span>{t("Status")}</span>
           <span />
         </div>
-        {(processes || []).map((process) => (
+        {visibleProcesses.map((process) => (
           <button
             type="button"
             className="progress-list-row"
@@ -88,10 +120,12 @@ export default function ProgressListView({
             <span>{t("Open")}</span>
           </button>
         ))}
-        {(processes || []).length === 0 && (
+        {visibleProcesses.length === 0 && (
           <div className="empty">
             {(projects || []).length
-              ? t("No deployment process records yet.")
+              ? filter === "deployments"
+                ? t("No deployment process records yet.")
+                : t("No process records yet.")
               : t("No projects yet.")}
           </div>
         )}

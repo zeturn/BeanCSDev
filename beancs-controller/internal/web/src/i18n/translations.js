@@ -374,8 +374,10 @@ export const zh = {
   "Production MySQL": "生产 MySQL",
 
   // ---- Progress view ----
+  "All processes": "全部流程",
   "Process": "流程",
   "Open": "打开",
+  "No process records yet.": "暂无流程记录。",
   "No deployment process records yet.": "暂无部署流程记录。",
   "Deployment process": "部署流程",
   "Choose a process": "选择流程",

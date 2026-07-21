@@ -2509,6 +2509,44 @@ button.domain-tile {
   font-size: 15px;
 }
 
+.progress-list-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  margin: 14px 18px 0;
+  padding: 4px;
+  border: 1px solid var(--wc-border-default);
+  border-radius: 8px;
+  background: var(--wc-surface-subtle);
+}
+
+button.progress-filter {
+  min-height: 32px;
+  gap: 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--wc-text-secondary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+button.progress-filter.active {
+  background: var(--wc-surface-raised);
+  color: var(--wc-text-primary);
+  box-shadow: var(--wc-shadow-sm);
+}
+
+button.progress-filter b {
+  min-width: 22px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--wc-action-hover);
+  color: var(--wc-text-primary);
+  font-size: 12px;
+}
+
 .progress-list-head,
 .progress-list-row {
   display: grid;
@@ -4047,10 +4085,24 @@ textarea {
   text-align: left;
 }
 
+button.application-detail-row-button,
+button.progress-list-row,
+button.deployment-row {
+  display: grid;
+  justify-content: stretch;
+  justify-items: stretch;
+  align-items: center;
+  gap: 14px;
+  border-radius: 0;
+  font: inherit;
+  text-align: left;
+}
+
 .application-detail-row-button {
   padding: 10px;
 }
 
+button.progress-list-row,
 .progress-list-row {
   grid-template-columns: minmax(180px, 1.2fr) minmax(180px, 1.2fr) minmax(
       140px,
@@ -4058,6 +4110,24 @@ textarea {
     ) minmax(100px, 0.6fr) auto;
   min-height: 62px;
   padding: 12px 18px;
+}
+
+button.progress-list-row > span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+button.progress-list-row b,
+button.progress-list-row small {
+  display: block;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tr {
