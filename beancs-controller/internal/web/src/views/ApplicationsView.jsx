@@ -1,12 +1,10 @@
 import React from "react";
 import {
   Box,
-  ChevronLeft,
   Database,
   GitBranch,
   Globe2,
   Layers3,
-  Trash2,
 } from "lucide-react";
 import { t } from "../i18n/index";
 import { Button } from "../components/index";
@@ -36,79 +34,46 @@ export default function ApplicationsView({
 
   return (
     <div className="stack">
-      <section className="panel">
-        <div className="section-head">
-          <h2>
-            <Layers3 size={16} /> {t("Applications")}
-          </h2>
-          <span className="muted">
-            {t("{count} total", { count: (applications || []).length })}
-          </span>
-        </div>
-        <div className="application-grid">
-          {(applications || []).map((application) => (
-            <div
-              className="application-card application-card-button"
-              key={application.id}
-              role="button"
-              tabIndex={0}
-              onClick={() => onOpenApplication?.(application)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  onOpenApplication?.(application);
-                }
-              }}
-            >
-              <div className="component-card-head">
-                <div>
-                  <b>{application.display_name || application.name}</b>
-                  <small>{application.github_repo || application.type}</small>
-                </div>
-                <Button
-                  type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onDeleteApplication(application);
-                  }}
-                  title={t("Delete application")}
-                  variant="danger"
-                >
-                  <Trash2 size={15} /> {t("Delete")}
-                </Button>
+      <div className="list-meta">
+        <span className="muted">
+          {t("{count} total", { count: (applications || []).length })}
+        </span>
+      </div>
+      <div className="application-grid">
+        {(applications || []).map((application) => (
+          <div
+            className="application-card application-card-button"
+            key={application.id}
+            role="button"
+            tabIndex={0}
+            onClick={() => onOpenApplication?.(application)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onOpenApplication?.(application);
+              }
+            }}
+          >
+            <div className="application-card-title">
+              <div>
+                <b>{application.display_name || application.name}</b>
+                <small>{application.github_repo || application.type}</small>
               </div>
               <span className="status-chip">{application.status || "-"}</span>
-              <div className="signal-list">
-                <span>
-                  {t("{count} projects", {
-                    count: (application.projects || []).length,
-                  })}
-                </span>
-                <span>
-                  {t("{count} dependencies", {
-                    count: (application.dependencies || []).length,
-                  })}
-                </span>
-              </div>
-              {(application.dependencies || []).length > 0 && (
-                <div className="dependency-summary-list">
-                  {(application.dependencies || []).map((dependency) => (
-                    <span key={dependency.id}>
-                      {dependency.name}
-                      <small>
-                        {dependency.type} · {dependency.status}
-                      </small>
-                    </span>
-                  ))}
-                </div>
-              )}
             </div>
-          ))}
-          {(applications || []).length === 0 && (
-            <div className="empty">{t("No applications yet.")}</div>
-          )}
-        </div>
-      </section>
+            <div className="signal-list">
+              <span>
+                {t("{count} projects", {
+                  count: (application.projects || []).length,
+                })}
+              </span>
+            </div>
+          </div>
+        ))}
+        {(applications || []).length === 0 && (
+          <div className="empty">{t("No applications yet.")}</div>
+        )}
+      </div>
     </div>
   );
 }
@@ -131,7 +96,7 @@ function ApplicationDetailView({
               <Layers3 size={16} /> {t("Application")}
             </h2>
             <Button type="button" onClick={onBack}>
-              <ChevronLeft size={15} /> {t("Back")}
+              {t("Applications")}
             </Button>
           </div>
           <div className="empty">
@@ -162,9 +127,6 @@ function ApplicationDetailView({
             </p>
           </div>
           <span className="row-actions">
-            <Button type="button" onClick={onBack}>
-              <ChevronLeft size={15} /> {t("Back")}
-            </Button>
             <Button
               type="button"
               onClick={() => onDeleteApplication(application)}
@@ -179,10 +141,6 @@ function ApplicationDetailView({
           <DetailStat label={t("Status")} value={application.status || "-"} />
           <DetailStat label={t("Namespace")} value={application.namespace || "-"} />
           <DetailStat label={t("Projects")} value={String(projects.length)} />
-          <DetailStat
-            label={t("Dependencies")}
-            value={String(dependencies.length)}
-          />
         </div>
       </section>
 

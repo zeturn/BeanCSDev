@@ -1,4 +1,3 @@
-import { Button } from "../components/index";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as LucideIcons from "lucide-react";
 import { formatTime } from "../utils/index";
@@ -67,7 +66,7 @@ export default function ProgressListView({
           <span />
         </div>
         {(processes || []).map((process) => (
-          <Button
+          <button
             type="button"
             className="progress-list-row"
             key={process.id}
@@ -87,7 +86,7 @@ export default function ProgressListView({
             <span>{process.type || "-"}</span>
             <span>{process.status || "-"}</span>
             <span>{t("Open")}</span>
-          </Button>
+          </button>
         ))}
         {(processes || []).length === 0 && (
           <div className="empty">

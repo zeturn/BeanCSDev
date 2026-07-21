@@ -117,21 +117,7 @@ export default function NetworkingView({
   ];
   return (
     <div className="stack network-page">
-      <section className="panel network-overview">
-        <div className="action-panel">
-          <div>
-            <h2>
-              <Network size={18} /> Service and network management
-            </h2>
-            <p>
-              Manage Service, Ingress, Endpoint, NetworkPolicy, Traefik,
-              Tailscale and TLS bindings from one operational view.
-            </p>
-          </div>
-          <Button onClick={refresh}>
-            <RefreshCw size={15} /> Refresh
-          </Button>
-        </div>
+      <section className="network-overview">
         <div className="dashboard-kpis">
           <MetricCard
             icon={Database}

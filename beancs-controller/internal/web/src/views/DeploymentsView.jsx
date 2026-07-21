@@ -1,4 +1,3 @@
-import { Button } from "../components/index";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { t } from "../i18n/index";
 import * as LucideIcons from "lucide-react";
@@ -125,7 +124,7 @@ export default function DeploymentsView({
     <section className="deployments-page">
       <div className="deployment-list">
         {rows.map((row) => (
-          <Button
+          <button
             type="button"
             className="deployment-row"
             key={row.id}
@@ -163,7 +162,7 @@ export default function DeploymentsView({
               {formatDeploymentDate(row.created)} by {row.author}
               <span className="mini-avatar" />
             </span>
-          </Button>
+          </button>
         ))}
         {rows.length === 0 && (
           <div className="empty">{t("No deployments found.")}</div>

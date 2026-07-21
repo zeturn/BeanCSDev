@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter, useLocation, useNavigate } from "react-router-dom";
 import {
   LocaleProvider as WatercolorLocaleProvider,
+  Snackbar as WatercolorSnackbar,
   ThemeProvider as WatercolorThemeProvider,
 } from "@zeturn/watercolor-react";
 import "@zeturn/watercolor-react/style.css";
@@ -2878,12 +2879,20 @@ function App() {
           title={
             view === "dashboard"
               ? dashboard?.cluster_name || t("Overview")
+              : view === "applicationDetail"
+                ? selectedApplication?.display_name ||
+                  selectedApplication?.name ||
+                  t("Application")
               : titleFor(view)
           }
           topLabel={view === "dashboard" ? t("Overview") : undefined}
           subtitle={
             view === "dashboard"
               ? `Kubernetes ${dashboard?.kubernetes_version || "-"}${dashboard?.k3s_version ? ` · K3s ${dashboard.k3s_version}` : ""}`
+              : view === "applicationDetail"
+                ? selectedApplication
+                  ? `${selectedApplication.github_repo || selectedApplication.type || "-"}${selectedApplication.github_branch ? ` · ${selectedApplication.github_branch}` : ""}`
+                  : t("Loading application...")
               : subtitleFor(view, runtime, projects)
           }
           actions={
@@ -2894,8 +2903,24 @@ function App() {
             )
           }
         />
-        {notice && <div className="notice">{notice}</div>}
-        {error && <div className="alert">{error}</div>}
+        <WatercolorSnackbar
+          open={Boolean(notice)}
+          message={notice}
+          severity="success"
+          closable
+          showIcon
+          autoHideDuration={4200}
+          onClose={() => setNotice("")}
+        />
+        <WatercolorSnackbar
+          open={Boolean(error)}
+          message={error}
+          severity="error"
+          closable
+          showIcon
+          autoHideDuration={7000}
+          onClose={() => setError("")}
+        />
         {shouldShowSkeleton(view, dashboard, network) ? (
           <SkeletonPage />
         ) : (
