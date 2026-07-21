@@ -2754,8 +2754,13 @@ function App() {
               </span>
             </div>
           ) : (
-            <Button onClick={startLogin} variant="primary" disabled={!config}>
-              <Lock size={18} /> {t("Sign in with BasaltPass")}
+            <Button
+              onClick={startLogin}
+              variant="primary"
+              disabled={!config}
+              startIcon={<Lock size={18} />}
+            >
+              {t("Sign in with BasaltPass")}
             </Button>
           )}
           {error && <p className="error-text">{error}</p>}

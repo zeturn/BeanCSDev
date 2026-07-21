@@ -1,12 +1,70 @@
 import React from "react";
 import { X } from "lucide-react";
-import { Button as WatercolorButton, Modal as WatercolorModal } from "@zeturn/watercolor-react";
+import {
+  Button as WatercolorButton,
+  Modal as WatercolorModal,
+} from "@zeturn/watercolor-react";
+
+function isIconElement(child) {
+  if (!React.isValidElement(child)) return false;
+  if (child.type === "svg") return true;
+  if (typeof child.type === "string") return false;
+  return Boolean(child.props?.size || child.props?.strokeWidth);
+}
+
+function trimContent(children) {
+  const items = React.Children.toArray(children);
+  while (items.length && typeof items[0] === "string" && !items[0].trim()) {
+    items.shift();
+  }
+  while (
+    items.length &&
+    typeof items[items.length - 1] === "string" &&
+    !items[items.length - 1].trim()
+  ) {
+    items.pop();
+  }
+  if (items.length === 1) return items[0];
+  return items;
+}
+
+function splitButtonContent(children, startIcon, endIcon, variant) {
+  const items = React.Children.toArray(children);
+  if (variant === "icon" || startIcon || endIcon || items.length < 2) {
+    return { content: children, startIcon, endIcon };
+  }
+
+  let contentItems = items;
+  let resolvedStartIcon = startIcon;
+  let resolvedEndIcon = endIcon;
+
+  if (isIconElement(contentItems[0])) {
+    resolvedStartIcon = contentItems[0];
+    contentItems = contentItems.slice(1);
+  }
+
+  if (!resolvedEndIcon && contentItems.length > 1) {
+    const lastItem = contentItems[contentItems.length - 1];
+    if (isIconElement(lastItem)) {
+      resolvedEndIcon = lastItem;
+      contentItems = contentItems.slice(0, -1);
+    }
+  }
+
+  return {
+    content: trimContent(contentItems),
+    startIcon: resolvedStartIcon,
+    endIcon: resolvedEndIcon,
+  };
+}
 
 export function Button({
   children,
   className,
   variant,
   type = "button",
+  startIcon,
+  endIcon,
   ...props
 }) {
   const wcProps =
@@ -17,6 +75,7 @@ export function Button({
         : variant === "ghost"
           ? { variant: "filled", buttonStyle: "outlined" }
           : { variant: "filled", buttonStyle: "outlined" };
+  const buttonContent = splitButtonContent(children, startIcon, endIcon, variant);
   let btnClass = `beancs-button ${className || ""}`.trim();
   if (variant === "primary") btnClass = `primary ${btnClass}`.trim();
   else if (variant === "danger") btnClass = `danger-button ${btnClass}`.trim();
@@ -27,12 +86,14 @@ export function Button({
     <WatercolorButton
       type={type}
       size="sm"
-      rounded={false}
+      rounded="lg"
       className={btnClass || undefined}
+      startIcon={buttonContent.startIcon}
+      endIcon={buttonContent.endIcon}
       {...wcProps}
       {...props}
     >
-      {children}
+      {buttonContent.content}
     </WatercolorButton>
   );
 }

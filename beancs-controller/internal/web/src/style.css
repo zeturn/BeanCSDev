@@ -93,6 +93,22 @@ button:disabled {
   cursor: not-allowed;
 }
 
+.beancs-button {
+  flex-direction: row;
+  border-radius: var(--bc-radius);
+}
+
+.beancs-button .wc-btn__start-icon,
+.beancs-button .wc-btn__end-icon,
+.beancs-button .wc-btn__content {
+  display: inline-flex;
+  align-items: center;
+}
+
+.beancs-button .wc-btn__content {
+  gap: 6px;
+}
+
 .primary:not(.beancs-button) {
   background: var(--wc-accent);
   border-color: var(--wc-accent);
@@ -3661,7 +3677,7 @@ button:not(.beancs-button):hover {
   min-width: 30px;
   min-height: 30px;
   padding: 0;
-  border-radius: 999px;
+  border-radius: var(--bc-radius);
   background: var(--wc-surface-raised);
 }
 
