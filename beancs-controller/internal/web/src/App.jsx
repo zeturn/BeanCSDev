@@ -3141,8 +3141,6 @@ function App() {
               <DependenciesView
                 definitions={dependencyDefinitions}
                 dependencies={reusableDependencies}
-                githubCredentials={credentials.github}
-                onCreateDependency={createDependency}
                 onCreateCredential={createDependencyCredential}
               />
             )}
