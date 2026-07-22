@@ -511,8 +511,9 @@ button.ghost:not(.beancs-button):hover,
 
 .method-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+  max-width: 980px;
 }
 
 .method-card {
@@ -522,6 +523,19 @@ button.ghost:not(.beancs-button):hover,
   flex-direction: column;
   text-align: left;
   padding: 14px;
+}
+
+.method-card .wc-btn__content {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  white-space: normal;
+}
+
+.method-card b,
+.method-card span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .method-card span {
@@ -1305,6 +1319,10 @@ button.ghost:not(.beancs-button):hover,
 }
 
 @media (max-width: 760px) {
+  .method-grid {
+    grid-template-columns: 1fr;
+  }
+
   .dependency-create-form,
   .dependency-credential-form {
     grid-template-columns: 1fr;
