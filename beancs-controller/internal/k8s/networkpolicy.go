@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 
 	"github.com/zeturn/beancs-controller/internal/model"
+	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 )
+
+const certManagerHTTP01SolverPort int32 = 8089
 
 func (m *Manager) ApplyNetworkPolicies(ctx context.Context, namespace, projectName, exposureMode string) error {
 	return m.ApplyNetworkPoliciesForPorts(ctx, namespace, projectName, model.ProjectPorts{{Name: "http", Port: 8080, Exposure: exposureMode}})
@@ -50,6 +53,9 @@ func (m *Manager) ApplyNetworkPoliciesForPorts(ctx context.Context, namespace, p
 			allow.Spec.Ingress = append(allow.Spec.Ingress, namespaceIngressPorts(ns, publicPorts))
 		}
 		allow.Spec.Ingress = append(allow.Spec.Ingress, publicIngressPorts(publicPorts))
+		if err := m.upsertNetworkPolicy(ctx, acmeHTTP01SolverNetworkPolicy(namespace, projectName, m.PublicIngressNamespaces)); err != nil {
+			return err
+		}
 	}
 	privatePorts := policyPortsForExposure(ports, model.ExposurePrivate)
 	if len(privatePorts) > 0 {
@@ -58,6 +64,29 @@ func (m *Manager) ApplyNetworkPoliciesForPorts(ctx context.Context, namespace, p
 		}
 	}
 	return m.upsertNetworkPolicy(ctx, allow)
+}
+
+func acmeHTTP01SolverNetworkPolicy(namespace, projectName string, ingressNamespaces []string) *networkingv1.NetworkPolicy {
+	peers := []networkingv1.NetworkPolicyPeer{{IPBlock: &networkingv1.IPBlock{CIDR: "0.0.0.0/0"}}}
+	for _, ns := range ingressNamespaces {
+		peers = append(peers, networkingv1.NetworkPolicyPeer{
+			NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": ns}},
+		})
+	}
+	return &networkingv1.NetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "allow-acme-http-solver", Namespace: namespace, Labels: Labels(projectName)},
+		Spec: networkingv1.NetworkPolicySpec{
+			PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{"acme.cert-manager.io/http01-solver": "true"}},
+			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
+			Ingress: []networkingv1.NetworkPolicyIngressRule{{
+				From: peers,
+				Ports: []networkingv1.NetworkPolicyPort{{
+					Protocol: ptr(corev1.ProtocolTCP),
+					Port:     &intstr.IntOrString{Type: intstr.Int, IntVal: certManagerHTTP01SolverPort},
+				}},
+			}},
+		},
+	}
 }
 
 func namespaceIngress(ns string) networkingv1.NetworkPolicyIngressRule {
@@ -91,6 +120,10 @@ func policyPortsForExposure(ports model.ProjectPorts, exposure string) []network
 		out = append(out, networkingv1.NetworkPolicyPort{Port: &intstr.IntOrString{Type: intstr.Int, IntVal: int32(p.Port)}})
 	}
 	return out
+}
+
+func ptr[T any](value T) *T {
+	return &value
 }
 
 func (m *Manager) upsertNetworkPolicy(ctx context.Context, np *networkingv1.NetworkPolicy) error {
