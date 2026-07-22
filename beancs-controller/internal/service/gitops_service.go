@@ -297,7 +297,7 @@ func updateKustomizeImageEntry(content string, project *model.Project, newImageR
 		break
 	}
 	if entryStart == -1 {
-		return content, false, false
+		return appendKustomizeImageEntry(content, newName, newTag), true, true
 	}
 	changed := false
 	hasNewName := false
@@ -335,6 +335,45 @@ func updateKustomizeImageEntry(content string, project *model.Project, newImageR
 		return content, true, false
 	}
 	return strings.Join(lines, "\n"), true, true
+}
+
+func appendKustomizeImageEntry(content string, newName string, newTag string) string {
+	lines := strings.Split(content, "\n")
+	imagesIdx := -1
+	for i, line := range lines {
+		if strings.TrimSpace(line) == "images:" {
+			imagesIdx = i
+			break
+		}
+	}
+	entry := []string{
+		"  - name: " + newName,
+		"    newName: " + newName,
+		"    newTag: " + newTag,
+	}
+	if imagesIdx == -1 {
+		if len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+			lines = lines[:len(lines)-1]
+		}
+		lines = append(lines, "images:")
+		lines = append(lines, entry...)
+		lines = append(lines, "")
+		return strings.Join(lines, "\n")
+	}
+	insertAt := imagesIdx + 1
+	for insertAt < len(lines) {
+		trimmed := strings.TrimSpace(lines[insertAt])
+		if trimmed == "" {
+			insertAt++
+			continue
+		}
+		if !strings.HasPrefix(lines[insertAt], " ") && !strings.HasPrefix(lines[insertAt], "\t") {
+			break
+		}
+		insertAt++
+	}
+	lines = append(lines[:insertAt], append(entry, lines[insertAt:]...)...)
+	return strings.Join(lines, "\n")
 }
 
 func imageEntryTargets(project *model.Project, newName string) map[string]bool {

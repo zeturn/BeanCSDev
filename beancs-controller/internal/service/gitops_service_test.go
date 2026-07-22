@@ -132,6 +132,31 @@ func TestUpdateKustomizeImageEntryReportsMatchWithoutChange(t *testing.T) {
 	}
 }
 
+func TestUpdateKustomizeImageEntryAppendsMissingComponentImage(t *testing.T) {
+	content := `resources:
+  - ../../base
+images:
+  - name: registry.beancs.com/tenant-2/issuetick-live-backend
+    newName: registry.beancs.com/tenant-2/issuetick-live-backend
+    newTag: beancs-20260722061624
+`
+	project := &model.Project{
+		Name:                   "issuetick-live-frontend",
+		RegistryImageReference: "registry.beancs.com/tenant-2/issuetick-live-frontend",
+	}
+
+	updated, matched, changed := updateKustomizeImageEntry(content, project, "registry.beancs.com/tenant-2/issuetick-live-frontend:beancs-20260722061633")
+
+	if !matched {
+		t.Fatal("expected missing frontend image entry to be appended")
+	}
+	if !changed {
+		t.Fatal("expected kustomization to change")
+	}
+	assertContains(t, updated, "registry.beancs.com/tenant-2/issuetick-live-backend\n    newName: registry.beancs.com/tenant-2/issuetick-live-backend\n    newTag: beancs-20260722061624")
+	assertContains(t, updated, "registry.beancs.com/tenant-2/issuetick-live-frontend\n    newName: registry.beancs.com/tenant-2/issuetick-live-frontend\n    newTag: beancs-20260722061633")
+}
+
 func TestRenderDependencyManifestsUsesExistingSecret(t *testing.T) {
 	service := NewGitOpsService(nil, nil)
 	registry, err := NewDependencyDefinitionRegistry()
