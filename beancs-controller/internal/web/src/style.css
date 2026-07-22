@@ -1242,8 +1242,71 @@ button.ghost:not(.beancs-button):hover,
 
 .dependency-create-form,
 .dependency-credential-form {
+  display: grid;
+  gap: 14px;
+}
+
+.component-grid.dependency-create-form {
   grid-template-columns: 180px minmax(0, 1fr);
   align-items: center;
+  gap: 10px 12px;
+}
+
+.dependency-form-section {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--wc-border-default);
+  border-radius: 8px;
+  background: var(--wc-surface-raised);
+}
+
+.dependency-form-section h3 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  color: var(--wc-text-primary);
+  font-size: 14px;
+}
+
+.dependency-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.dependency-choice {
+  min-height: 92px;
+  align-items: flex-start;
+  justify-content: flex-start;
+  flex-direction: column;
+  padding: 13px;
+  text-align: left;
+}
+
+.dependency-choice .wc-btn__content {
+  display: grid;
+  gap: 4px;
+  white-space: normal;
+}
+
+.dependency-choice span {
+  color: var(--wc-text-secondary);
+  font-size: 13px;
+}
+
+.dependency-choice.active {
+  border-color: var(--bc-primary-700);
+  background: var(--bc-primary-100);
+}
+
+.dependency-form-fields,
+.dependency-credential-form {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px 12px;
 }
 
 .dependency-entity-list {
@@ -1323,7 +1386,9 @@ button.ghost:not(.beancs-button):hover,
     grid-template-columns: 1fr;
   }
 
-  .dependency-create-form,
+  .dependency-choice-grid,
+  .dependency-form-fields,
+  .component-grid.dependency-create-form,
   .dependency-credential-form {
     grid-template-columns: 1fr;
   }

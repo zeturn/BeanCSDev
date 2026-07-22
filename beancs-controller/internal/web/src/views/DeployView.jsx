@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as LucideIcons from "lucide-react";
 import {
   canContinueDeployStep,
@@ -273,6 +273,7 @@ export default function DeployView({
   const [componentEditorIndex, setComponentEditorIndex] = useState(null);
   const [dependencyEditorIndex, setDependencyEditorIndex] = useState(null);
   const [dependencyLinksIndex, setDependencyLinksIndex] = useState(null);
+  const [dependencyDraft, setDependencyDraft] = useState({});
   const selectedCloudflareDomain = (domains || []).find(
     (domain) =>
       String(domain.credential_id) === String(form.cloudflare_credential_id) &&
@@ -354,6 +355,7 @@ export default function DeployView({
   };
   const setDeployTarget = (deployTarget) => {
     setAnalysis(null);
+    setDependencyDraft({});
     if (deployTarget === "basaltpass") {
       setForm({
         ...defaultDeployForm(),
@@ -536,6 +538,9 @@ export default function DeployView({
     });
     setDependencyEditorIndex(nextIndex);
   };
+  const updateDependencyDraft = useCallback((draft) => {
+    setDependencyDraft(draft || {});
+  }, []);
   const changeDependencySource = (index, dependency, source) => {
     if (source === "existing") {
       const match = (reusableDependencies || []).find(
@@ -693,6 +698,7 @@ export default function DeployView({
                 submitLabel="Deploy dependency"
                 embedded
                 showActions={false}
+                onDraftChange={updateDependencyDraft}
               />
             </div>
         )}
@@ -2353,6 +2359,70 @@ export default function DeployView({
           <div className="detail-list">
             <span>
               {t("Target")} <b>{t("Dependency")}</b>
+            </span>
+            <span>
+              {t("Location")}{" "}
+              <b>
+                {dependencyDraft.mode === "external"
+                  ? t("External service")
+                  : t("BeanCS cluster")}
+              </b>
+            </span>
+            <span>
+              {t("Type")} <b>{dependencyDraft.typeLabel || dependencyDraft.type || "-"}</b>
+            </span>
+            <span>
+              {t("Name")} <b>{dependencyDraft.name || "-"}</b>
+            </span>
+            {dependencyDraft.displayName && (
+              <span>
+                {t("Display name")} <b>{dependencyDraft.displayName}</b>
+              </span>
+            )}
+            {dependencyDraft.mode === "cluster" ? (
+              <>
+                <span>
+                  {t("Deploy method")} <b>{t(dependencyDraft.deployMethod || "helm")}</b>
+                </span>
+                <span>
+                  {t("GitOps credential")}{" "}
+                  <b>{dependencyDraft.githubCredentialName || "-"}</b>
+                </span>
+                <span>
+                  {t("Version")} <b>{dependencyDraft.version || t("default")}</b>
+                </span>
+              </>
+            ) : (
+              <>
+                <span>
+                  {t("Host")} <b>{dependencyDraft.host || "-"}</b>
+                </span>
+                <span>
+                  {t("Port")} <b>{dependencyDraft.port || "-"}</b>
+                </span>
+                <span>
+                  {t("Credentials")}{" "}
+                  <b>
+                    {dependencyDraft.controlled
+                      ? t("BeanCS can create credentials")
+                      : t("Manual credentials")}
+                  </b>
+                </span>
+              </>
+            )}
+            <span>
+              {t("App object")}{" "}
+              <b>
+                {dependencyDraft.applicationName ||
+                  (dependencyDraft.type ? `dep-${dependencyDraft.type}` : "-")}
+              </b>
+            </span>
+            <span>
+              {t("Namespace")}{" "}
+              <b>
+                {dependencyDraft.namespace ||
+                  (dependencyDraft.type ? `dep-${dependencyDraft.type}` : "-")}
+              </b>
             </span>
             <span>
               {t("Flow")}{" "}
