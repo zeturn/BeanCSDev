@@ -107,6 +107,20 @@ func (m *Manager) CreateNamespace(ctx context.Context, name, projectName string)
 	return fmt.Errorf("namespace %s is still terminating", name)
 }
 
+func (m *Manager) NamespaceExists(ctx context.Context, name string) (bool, error) {
+	if err := m.ensure(); err != nil {
+		return false, err
+	}
+	_, err := m.Clientset.CoreV1().Namespaces().Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (m *Manager) DeleteNamespace(ctx context.Context, name string) error {
 	if err := m.ensure(); err != nil {
 		return err

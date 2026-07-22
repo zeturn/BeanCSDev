@@ -80,6 +80,7 @@ type PortSpec struct {
 	Port     int    `yaml:"port" json:"port"`
 	Protocol string `yaml:"protocol,omitempty" json:"protocol,omitempty"`
 	Exposure string `yaml:"exposure,omitempty" json:"exposure,omitempty"`
+	Domain   string `yaml:"domain,omitempty" json:"domain,omitempty"`
 }
 
 type HealthCheckSpec struct {

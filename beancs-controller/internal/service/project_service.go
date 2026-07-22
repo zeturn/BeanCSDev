@@ -466,11 +466,22 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID, te
 		}
 	}
 
+	namespaceExisted := false
+	if s.k8s != nil {
+		existed, err := s.k8s.NamespaceExists(ctx, project.Namespace)
+		if err != nil {
+			rollback()
+			return nil, err
+		}
+		namespaceExisted = existed
+	}
 	if err := s.k8s.CreateNamespace(ctx, project.Namespace, project.Name); err != nil {
 		rollback()
 		return nil, err
 	}
-	rollbacks = append(rollbacks, func() { _ = s.k8s.DeleteNamespace(context.Background(), project.Namespace) })
+	if !namespaceExisted {
+		rollbacks = append(rollbacks, func() { _ = s.k8s.DeleteNamespace(context.Background(), project.Namespace) })
+	}
 
 	if project.BasaltClientID != "" {
 		if err := s.k8s.UpsertSecret(ctx, project.Namespace, project.BasaltPassKeysSecretName(), project.Name, basaltPassRuntimeEnv(bpInstance, project, secret, map[string]string{"client_id": project.BasaltClientID, "client_secret": secret})); err != nil {

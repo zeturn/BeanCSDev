@@ -134,6 +134,33 @@ func TestApplyComponentDomainsUsesOverrides(t *testing.T) {
 	}
 }
 
+func TestSpecToMonorepoRequestPreservesPortDomain(t *testing.T) {
+	doc := &appspec.ApplicationSpecDocument{
+		Metadata: appspec.ApplicationMetadata{Name: "issuetick"},
+		Spec: appspec.ApplicationSpec{
+			Type: "monorepo",
+			Repo: appspec.RepoSpec{Name: "zeturn/IssueTick", Branch: "master"},
+			Components: []appspec.ComponentSpec{{
+				Name:        "frontend",
+				Kind:        "frontend",
+				ProjectName: "issuetick-frontend",
+				Ports: []appspec.PortSpec{{
+					Name:     "http",
+					Port:     80,
+					Protocol: "http",
+					Exposure: "public",
+					Domain:   "IssueTick.BeanCS.com.",
+				}},
+			}},
+		},
+	}
+
+	req := (&ApplicationSpecService{}).specToMonorepoRequest(nil, "", doc, dto.ApplicationSpecRepoRequest{GitHubCredentialID: 42})
+	if got := req.Components[0].Ports[0].Domain; got != "issuetick.beancs.com" {
+		t.Fatalf("port domain = %q", got)
+	}
+}
+
 func TestApplyComponentDomainsDoesNotReusePublicOverrideForPrivatePort(t *testing.T) {
 	component := dto.MonorepoComponentRequest{
 		Name:        "control",

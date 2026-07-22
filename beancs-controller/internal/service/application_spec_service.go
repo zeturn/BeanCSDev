@@ -305,7 +305,7 @@ func specComponentToRequest(component appspec.ComponentSpec) dto.MonorepoCompone
 		if exposure == "internal" {
 			exposure = model.ExposureInternalOnly
 		}
-		req.Ports = append(req.Ports, model.ProjectPort{Name: port.Name, Port: port.Port, Protocol: port.Protocol, Exposure: exposure})
+		req.Ports = append(req.Ports, model.ProjectPort{Name: port.Name, Port: port.Port, Protocol: port.Protocol, Exposure: exposure, Domain: strings.Trim(strings.ToLower(port.Domain), ".")})
 	}
 	if len(req.Ports) == 0 {
 		req.ExposureMode = model.ExposureInternalOnly
