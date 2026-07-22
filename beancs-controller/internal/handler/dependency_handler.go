@@ -96,11 +96,13 @@ func (h *DependencyHandler) createStandaloneDependency(c *fiber.Ctx) error {
 	if err := h.parseAndValidate(c, &req); err != nil {
 		return err
 	}
-	out, err := h.service.CreateStandalone(c.UserContext(), middleware.UserID(c), middleware.TenantID(c), middleware.TenantCode(c), req)
+	userID := middleware.UserID(c)
+	process, err := h.service.CreateStandaloneDeploymentProcess(c.UserContext(), userID, req)
 	if err != nil {
 		return fail(c, 400, err)
 	}
-	return c.Status(fiber.StatusCreated).JSON(h.service.Mask(*out))
+	h.service.StartStandaloneDependencyDeployment(process.ID, userID, middleware.TenantID(c), middleware.TenantCode(c), req)
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"process": process})
 }
 
 func (h *DependencyHandler) listCredentials(c *fiber.Ctx) error {

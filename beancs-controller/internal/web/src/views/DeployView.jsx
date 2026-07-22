@@ -166,6 +166,23 @@ const basaltPassDeploySteps = [
     title: t("Confirm BasaltPass deployment"),
   },
 ];
+const dependencyDeploySteps = [
+  {
+    id: "method",
+    label: t("Target"),
+    title: t("Choose deployment target"),
+  },
+  {
+    id: "dependency",
+    label: t("Dependency"),
+    title: t("Configure dependency deployment"),
+  },
+  {
+    id: "confirm",
+    label: t("Confirm"),
+    title: t("Confirm dependency deployment"),
+  },
+];
 const deployTargetOptions = [
   {
     id: "project",
@@ -178,6 +195,14 @@ const deployTargetOptions = [
     label: t("BasaltPass"),
     icon: ShieldCheck,
     description: t("Deploy a BasaltPass platform and store the new tenant."),
+  },
+  {
+    id: "dependency",
+    label: t("Dependency"),
+    icon: Database,
+    description: t(
+      "Deploy a managed dependency such as MySQL, PostgreSQL, RabbitMQ, or Redis.",
+    ),
   },
 ];
 const deploySourceOptions = [
@@ -239,12 +264,12 @@ export default function DeployView({
   onConnectGitHub,
   reposLoading,
 }) {
+  const wizardFormRef = useRef(null);
   const [stepIndex, setStepIndex] = useState(0);
   const [creatingImage, setCreatingImage] = useState(false);
   const [checkingInstall, setCheckingInstall] = useState(false);
   const [repoSearch, setRepoSearch] = useState("");
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
-  const [dependencyCreateOpen, setDependencyCreateOpen] = useState(false);
   const [componentEditorIndex, setComponentEditorIndex] = useState(null);
   const [dependencyEditorIndex, setDependencyEditorIndex] = useState(null);
   const [dependencyLinksIndex, setDependencyLinksIndex] = useState(null);
@@ -272,6 +297,7 @@ export default function DeployView({
       ? `${registryHost}/${basaltpassImageProject}`
       : "";
   const isBasaltPassDeploy = form.deploy_target === "basaltpass";
+  const isDependencyDeploy = form.deploy_target === "dependency";
   const databaseDependencies = (reusableDependencies || []).filter(
     (dependency) => ["mysql", "postgresql", "timescaledb"].includes(dependency.type),
   );
@@ -291,7 +317,11 @@ export default function DeployView({
   const basaltPassBaseURL = basaltPassPublicHost
     ? `https://${basaltPassPublicHost}`
     : form.base_url || "";
-  const activeSteps = isBasaltPassDeploy ? basaltPassDeploySteps : deploySteps;
+  const activeSteps = isBasaltPassDeploy
+    ? basaltPassDeploySteps
+    : isDependencyDeploy
+      ? dependencyDeploySteps
+      : deploySteps;
   const step = activeSteps[stepIndex] || activeSteps[0];
   const stepBlockers = isBasaltPassDeploy
     ? basaltPassStepBlockers(step.id, form, selectedCredential)
@@ -299,7 +329,9 @@ export default function DeployView({
   const basaltPassBuildBlockers = isBasaltPassDeploy
     ? basaltPassStepBlockers("dependencies", form, selectedCredential)
     : [];
-  const canContinue = isBasaltPassDeploy
+  const canContinue = isDependencyDeploy
+    ? true
+    : isBasaltPassDeploy
     ? stepBlockers.length === 0
     : canContinueDeployStep(step.id, form, selectedCredential, analysis);
   const harborPreviewRepo = slugify(form.name || form.github_repo?.split("/").pop() || "app");
@@ -331,6 +363,14 @@ export default function DeployView({
         repo_type: "github",
         application_type: "single",
         exposure_mode: "public",
+      });
+      setStepIndex(1);
+      return;
+    }
+    if (deployTarget === "dependency") {
+      setForm({
+        ...defaultDeployForm(),
+        deploy_target: "dependency",
       });
       setStepIndex(1);
       return;
@@ -420,6 +460,10 @@ export default function DeployView({
     runInstallCheck();
   }, [step.id]);
   const next = async () => {
+    if (isDependencyDeploy && step.id === "dependency") {
+      const valid = wizardFormRef.current?.reportValidity?.() ?? true;
+      if (!valid) return;
+    }
     if (step.id === "check" && !isBasaltPassDeploy) {
       const result = await runInstallCheck();
       if (result && stepIndex < activeSteps.length - 1)
@@ -574,11 +618,6 @@ export default function DeployView({
       .filter(Boolean);
   return (
     <div className="deploy-wizard">
-      <div className="deploy-wizard-actions">
-        <Button type="button" onClick={() => setDependencyCreateOpen(true)}>
-          <Database size={15} /> {t("Deploy dependency")}
-        </Button>
-      </div>
       <section className="panel wizard-progress-panel">
         <div className="wizard-progress-head">
           <span>{step.label}</span>
@@ -607,8 +646,15 @@ export default function DeployView({
         </div>
       </section>
       <form
+        ref={wizardFormRef}
         className="panel deploy-form wizard-panel"
-        onSubmit={isBasaltPassDeploy ? deployBasaltPass : deployProject}
+        onSubmit={
+          isBasaltPassDeploy
+            ? deployBasaltPass
+            : isDependencyDeploy
+              ? onDeployDependency
+              : deployProject
+        }
       >
         <h2>
           <Rocket size={18} /> {step.title}
@@ -635,6 +681,20 @@ export default function DeployView({
               );
             })}
           </div>
+        )}
+        {isDependencyDeploy &&
+          (step.id === "dependency" || step.id === "confirm") && (
+            <div className={step.id === "confirm" ? "hidden-form-state" : ""}>
+              <DependencyCreateForm
+                definitions={dependencyDefinitions}
+                githubCredentials={credentials.github}
+                onSubmit={onDeployDependency}
+                requireGitOpsCredential
+                submitLabel="Deploy dependency"
+                embedded
+                showActions={false}
+              />
+            </div>
         )}
         {step.id === "source" && (
           <div className="form-grid">
@@ -2289,7 +2349,30 @@ export default function DeployView({
             </span>
           </div>
         )}
-        {step.id === "confirm" && !isBasaltPassDeploy && (
+        {step.id === "confirm" && isDependencyDeploy && (
+          <div className="detail-list">
+            <span>
+              {t("Target")} <b>{t("Dependency")}</b>
+            </span>
+            <span>
+              {t("Flow")}{" "}
+              <b>
+                {t(
+                  "BeanCS will create the dependency, write GitOps manifests, register Argo CD, and wait for readiness.",
+                )}
+              </b>
+            </span>
+            <span>
+              {t("Progress")}{" "}
+              <b>
+                {t(
+                  "After submission, BeanCS opens the dependency deployment progress page.",
+                )}
+              </b>
+            </span>
+          </div>
+        )}
+        {step.id === "confirm" && !isBasaltPassDeploy && !isDependencyDeploy && (
           <div className="detail-list">
             <span>
               {t("Install method")} <b>{sourceLabel(form.build_source)}</b>
@@ -2370,7 +2453,9 @@ export default function DeployView({
             {step.id === "confirm" ? (
               <Button
                 disabled={
-                  isBasaltPassDeploy
+                  isDependencyDeploy
+                    ? false
+                    : isBasaltPassDeploy
                     ? basaltPassBuildBlockers.length > 0
                     : form.application_type === "monorepo"
                     ? !(analysis?.is_monorepo && analysis?.deployable !== false)
@@ -2379,7 +2464,7 @@ export default function DeployView({
                 type="submit"
                 variant="primary"
               >
-                <Play size={16} /> Build
+                <Play size={16} /> {isDependencyDeploy ? t("Deploy") : t("Build")}
               </Button>
             ) : (
               <Button
@@ -2706,23 +2791,6 @@ export default function DeployView({
             </div>
           </Modal>
         )}
-      {dependencyCreateOpen && (
-        <Modal
-          title={t("Deploy dependency")}
-          subtitle={t("Create and deploy a managed dependency from this workflow.")}
-          className="wide-modal"
-          onClose={() => setDependencyCreateOpen(false)}
-        >
-          <DependencyCreateForm
-            definitions={dependencyDefinitions}
-            githubCredentials={credentials.github}
-            onSubmit={onDeployDependency}
-            onCancel={() => setDependencyCreateOpen(false)}
-            requireGitOpsCredential
-            submitLabel="Deploy dependency"
-          />
-        </Modal>
-      )}
     </div>
   );
 }

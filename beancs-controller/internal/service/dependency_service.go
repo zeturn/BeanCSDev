@@ -6,12 +6,15 @@ import (
 	"encoding/base64"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/zeturn/beancs-controller/internal/dto"
 	"github.com/zeturn/beancs-controller/internal/k8s"
 	"github.com/zeturn/beancs-controller/internal/model"
 	"gorm.io/gorm"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type DependencyService struct {
@@ -20,6 +23,7 @@ type DependencyService struct {
 	credentials *CredentialService
 	gitops      *GitOpsService
 	k8s         *k8s.Manager
+	processes   *ProcessService
 }
 
 func NewDependencyService(db *gorm.DB, registry *DependencyDefinitionRegistry) *DependencyService {
@@ -34,6 +38,61 @@ func (s *DependencyService) SetDeployers(credentials *CredentialService, gitops 
 	s.credentials = credentials
 	s.gitops = gitops
 	s.k8s = k8sManager
+}
+
+func (s *DependencyService) SetProcessService(processes *ProcessService) {
+	s.processes = processes
+}
+
+func (s *DependencyService) CreateStandaloneDeploymentProcess(ctx context.Context, userID string, req dto.CreateManagedDependencyRequest) (*model.Process, error) {
+	name := strings.TrimSpace(req.DisplayName)
+	if name == "" {
+		name = strings.TrimSpace(req.Name)
+	}
+	if name == "" {
+		name = "dependency"
+	}
+	process := &model.Process{
+		Type:        model.ProcessTypeDependencyDeployment,
+		Status:      model.ProcessStatusQueued,
+		OwnerID:     userID,
+		Title:       "Dependency deployment: " + name,
+		TriggeredBy: userID,
+	}
+	jobs := []processJobSpec{
+		{Name: "validate", DisplayName: "Validate dependency request"},
+		{Name: "record", DisplayName: "Create dependency record"},
+		{Name: "secret", DisplayName: "Prepare namespace and credential secret"},
+		{Name: "gitops", DisplayName: "Write GitOps manifests"},
+		{Name: "argocd", DisplayName: "Create Argo CD application"},
+		{Name: "ready", DisplayName: "Wait for dependency readiness"},
+	}
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(process).Error; err != nil {
+			return err
+		}
+		for i, spec := range jobs {
+			job := model.ProcessJob{ProcessID: process.ID, Name: spec.Name, DisplayName: spec.DisplayName, Status: model.ProcessStatusQueued, StepIndex: i}
+			if err := tx.Create(&job).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	var out model.Process
+	if err := s.db.WithContext(ctx).Preload("Jobs", func(db *gorm.DB) *gorm.DB {
+		return db.Order("step_index asc")
+	}).First(&out, process.ID).Error; err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (s *DependencyService) StartStandaloneDependencyDeployment(processID uint, userID, tenantID, tenantCode string, req dto.CreateManagedDependencyRequest) {
+	go s.runStandaloneDependencyDeployment(context.Background(), processID, userID, tenantID, tenantCode, req)
 }
 
 func (s *DependencyService) CreateStandalone(ctx context.Context, userID, tenantID, tenantCode string, req dto.CreateManagedDependencyRequest) (*model.ManagedDependency, error) {
@@ -99,6 +158,260 @@ func (s *DependencyService) deployStandalone(ctx context.Context, userID string,
 		return s.k8s.ApplyArgoCDApplication(ctx, dependencyRootArgoApplicationName(app.Name, dep.Name), gitOpsRepoURL(cred), fmt.Sprintf("apps/%s/dependencies/%s", app.Name, dep.Name), dep.Namespace)
 	}
 	return nil
+}
+
+func (s *DependencyService) runStandaloneDependencyDeployment(ctx context.Context, processID uint, userID, tenantID, tenantCode string, req dto.CreateManagedDependencyRequest) {
+	started := time.Now().UTC()
+	_ = s.db.WithContext(ctx).Model(&model.Process{}).Where("id = ?", processID).Updates(map[string]any{
+		"status": model.ProcessStatusRunning, "started_at": &started,
+	}).Error
+	var dep *model.ManagedDependency
+	fail := func(err error) {
+		if dep != nil {
+			_ = s.db.WithContext(ctx).Model(dep).Update("status", model.DependencyStatusFailed).Error
+			var app model.Application
+			if e := s.db.WithContext(ctx).First(&app, dep.ApplicationID).Error; e == nil {
+				_ = s.db.WithContext(ctx).Model(&app).Update("status", model.ApplicationStatusPartialFailed).Error
+			}
+		}
+		if s.processes != nil {
+			s.processes.failProcess(ctx, processID, err)
+			return
+		}
+		finished := time.Now().UTC()
+		_ = s.db.WithContext(ctx).Model(&model.Process{}).Where("id = ?", processID).Updates(map[string]any{
+			"status": model.ProcessStatusFailed, "finished_at": &finished, "failure_reason": truncateFailure(err.Error()),
+		}).Error
+	}
+	if s.processes == nil {
+		fail(fmt.Errorf("process service is not configured"))
+		return
+	}
+	validate, err := s.processes.startJob(ctx, processID, "validate")
+	if err != nil {
+		fail(err)
+		return
+	}
+	depType := strings.TrimSpace(req.Type)
+	if depType == "" {
+		depType = strings.TrimSpace(req.Name)
+	}
+	s.processes.appendJobLog(ctx, validate, fmt.Sprintf("dependency=%s type=%s method=%s", req.Name, depType, coalesce(req.DeployMethod, "default")))
+	external := req.External || req.DeployMethod == model.DependencyDeployMethodExternal
+	if !external && req.GitHubCredentialID == 0 {
+		fail(s.processes.failJob(ctx, validate, "GitOps credential is required to deploy a managed dependency"))
+		return
+	}
+	if !external && s.credentials != nil {
+		if err := s.credentials.RequireAccess(userID, model.CredentialTypeGitHub, req.GitHubCredentialID, false); err != nil {
+			fail(s.processes.failJob(ctx, validate, err.Error()))
+			return
+		}
+	}
+	if err := s.processes.finishJob(ctx, validate, model.ProcessStatusSucceeded, ""); err != nil {
+		fail(err)
+		return
+	}
+
+	record, err := s.processes.startJob(ctx, processID, "record")
+	if err != nil {
+		fail(err)
+		return
+	}
+	recordReq := req
+	recordReq.GitHubCredentialID = 0
+	dep, err = s.CreateStandalone(ctx, userID, tenantID, tenantCode, recordReq)
+	if err != nil {
+		fail(s.processes.failJob(ctx, record, err.Error()))
+		return
+	}
+	s.processes.appendJobLog(ctx, record, fmt.Sprintf("dependency_id=%d application_id=%d namespace=%s service=%s", dep.ID, dep.ApplicationID, dep.Namespace, dep.ServiceName))
+	if err := s.processes.finishJob(ctx, record, model.ProcessStatusSucceeded, ""); err != nil {
+		fail(err)
+		return
+	}
+
+	var app model.Application
+	if err := s.db.WithContext(ctx).First(&app, dep.ApplicationID).Error; err != nil {
+		fail(err)
+		return
+	}
+	if external || dep.DeployMethod == model.DependencyDeployMethodExternal {
+		if err := s.finishSkippedDependencyDeployJobs(ctx, processID, "external dependency record created; no in-cluster rollout required"); err != nil {
+			fail(err)
+			return
+		}
+		s.finishDependencyDeploymentProcess(ctx, processID, dep, app)
+		return
+	}
+	var cred model.GitHubCredential
+	var token string
+	if s.credentials != nil {
+		if err := s.db.WithContext(ctx).First(&cred, req.GitHubCredentialID).Error; err != nil {
+			fail(err)
+			return
+		}
+		token, err = s.credentials.GitHubToken(ctx, cred)
+		if err != nil {
+			fail(err)
+			return
+		}
+	}
+
+	secret, err := s.processes.startJob(ctx, processID, "secret")
+	if err != nil {
+		fail(err)
+		return
+	}
+	if s.k8s != nil {
+		if err := s.k8s.CreateNamespace(ctx, dep.Namespace, app.Name); err != nil {
+			fail(s.processes.failJob(ctx, secret, err.Error()))
+			return
+		}
+		s.processes.appendJobLog(ctx, secret, "namespace exists or was created")
+		if err := s.k8s.UpsertSecret(ctx, dep.Namespace, dep.SecretName, app.Name, dependencySecretRuntimeData(*dep)); err != nil {
+			fail(s.processes.failJob(ctx, secret, err.Error()))
+			return
+		}
+		s.processes.appendJobLog(ctx, secret, "runtime credential secret reconciled: "+dep.SecretName)
+	}
+	if err := s.processes.finishJob(ctx, secret, model.ProcessStatusSucceeded, ""); err != nil {
+		fail(err)
+		return
+	}
+
+	gitopsJob, err := s.processes.startJob(ctx, processID, "gitops")
+	if err != nil {
+		fail(err)
+		return
+	}
+	if s.gitops != nil && token != "" && cred.GitOpsRepo != "" {
+		if err := s.gitops.CommitDependencyManifests(ctx, token, cred, app, *dep); err != nil {
+			fail(s.processes.failJob(ctx, gitopsJob, err.Error()))
+			return
+		}
+		s.processes.appendJobLog(ctx, gitopsJob, fmt.Sprintf("dependency manifests committed for apps/%s/dependencies/%s", app.Name, dep.Name))
+	} else {
+		s.processes.appendJobLog(ctx, gitopsJob, "GitOps repo not configured; dependency manifest commit skipped")
+	}
+	if err := s.processes.finishJob(ctx, gitopsJob, model.ProcessStatusSucceeded, ""); err != nil {
+		fail(err)
+		return
+	}
+
+	argoJob, err := s.processes.startJob(ctx, processID, "argocd")
+	if err != nil {
+		fail(err)
+		return
+	}
+	if s.k8s != nil && cred.GitOpsRepo != "" {
+		appName := dependencyRootArgoApplicationName(app.Name, dep.Name)
+		if err := s.k8s.ApplyArgoCDApplication(ctx, appName, gitOpsRepoURL(cred), fmt.Sprintf("apps/%s/dependencies/%s", app.Name, dep.Name), dep.Namespace); err != nil {
+			fail(s.processes.failJob(ctx, argoJob, err.Error()))
+			return
+		}
+		s.processes.appendJobLog(ctx, argoJob, "Argo CD application reconciled: "+appName)
+	} else {
+		s.processes.appendJobLog(ctx, argoJob, "Argo CD application skipped")
+	}
+	if err := s.processes.finishJob(ctx, argoJob, model.ProcessStatusSucceeded, ""); err != nil {
+		fail(err)
+		return
+	}
+
+	readyJob, err := s.processes.startJob(ctx, processID, "ready")
+	if err != nil {
+		fail(err)
+		return
+	}
+	if s.k8s != nil {
+		if err := s.waitDependencyEndpointsReady(ctx, dep, 8*time.Minute, func(line string) {
+			s.processes.appendJobLog(ctx, readyJob, line)
+		}); err != nil {
+			fail(s.processes.failJob(ctx, readyJob, err.Error()))
+			return
+		}
+	} else {
+		s.processes.appendJobLog(ctx, readyJob, "kubernetes manager unavailable; readiness check skipped")
+	}
+	if err := s.processes.finishJob(ctx, readyJob, model.ProcessStatusSucceeded, ""); err != nil {
+		fail(err)
+		return
+	}
+	s.finishDependencyDeploymentProcess(ctx, processID, dep, app)
+}
+
+func (s *DependencyService) finishSkippedDependencyDeployJobs(ctx context.Context, processID uint, message string) error {
+	for _, name := range []string{"secret", "gitops", "argocd", "ready"} {
+		job, err := s.processes.startJob(ctx, processID, name)
+		if err != nil {
+			return err
+		}
+		s.processes.appendJobLog(ctx, job, message)
+		if err := s.processes.finishJob(ctx, job, model.ProcessStatusSucceeded, ""); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *DependencyService) finishDependencyDeploymentProcess(ctx context.Context, processID uint, dep *model.ManagedDependency, app model.Application) {
+	now := time.Now().UTC()
+	_ = s.db.WithContext(ctx).Model(dep).Update("status", model.DependencyStatusReady).Error
+	_ = s.db.WithContext(ctx).Model(&app).Update("status", model.ApplicationStatusActive).Error
+	_ = s.db.WithContext(ctx).Model(&model.Process{}).Where("id = ?", processID).Updates(map[string]any{
+		"status": model.ProcessStatusSucceeded, "finished_at": &now, "failure_reason": "",
+	}).Error
+}
+
+func (s *DependencyService) waitDependencyEndpointsReady(ctx context.Context, dep *model.ManagedDependency, timeout time.Duration, log func(string)) error {
+	if dep == nil {
+		return fmt.Errorf("dependency is required")
+	}
+	port := 0
+	if value, ok := dep.Outputs["port"]; ok {
+		port, _ = strconv.Atoi(strings.TrimSpace(fmt.Sprint(value)))
+	}
+	if port == 0 {
+		port, _ = strconv.Atoi(strings.TrimSpace(fmt.Sprint(dep.Config["port"])))
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		endpoints, err := s.k8s.Clientset.CoreV1().Endpoints(dep.Namespace).Get(ctx, dep.ServiceName, metav1.GetOptions{})
+		if err == nil {
+			ready := 0
+			for _, subset := range endpoints.Subsets {
+				portMatches := port == 0
+				for _, endpointPort := range subset.Ports {
+					if int(endpointPort.Port) == port {
+						portMatches = true
+						break
+					}
+				}
+				if portMatches {
+					ready += len(subset.Addresses)
+				}
+			}
+			if ready > 0 {
+				if log != nil {
+					log(fmt.Sprintf("ready endpoints %s/%s: %d", dep.Namespace, dep.ServiceName, ready))
+				}
+				return nil
+			}
+			err = fmt.Errorf("service has no ready endpoints")
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("dependency readiness timeout for %s/%s: %s", dep.Namespace, dep.ServiceName, err.Error())
+		}
+		if log != nil {
+			log(fmt.Sprintf("waiting for endpoints %s/%s", dep.Namespace, dep.ServiceName))
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(10 * time.Second):
+		}
+	}
 }
 
 func (s *DependencyService) Create(ctx context.Context, userID string, applicationID uint, req dto.CreateManagedDependencyRequest) (*model.ManagedDependency, error) {

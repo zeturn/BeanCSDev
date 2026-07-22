@@ -5,6 +5,7 @@ import "time"
 const (
 	ProcessTypeDeployment           = "deployment"
 	ProcessTypeBasaltPassDeployment = "basaltpass_deployment"
+	ProcessTypeDependencyDeployment = "dependency_deployment"
 
 	ProcessStatusQueued    = "queued"
 	ProcessStatusRunning   = "running"

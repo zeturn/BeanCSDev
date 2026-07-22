@@ -448,12 +448,20 @@ export const zh = {
   "Tenant": "租户",
   "Create tenant and credentials": "创建租户与凭据",
   "Confirm BasaltPass deployment": "确认 BasaltPass 部署",
+  "Configure dependency deployment": "配置依赖部署",
+  "Confirm dependency deployment": "确认依赖部署",
   "Application": "应用",
   "Deploy an application service or monorepo workload.":
     "部署应用服务或 Monorepo 工作负载。",
   "BasaltPass": "BasaltPass",
   "Deploy a BasaltPass platform and store the new tenant.":
     "部署 BasaltPass 平台并保存新租户。",
+  "Deploy a managed dependency such as MySQL, PostgreSQL, RabbitMQ, or Redis.":
+    "部署 MySQL、PostgreSQL、RabbitMQ、Redis 等托管依赖。",
+  "BeanCS will create the dependency, write GitOps manifests, register Argo CD, and wait for readiness.":
+    "BeanCS 会创建依赖、写入 GitOps 清单、注册 Argo CD，并等待资源就绪。",
+  "After submission, BeanCS opens the dependency deployment progress page.":
+    "提交后 BeanCS 会打开依赖部署进度页。",
   "GitOps repository": "GitOps 仓库",
   "Use a GitHub repository as source and publish runtime images to BeanCS Harbor.":
     "使用 GitHub 仓库作为来源，并将运行时镜像发布到 BeanCS Harbor。",
@@ -886,6 +894,8 @@ export const zh = {
   "GitHub credential updated.": "GitHub 凭据已更新。",
   "Project created. Deployment process queued.": "项目已创建，部署流程已排队。",
   "BasaltPass deployment process started.": "BasaltPass 部署流程已启动。",
+  "Dependency deployment process started.": "依赖部署流程已启动。",
+  "Dependency deployment submitted.": "依赖部署已提交。",
   "Image reference is required for registry deployments.":
     "镜像仓库部署必须填写镜像引用。",
   "Select at least one monorepo component.": "请至少选择一个 Monorepo 组件。",

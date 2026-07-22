@@ -32,6 +32,8 @@ export default function DependencyCreateForm({
   onCancel,
   requireGitOpsCredential = false,
   submitLabel = "Add dependency",
+  embedded = false,
+  showActions = true,
 }) {
   const clusterDefinitions = useMemo(
     () =>
@@ -81,14 +83,18 @@ export default function DependencyCreateForm({
     setConfig(dependencyDefaultConfig(activeDefinition));
   }, [activeDefinition, defaultDeployMethod]);
 
+  const Shell = embedded ? "div" : "form";
+  const shellProps = embedded
+    ? {}
+    : {
+        onSubmit: async (event) => {
+          const ok = await onSubmit(event);
+          if (ok) onCancel?.();
+        },
+      };
+
   return (
-    <form
-      className="component-grid dependency-create-form"
-      onSubmit={async (event) => {
-        const ok = await onSubmit(event);
-        if (ok) onCancel?.();
-      }}
-    >
+    <Shell className="component-grid dependency-create-form" {...shellProps}>
       <label>{t("Location")}</label>
       <Select
         name="location"
@@ -223,15 +229,19 @@ export default function DependencyCreateForm({
           )}
         </>
       )}
-      <div />
-      <div className="modal-actions">
-        <Button type="button" onClick={onCancel}>
-          {t("Cancel")}
-        </Button>
-        <Button type="submit" variant="primary">
-          <Database size={15} /> {t(submitLabel)}
-        </Button>
-      </div>
-    </form>
+      {showActions && (
+        <>
+          <div />
+          <div className="modal-actions">
+            <Button type="button" onClick={onCancel}>
+              {t("Cancel")}
+            </Button>
+            <Button type="submit" variant="primary">
+              <Database size={15} /> {t(submitLabel)}
+            </Button>
+          </div>
+        </>
+      )}
+    </Shell>
   );
 }

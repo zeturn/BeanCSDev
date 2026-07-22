@@ -1094,11 +1094,11 @@ function App() {
       if (body.config[key] === "") delete body.config[key];
     });
     try {
-      await api.post("/dependencies", body);
+      const created = await api.post("/dependencies", body);
       form.reset();
       setNotice(t("Dependency added."));
       await loadWorkspace();
-      return true;
+      return created;
     } catch (err) {
       setError(err.message);
       return false;
@@ -1106,6 +1106,12 @@ function App() {
   }
   async function deployDependency(event) {
     const created = await createDependency(event);
+    if (created?.process?.id) {
+      setNotice(t("Dependency deployment process started."));
+      await loadProcesses();
+      openProgress("", created.process.id);
+      return true;
+    }
     if (created) setNotice(t("Dependency deployment submitted."));
     return created;
   }

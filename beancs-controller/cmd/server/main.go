@@ -79,6 +79,7 @@ func main() {
 	dependencySvc := service.NewDependencyService(db, dependencyRegistry)
 	dependencySvc.SetDeployers(credentialSvc, gitopsSvc, k8sManager)
 	processSvc := service.NewProcessService(db, buildSvc, credentialSvc, gitopsSvc, dnsSvc, k8sManager)
+	dependencySvc.SetProcessService(processSvc)
 	deploymentSvc := service.NewDeploymentService(db, buildSvc, credentialSvc, gitopsSvc, processSvc)
 	applicationSvc := service.NewApplicationService(db, projectSvc, dependencySvc, deploymentSvc)
 	applicationSpecSvc := service.NewApplicationSpecService(db, credentialSvc, dependencySvc, applicationSvc)
