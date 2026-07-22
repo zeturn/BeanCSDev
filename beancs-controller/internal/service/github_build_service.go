@@ -589,7 +589,7 @@ func beancsBuildWorkflow(project *model.Project, callbackEnabled bool) string {
 	callback := ""
 	if callbackEnabled {
 		callback = fmt.Sprintf(`      - name: Notify BeanCS
-        if: always()
+        if: always() && github.event_name != 'workflow_dispatch'
         env:
           BEANCS_PROJECT: %s
           BEANCS_WEBHOOK_URL: ${{ secrets.BEANCS_WEBHOOK_URL }}

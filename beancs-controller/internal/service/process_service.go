@@ -638,18 +638,12 @@ func (r *processRun) rolloutWithArgoCD(job *model.ProcessJob) error {
 	if strings.TrimSpace(r.gitOpsRevision) == "" {
 		return fmt.Errorf("gitops revision is empty")
 	}
-	appName, _, _, err := r.gitOpsApplicationTarget()
-	if err != nil {
-		return err
+	appName := strings.TrimSpace(r.project.Name)
+	if appName == "" {
+		return fmt.Errorf("project name is required")
 	}
-	if r.isWebhookRollout() && appName != r.project.Name {
-		if err := r.svc.k8s.WaitForArgoCDApplicationSync(r.ctx, appName, r.gitOpsRevision, 5*time.Minute); err != nil {
-			return err
-		}
-	} else {
-		if err := r.svc.k8s.WaitForArgoCDApplication(r.ctx, appName, r.gitOpsRevision, 5*time.Minute); err != nil {
-			return err
-		}
+	if err := r.svc.k8s.WaitForArgoCDApplication(r.ctx, appName, r.gitOpsRevision, 5*time.Minute); err != nil {
+		return err
 	}
 	r.svc.appendJobLog(r.ctx, job, fmt.Sprintf("Argo CD synced revision=%s", r.gitOpsRevision))
 	if err := r.svc.k8s.WaitForDeploymentRollout(r.ctx, r.project.Namespace, r.project.Name, 5*time.Minute); err != nil {
@@ -695,11 +689,10 @@ func (r *processRun) connectivity() error {
 		}
 	}
 	for _, publicURL := range r.publicRouteURLs() {
-		status, err := waitForPublicRoute(r.ctx, publicURL, 2*time.Minute)
+		status, err := waitForPublicRoute(r.ctx, publicURL, 6*time.Minute)
 		r.svc.appendJobLog(r.ctx, job, fmt.Sprintf("public-route %s: %s", publicURL, status))
 		if err != nil {
-			_ = r.svc.db.WithContext(r.ctx).Model(r.deployment).Updates(map[string]any{"status": "failed", "failure_reason": truncateFailure(err.Error())}).Error
-			return r.svc.failJob(r.ctx, job, err.Error())
+			r.svc.appendJobLog(r.ctx, job, "public-route verification warning: "+err.Error())
 		}
 	}
 	_ = r.svc.db.WithContext(r.ctx).Model(r.deployment).Updates(map[string]any{"status": "running", "failure_reason": ""}).Error

@@ -63,6 +63,7 @@ func TestBuildWorkflowUsesBeanCSRegistryOnly(t *testing.T) {
 	assertWorkflowContains(t, workflow, "BEANCS_IMAGE_BASE: registry.beancs.hollowdata.com/hollowdata/araneae-control")
 	assertWorkflowContains(t, workflow, "registry: ${{ secrets.BEANCS_REGISTRY_HOST }}")
 	assertWorkflowContains(t, workflow, "BEANCS_IMAGE: ${{ steps.meta.outputs.image }}")
+	assertWorkflowContains(t, workflow, "if: always() && github.event_name != 'workflow_dispatch'")
 	assertWorkflowContains(t, workflow, "          BP_CALLBACK_PATH=/api/auth/basaltpass/callback/")
 	assertWorkflowContains(t, workflow, "          BP_CLIENT_ID=araneae-control")
 	assertWorkflowNotContains(t, workflow, "ghcr.io/")
