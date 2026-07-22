@@ -251,7 +251,10 @@ func (s *GitOpsService) updateApplicationImageOverlay(ctx context.Context, clien
 	if err != nil {
 		return "", "", nil, "", false, fmt.Errorf("decode gitops application overlay: %w", err)
 	}
-	updated, matched, changed := updateKustomizeImageEntry(content, project, newImageRef)
+	updated, matched, changed, err := s.updateApplicationImageEntries(ctx, content, project, newImageRef)
+	if err != nil {
+		return "", "", nil, "", false, err
+	}
 	if !matched {
 		return "", "", nil, "", false, nil
 	}
@@ -263,6 +266,46 @@ func (s *GitOpsService) updateApplicationImageOverlay(ctx context.Context, clien
 		return "", "", nil, revision, true, nil
 	}
 	return filePath, updated, current.SHA, "", true, nil
+}
+
+func (s *GitOpsService) updateApplicationImageEntries(ctx context.Context, content string, project *model.Project, newImageRef string) (string, bool, bool, error) {
+	if s == nil || s.db == nil || project == nil || project.ApplicationID == nil || *project.ApplicationID == 0 {
+		updated, matched, changed := updateKustomizeImageEntry(content, project, newImageRef)
+		return updated, matched, changed, nil
+	}
+	var projects []model.Project
+	if err := s.db.WithContext(ctx).Where("application_id = ?", *project.ApplicationID).Order("id asc").Find(&projects).Error; err != nil {
+		return "", false, false, err
+	}
+	if len(projects) == 0 {
+		updated, matched, changed := updateKustomizeImageEntry(content, project, newImageRef)
+		return updated, matched, changed, nil
+	}
+	updated := content
+	changed := false
+	matched := false
+	for i := range projects {
+		sibling := projects[i]
+		imageRef := strings.TrimSpace(sibling.ImageReference)
+		if sibling.ID == project.ID {
+			imageRef = strings.TrimSpace(newImageRef)
+		}
+		if imageRef == "" {
+			imageRef = strings.TrimSpace(sibling.RegistryImageReference)
+		}
+		if imageRef == "" {
+			continue
+		}
+		next, ok, didChange := updateKustomizeImageEntry(updated, &sibling, imageRef)
+		if ok {
+			matched = true
+		}
+		if didChange {
+			changed = true
+			updated = next
+		}
+	}
+	return updated, matched, changed, nil
 }
 
 func updateKustomizeImageEntry(content string, project *model.Project, newImageRef string) (string, bool, bool) {
