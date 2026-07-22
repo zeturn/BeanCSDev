@@ -1789,6 +1789,7 @@ button.domain-tile {
   gap: 1px;
   overflow-x: auto;
   overflow-y: hidden;
+  min-width: 0;
   max-width: 100%;
   align-items: stretch;
 }
@@ -1811,7 +1812,7 @@ button.domain-tile {
   gap: 12px;
   align-items: center;
   min-width: max(700px, 100%);
-  width: max-content;
+  width: 100%;
   max-width: none;
   padding: 10px;
   background: #ffffff;
@@ -1911,8 +1912,10 @@ button.domain-tile {
 
 .row-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 6px;
+  align-items: center;
+  white-space: nowrap;
 }
 
 .pagination-bar {
@@ -2000,7 +2003,8 @@ button.domain-tile {
 
 .dns-table .tr,
 .runtime-table .tr {
-  grid-template-columns: repeat(6, minmax(96px, 1fr)) minmax(136px, auto);
+  grid-template-columns: repeat(6, minmax(140px, 1fr)) minmax(220px, auto);
+  min-width: 1060px;
 }
 
 .network-page {
@@ -4259,6 +4263,7 @@ textarea {
 .table {
   overflow-x: auto;
   overflow-y: hidden;
+  min-width: 0;
   max-width: 100%;
   border: 1px solid var(--wc-border-default);
   border-radius: 8px;
