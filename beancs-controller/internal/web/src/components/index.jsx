@@ -1025,7 +1025,7 @@ export function RuntimeTable({
         />
       )}
       <section className="panel">
-          <div className="table runtime-table">
+        <div className={`table runtime-table ${kind}-runtime-table`}>
           <div className="tr head">
             {keys.map((key) => (
               <span key={key}>{t(key.replaceAll("_", " "))}</span>

@@ -1194,6 +1194,7 @@ button.ghost:not(.beancs-button):hover,
 .stack {
   display: grid;
   gap: 14px;
+  min-width: 0;
 }
 
 .panel {
@@ -1202,6 +1203,7 @@ button.ghost:not(.beancs-button):hover,
   border-radius: 8px;
   padding: 14px;
   box-shadow: var(--wc-shadow-sm);
+  min-width: 0;
 }
 
 .panel h2 {
@@ -1785,7 +1787,9 @@ button.domain-tile {
 }
 
 .table {
-  display: grid;
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
   gap: 1px;
   overflow-x: auto;
   overflow-y: hidden;
@@ -2009,6 +2013,19 @@ button.domain-tile {
 .runtime-table .tr {
   grid-template-columns: repeat(7, minmax(140px, 1fr)) minmax(220px, auto);
   min-width: 1200px;
+}
+
+.services-runtime-table .tr {
+  grid-template-columns:
+    minmax(140px, 0.8fr)
+    minmax(220px, 1.1fr)
+    minmax(120px, 0.7fr)
+    minmax(150px, 0.8fr)
+    minmax(180px, 0.9fr)
+    minmax(300px, 1.35fr)
+    minmax(300px, 1.35fr)
+    minmax(220px, auto);
+  min-width: 1630px;
 }
 
 .network-page {
