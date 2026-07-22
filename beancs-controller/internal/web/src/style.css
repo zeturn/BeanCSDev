@@ -1725,11 +1725,19 @@ button.domain-tile {
   overflow-x: auto;
   overflow-y: hidden;
   max-width: 100%;
+  align-items: stretch;
 }
 
 .table .tr span,
 .table .tr button.expandable-cell {
+  min-width: max-content;
+}
+
+.table .tr > * {
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tr {
@@ -1737,7 +1745,9 @@ button.domain-tile {
   grid-template-columns: 1fr 1.15fr 0.9fr 0.7fr 0.65fr 0.9fr;
   gap: 12px;
   align-items: center;
-  min-width: 700px;
+  min-width: max(700px, 100%);
+  width: max-content;
+  max-width: none;
   padding: 10px;
   background: #ffffff;
   border-bottom: 1px solid #edf2f7;
