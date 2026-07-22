@@ -88,11 +88,21 @@ func (s *DNSService) findARecord(ctx context.Context, token string, cred model.C
 		return nil, false, err
 	}
 	results, _ := out["result"].([]any)
+	var first *model.DNSRecord
 	for _, item := range results {
 		rec, ok := cloudflareRecordFromAPI(cred, item)
-		if ok && strings.EqualFold(rec.Name, strings.TrimSpace(fqdn)) {
+		if !ok {
+			continue
+		}
+		if first == nil {
+			first = rec
+		}
+		if dnsNamesEqual(rec.Name, fqdn) {
 			return rec, true, nil
 		}
+	}
+	if first != nil {
+		return first, true, nil
 	}
 	return nil, false, nil
 }
@@ -189,6 +199,12 @@ func isCloudflareDuplicateRecord(err error) bool {
 		return false
 	}
 	message := err.Error()
-	return strings.Contains(message, `"code":81058`) ||
+	return strings.Contains(message, "81058") ||
 		strings.Contains(strings.ToLower(message), "identical record already exists")
+}
+
+func dnsNamesEqual(a, b string) bool {
+	a = strings.ToLower(strings.Trim(strings.TrimSpace(a), "."))
+	b = strings.ToLower(strings.Trim(strings.TrimSpace(b), "."))
+	return a == b
 }

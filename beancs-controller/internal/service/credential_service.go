@@ -1407,6 +1407,9 @@ func (s *CredentialService) CloudflareCredentialForDomain(ctx context.Context, c
 		if strings.TrimSpace(zoneID) != "" && cred.ZoneID != strings.TrimSpace(zoneID) {
 			return cred, fmt.Errorf("cloudflare zone does not belong to this credential")
 		}
+		if strings.TrimSpace(fqdn) != "" && strings.TrimSpace(cred.Domain) != "" && !domainMatchesZone(fqdn, cred.Domain) {
+			return cred, fmt.Errorf("cloudflare zone %q does not match %q", cred.Domain, fqdn)
+		}
 		return cred, nil
 	}
 	var cached model.CloudflareDomainCache
@@ -1482,6 +1485,12 @@ func domainSuffixes(fqdn string) []string {
 		out = append(out, strings.Join(parts[i:], "."))
 	}
 	return out
+}
+
+func domainMatchesZone(fqdn, zone string) bool {
+	fqdn = strings.ToLower(strings.Trim(strings.TrimSpace(fqdn), "."))
+	zone = strings.ToLower(strings.Trim(strings.TrimSpace(zone), "."))
+	return fqdn == zone || strings.HasSuffix(fqdn, "."+zone)
 }
 
 type cloudflareZoneAccount struct {
