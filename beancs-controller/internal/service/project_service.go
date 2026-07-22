@@ -366,8 +366,9 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID, te
 	var cfCred model.CloudflareCredential
 	var cfToken string
 	var err error
-	if req.CloudflareCredentialID != nil {
-		cfCred, err = s.credentials.CloudflareCredentialForDomain(ctx, *req.CloudflareCredentialID, req.CloudflareZoneID, firstRoutableDomain(req.Ports))
+	routableDomain := firstRoutableDomain(req.Ports)
+	if req.CloudflareCredentialID != nil && routableDomain != "" {
+		cfCred, err = s.credentials.CloudflareCredentialForDomain(ctx, *req.CloudflareCredentialID, req.CloudflareZoneID, routableDomain)
 		if err != nil {
 			rollback()
 			return nil, err

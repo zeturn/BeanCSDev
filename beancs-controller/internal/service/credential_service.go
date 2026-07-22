@@ -1417,10 +1417,11 @@ func (s *CredentialService) CloudflareCredentialForDomain(ctx context.Context, c
 	if strings.TrimSpace(zoneID) != "" {
 		q = q.Where("zone_id = ?", strings.TrimSpace(zoneID))
 	} else {
-		q = q.Order("length(domain) desc")
 		for _, suffix := range domainSuffixes(fqdn) {
 			var row model.CloudflareDomainCache
-			if err := q.Where("domain = ?", suffix).First(&row).Error; err == nil {
+			if err := s.db.WithContext(ctx).
+				Where("cloudflare_credential_id = ? AND domain = ?", credentialID, suffix).
+				First(&row).Error; err == nil {
 				cached = row
 				break
 			}
