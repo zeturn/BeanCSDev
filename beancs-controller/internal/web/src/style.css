@@ -2001,10 +2001,14 @@ button.domain-tile {
   width: auto;
 }
 
-.dns-table .tr,
-.runtime-table .tr {
+.dns-table .tr {
   grid-template-columns: repeat(6, minmax(140px, 1fr)) minmax(220px, auto);
   min-width: 1060px;
+}
+
+.runtime-table .tr {
+  grid-template-columns: repeat(7, minmax(140px, 1fr)) minmax(220px, auto);
+  min-width: 1200px;
 }
 
 .network-page {
