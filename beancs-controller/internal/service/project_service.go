@@ -609,6 +609,13 @@ func (s *ProjectService) CreateProject(ctx context.Context, userID, tenantID, te
 		}
 	}
 	_ = s.db.WithContext(ctx).Model(deployment).Updates(map[string]any{"status": "provisioned"}).Error
+	if req.AutoDeploy != nil && project.AutoDeploy != *req.AutoDeploy {
+		if err := s.db.WithContext(ctx).Model(project).Update("auto_deploy", *req.AutoDeploy).Error; err != nil {
+			rollback()
+			return nil, err
+		}
+		project.AutoDeploy = *req.AutoDeploy
+	}
 	if s.build != nil && project.BuildSource == model.BuildSourceGitHub && project.AutoDeploy {
 		if _, err := s.build.Start(ctx, project, userID); err != nil {
 			rollback()
