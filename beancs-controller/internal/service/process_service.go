@@ -643,10 +643,11 @@ func (r *processRun) rolloutWithArgoCD(job *model.ProcessJob) error {
 		return fmt.Errorf("project name is required")
 	}
 	if err := r.svc.k8s.WaitForArgoCDApplication(r.ctx, appName, r.gitOpsRevision, 5*time.Minute); err != nil {
-		return err
+		r.svc.appendJobLog(r.ctx, job, "Argo CD revision warning: "+err.Error())
+	} else {
+		r.svc.appendJobLog(r.ctx, job, fmt.Sprintf("Argo CD synced revision=%s", r.gitOpsRevision))
 	}
-	r.svc.appendJobLog(r.ctx, job, fmt.Sprintf("Argo CD synced revision=%s", r.gitOpsRevision))
-	if err := r.svc.k8s.WaitForDeploymentRollout(r.ctx, r.project.Namespace, r.project.Name, 5*time.Minute); err != nil {
+	if err := r.svc.k8s.WaitForDeploymentImageRollout(r.ctx, r.project.Namespace, r.project.Name, r.image, 5*time.Minute); err != nil {
 		return err
 	}
 	r.svc.appendJobLog(r.ctx, job, fmt.Sprintf("deployment rollout completed %s/%s", r.project.Namespace, r.project.Name))

@@ -155,6 +155,14 @@ func (m *Manager) ScaleDeployment(ctx context.Context, namespace, name string, r
 }
 
 func (m *Manager) WaitForDeploymentRollout(ctx context.Context, namespace, name string, timeout time.Duration) error {
+	return m.waitForDeploymentRollout(ctx, namespace, name, "", timeout)
+}
+
+func (m *Manager) WaitForDeploymentImageRollout(ctx context.Context, namespace, name, image string, timeout time.Duration) error {
+	return m.waitForDeploymentRollout(ctx, namespace, name, image, timeout)
+}
+
+func (m *Manager) waitForDeploymentRollout(ctx context.Context, namespace, name, image string, timeout time.Duration) error {
 	if err := m.ensure(); err != nil {
 		return err
 	}
@@ -173,7 +181,18 @@ func (m *Manager) WaitForDeploymentRollout(ctx context.Context, namespace, name 
 		if dep.Spec.Replicas != nil {
 			expected := *dep.Spec.Replicas
 			status := dep.Status
-			if status.ObservedGeneration >= dep.Generation &&
+			imageMatches := true
+			if strings.TrimSpace(image) != "" {
+				imageMatches = false
+				for _, container := range dep.Spec.Template.Spec.Containers {
+					if container.Image == image {
+						imageMatches = true
+						break
+					}
+				}
+			}
+			if imageMatches &&
+				status.ObservedGeneration >= dep.Generation &&
 				status.UpdatedReplicas >= expected &&
 				status.AvailableReplicas >= expected &&
 				status.ReadyReplicas >= expected &&
@@ -182,7 +201,7 @@ func (m *Manager) WaitForDeploymentRollout(ctx context.Context, namespace, name 
 			}
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("deployment rollout timeout for %s/%s: observed_generation=%d generation=%d updated=%d ready=%d available=%d unavailable=%d", namespace, name, dep.Status.ObservedGeneration, dep.Generation, dep.Status.UpdatedReplicas, dep.Status.ReadyReplicas, dep.Status.AvailableReplicas, dep.Status.UnavailableReplicas)
+			return fmt.Errorf("deployment rollout timeout for %s/%s: expected_image=%s observed_generation=%d generation=%d updated=%d ready=%d available=%d unavailable=%d", namespace, name, image, dep.Status.ObservedGeneration, dep.Generation, dep.Status.UpdatedReplicas, dep.Status.ReadyReplicas, dep.Status.AvailableReplicas, dep.Status.UnavailableReplicas)
 		}
 		select {
 		case <-ctx.Done():
